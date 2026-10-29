@@ -220,4 +220,4 @@ Choose a primary workflow only after the owner tries all three against the same 
 
 ## Visual mockup step
 
-A visual candidate set can make the spatial tradeoffs easier to compare. The 12ui design CLI is installed, but its hosted image generation requires the user to connect a 12ui account. Until that connection is completed, this document keeps the prototypes tool-agnostic and avoids presenting an unreviewed visual as a DAWg design decision.
+The owner connected the 12ui account and three visual concepts were generated for comparison. Selected representatives and review notes are described in [DAWG_WORKFLOW_VISUALS.md](DAWG_WORKFLOW_VISUALS.md). The images are exploratory concepts, not an approved design or implemented interface. The current GitHub file integration supports UTF-8 text only, so generated PNGs are supplied separately as a review bundle rather than committed as repository assets.
