@@ -41,3 +41,8 @@ The current callback only clears output buffers, so it does not yet implement th
 ## State ownership
 
 The message thread owns editor components. The audio thread owns callback-time processing state. Cross-thread changes should be explicit commands or snapshots; UI components must never act as the audio engine's storage.
+
+
+## Configurable workbench boundary
+
+The editor is a view over the project model, not the owner of musical data. Arrangement, pattern/step editing, idea-grid launching, recording, and mixing should be separate panels that can be composed into named workspaces. Workspace persistence is versioned UI state and must never duplicate or mutate project audio/MIDI/routing by itself. See the [workbench and workspace proposal](research/DAWG_WORKBENCH_AND_WORKSPACES.md).
