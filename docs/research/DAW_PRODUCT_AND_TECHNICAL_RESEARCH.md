@@ -382,3 +382,8 @@ The expanded survey intentionally names capabilities and tradeoffs rather than a
 ## 15. Follow-up: first-session interaction prototypes
 
 The three candidate interaction models are described in the [task-based workflow prototype brief](DAWG_WORKFLOW_PROTOTYPES.md). Selected visual concepts and their comparison notes are summarized in [DAWG_WORKFLOW_VISUALS.md](DAWG_WORKFLOW_VISUALS.md). These artifacts are exploratory; the project owner has not selected a workflow or approved the visual style.
+
+
+## 16. Owner direction: DAWg as a personal workbench
+
+The owner clarified that the track-first prototype was selected because it feels familiar after extensive FruityLoops/FL Studio use, not because it is necessarily preferred. DAWg should investigate supporting pattern-first, track-first, idea-grid, and user-built layouts over one shared project model. See the [workbench and workspace proposal](DAWG_WORKBENCH_AND_WORKSPACES.md) for the separation of project state, routing, clip identity, workspace presets, and saved user layouts.
