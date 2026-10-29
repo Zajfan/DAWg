@@ -232,3 +232,148 @@ Record task completion, hesitation, misclicks, and the words the user uses to de
 This report used public vendor documentation and standards pages for product behavior and technical/license claims. Principal sources are linked inline above. Research was performed on 2026-10-29.
 
 This is a desk-research synthesis, not a statistically representative survey or hands-on usability study. Vendor descriptions are used to map workflows, not to endorse the products. The strongest DAWg-specific evidence is the owner’s direct history with eJay, FL Studio, and Reason. The report makes no claim that other users share the same preferences. A hands-on comparison of current versions—especially Reason 14 and the current FL Studio—remains necessary before selecting a final workflow.
+
+
+## 12. Expanded DAW survey: products beyond the first comparison
+
+**Scope:** This appendix adds products not covered in the initial workflow table (eJay, FL Studio, Reason, Ableton Live, Bitwig Studio, REAPER, Cubase, Logic Pro, Ardour, and Pro Tools). It is a broad market map, not a claim that all products are direct substitutes. It compares workflow strengths and tradeoffs that could inform DAWg. Product pages and manuals establish documented capabilities; subjective ease, stability, sound, and value require hands-on evaluation.
+
+### 12.1 Additional desktop DAWs and studio workstations
+
+| Product | Category and differentiating model | Strengths to study | Tradeoffs / DAWg lesson |
+|---|---|---|---|
+| **Fender Studio Pro 8 (formerly Studio One Pro)** | General-purpose songwriting, recording, and production arranged around tracks, channel strips, and overviews | Channel Overview and Arrangement Overview place project/channel context in focused surfaces; chord, sampler, stem, and audio-to-note tools connect composition and production | Rapid product/brand changes can disrupt familiarity. Preserve stable names, navigation, and project continuity as features evolve. Fender’s current launch notes describe Studio Pro 8 and 8.1 features. |
+| **Digital Performer 12** | Full studio DAW with deep MIDI/composition tools and advanced recording/performance options | Arrangement Strip offers a dedicated structure-navigation/editing surface; POLAR provides loop/take recording; Atmos and notation-oriented strengths serve complex music production | Breadth and long-standing feature depth mean a large command surface. Offer a readable basic path and command discovery rather than assuming users know where specialist functions live. Current details should be validated against MOTU’s official DP12 documentation before a purchase comparison. |
+| **Tracktion Waveform Pro** | Flexible, track-based DAW with both linear and clip-launch workflows | Clip Launcher, clip automation, MIDI drum grid, probability, arranger track, video, and plugin sandboxing illustrate an unusually broad “one window, many tasks” direction | Broad capabilities and bundled instruments can make product editions and UI scope harder to reason about. Separate core DAW behavior from optional content and label advanced controls by task. Vendor describes Waveform 14’s engine/UI claims; treat performance claims as unverified until benchmarked. |
+| **Cakewalk Sonar / Next** | Windows-oriented recording DAW family with configurable workspaces and a membership/free-tier model | Sonar combines track recording, comping, automation, and workspaces; Cakewalk Assist and CakeScript explore searchable help and repeatable user automation | Product tiers, account/membership changes, and Windows scope matter to the ownership story. Command search and contextual help could directly address “I can’t find myself in this DAW” without hiding power. Verify current tier limits before pricing comparisons. |
+| **Mixcraft 10** | Accessible Windows production and recording, including performance-oriented clip panel | Clear per-track controls; takes/overdub/replace modes; loop recording and take lanes; a Live Performance panel | Friendly immediate workflow is a useful model, but keep the performance grid optional and ensure a project can graduate cleanly into detailed editing and mixing. |
+| **Samplitude Pro X** | Recording, editing, and mixing with strong object-based editing | Audio objects can carry processing, sends, and automation independent of track-level processing; useful for edits that need local processing without many tracks | Object-level power may be less obvious than a simple track processor chain. Make processing ownership visible at the selected clip and in a single signal-flow view. Current product positioning is under Boris FX. |
+| **Sequoia** | Specialized high-end mastering, broadcast, classical/live recording, and post-production | Multichannel/spatial workflows, video, AAF/OMF, stem tools, and recording-oriented features address delivery and production needs beyond a typical song DAW | Specialized scope, hardware/performance needs, and price make this a poor target for feature parity. DAWg should implement only the delivery capabilities its first users actually need. |
+| **Harrison Mixbus** | DAW built around a console-style channel-strip/mixing metaphor | Dedicated channel strips, buses, sends, and analog-inspired processing make a mixer-centric workflow concrete and continuously visible | The console metaphor can be legible to engineers but may add visual weight to composition. Analog coloration is an effect choice, not evidence of objectively superior fidelity. Prefer a clean neutral signal path and offer optional character processing. |
+| **Universal Audio LUNA** | Recording/mixing workflow linked to UA interfaces and an “analog studio” ecosystem | Free core DAW positioning, track presets, bounce-in-place, hardware inserts, ARA, and Apollo low-latency monitoring integration | Best-case workflows may depend on UA hardware or ecosystem services. DAWg should distinguish universally available functions from interface-specific enhancements. Avoid “analog sound” claims as a quality ranking. |
+| **GarageBand** | Guided, loop-rich, Apple-only entry point into music creation | Loops, Drummer, Smart Controls, instrument presets, and multi-take comping help users start with musical results instead of routing setup | Curated simplicity accelerates the first session but can constrain cross-platform continuity and advanced customization. Good reference for sensible defaults and a path from guided choices into detailed editing. |
+| **Nuendo** | Specialist production DAW for post, film, TV, game audio, ADR, and immersive delivery | ADR windows, video, dubbing, game-audio asset export, and spatial routing embody workflows that a general music DAW rarely needs | Deep specialty features should live in task-specific panels/templates. Don’t burden a music-first startup with post-production controls. |
+| **Pyramix** | Specialist recording/editing/mastering and broadcast workstation | Source/destination editing, album delivery, networked audio, and specialized DXD/DSD workflows serve archival, classical, and high-end production requirements | Extreme formats and hardware-scaled I/O are specialist engineering choices. Higher sample-rate numbers do not alone imply audible superiority for ordinary music; determine actual delivery requirements first. |
+
+Sources: [Fender Studio Pro 8 launch](https://www.fender.com/articles/behind-the-scenes/studio-pro-8-is-here) · [Studio Pro 8.1](https://www.fender.com/articles/behind-the-scenes/studio-pro-8-1-is-here) · [Waveform 14](https://www.tracktion.com/products/waveform-pro) · [Cakewalk Sonar](https://www.cakewalk.com/sonar) · [Cakewalk FAQ](https://help.cakewalk.com/hc/en-us/articles/32587898870301-Cakewalk-Sonar-FAQ) · [Mixcraft recording modes](https://acoustica.com/mixcraft-manual/recording-audio.htm) · [Samplitude Pro X](https://www.samplitude.com/us/) · [Sequoia](https://www.sequoia-software.com/) · [Mixbus](https://mixbus.ardour.org/) · [LUNA](https://www.uaudio.com/products/luna) · [GarageBand](https://www.apple.com/mac/garageband/) · [Nuendo ADR](https://www.steinberg.net/nuendo/features/adr/) · [Nuendo game audio](https://www.steinberg.net/nuendo/features/game-audio/) · [Pyramix manuals/downloads](https://www.merging.com/support/downloads)
+
+### 12.2 Beat, sampler, and performance-centered tools
+
+| Product | Differentiator | Pros | Cons / DAWg lesson |
+|---|---|---|---|
+| **Serato Studio** | DJ/sample-deck approach with scenes, song view, sample slicing, key/time tools, stems, and VST3/AU instruments/effects | Turns source material into a beat/song quickly; useful benchmark for making audio manipulation and musical structure feel immediate | The deck/DJ model and beat-centric defaults are specialized. DAWg could make sample slicing and stem workflows easy to reach without making them the whole project model. |
+| **Native Instruments Maschine** | Hardware/software groove production with Ideas and Song views | Separating ideas (patterns/scenes) from a song arrangement supports exploration before commitment; pattern reuse is powerful for beat building | Hardware-centered interaction and a sampler/instrument-first bias make it less of a neutral multitrack recorder. Keep mouse/keyboard workflows complete even if controller support is added. |
+| **Renoise** | Cross-platform tracker DAW: musical events and effect commands entered in vertical rows | Extremely fast keyboard editing, precise sample triggering, phrase sequencing, deep modulation, and a compact pattern representation | Tracker notation is a specialized literacy barrier. It suggests an optional step/event editor could serve power users while a conventional piano roll and timeline remain approachable. |
+| **OpenMPT** | Free Windows tracker for module-based composition | Lightweight, keyboard-focused pattern editing, many module formats, samples, MIDI recording, and VST effects/instruments | Excellent for tracker/module workflows but not a conventional audio-recording-first studio. DAWg should support fast pattern entry as a view, not force all users into tracker notation. |
+| **LMMS** | Free cross-platform, pattern-oriented MIDI/sample composition | Piano roll, song editor, mixer, built-in instruments, and plugin support lower the cost of trying electronic composition | Its composition-and-instrument center is distinct from a live audio recording workflow. DAWg should make recording and monitoring first-class if that remains the first engineering milestone. |
+| **MPC software** | Hardware-linked sampler/sequencer and beat production | Pad-based sampling, chops, sequences, and performance can make a groove tactile and immediate | The MPC-centered model optimizes a particular device workflow. Translate the principle—fast capture, audition, chop, reuse—into generic controls rather than requiring proprietary hardware. |
+
+Sources: [Serato Studio](https://serato.com/studio/features) · [Maschine Ideas and Song views](https://www.native-instruments.com/en/products/maschine/maschine-software/) · [Renoise](https://www.renoise.com/products/renoise) · [OpenMPT features](https://openmpt.org/features) · [LMMS](https://lmms.io/) · [Akai MPC software](https://www.akaipro.com/mpc-software.html)
+
+### 12.3 Open-source and Linux-oriented projects
+
+| Product | Distinctive contribution | Tradeoffs and relevance |
+|---|---|---|
+| **Zrythm** | A modern, cross-platform project using C++23, Qt/QML, and JUCE, with clip/take recording, chord tools, a piano roll, multiple plug-in formats, and in-context editing | Especially relevant as a peer architecture/product study, not just a feature reference. Its v2 is actively changing and currently alpha; the project explicitly distinguishes shipped features from items not yet ported. Follow its UI experiments and architecture, but avoid assuming all announced capabilities are stable. Its public technical choices also show that JUCE can coexist with a different UI toolkit and project/engine architecture. |
+| **Qtractor** | Linux-native C++/Qt multitrack audio/MIDI recorder and editor, traditional recorder paradigm, patchbay, non-destructive editing, takes, automation, and broad Linux plugin support | Integrates tightly with Linux audio infrastructure, but this infrastructure and Linux-only target are themselves assumptions a newcomer must meet. DAWg should hide device/port complexity until users need routing, while retaining an inspectable patchbay for advanced setups. |
+| **Rosegarden** | Linux composition/sequencing with unusually strong notation alongside MIDI and basic audio recording | Demonstrates that notation is a primary workflow for some musicians rather than a niche export. DAWg could add notation/interchange later if user evidence supports it, without making staff notation the default. |
+| **MusE** | Linux virtual studio combining MIDI and audio sequencing/recording, open-source and extensible | Useful evidence that a desktop DAW can be part of a larger modular Linux audio environment. External synths and graph routing offer flexibility but increase setup demands; make device setup explicit, guided, and recoverable. |
+| **Radium** | Modular sequencing and sound design arranged as a node-based environment with a pattern sequencer | A node graph encourages experimentation and unusual signal flow; however, node editing can obscure ordinary track relationships. Treat modular routing as an advanced view connected to familiar tracks. |
+| **SunVox** | Portable modular synth and tracker sequencer available across desktop/mobile environments | Strong inspiration for small-footprint, self-contained sound creation and portability. A tracker-plus-module environment is intentionally idiosyncratic; borrow portability and fast auditioning rather than reproducing its learning curve. |
+
+Sources: [Zrythm project and feature status](https://github.com/zrythm/zrythm) · [Zrythm v2 feature page](https://www.zrythm.org/en/features.html) · [Qtractor](https://www.qtractor.org/) · [Rosegarden](https://www.rosegardenmusic.com/) · [MusE](https://github.com/muse-sequencer/muse) · [Radium](https://www.radiumsoftware.com/) · [SunVox](https://warmplace.ru/soft/sunvox/)
+
+**Zrythm implementation note:** the upstream project says its newer v2 is a full rewrite and labels some previous features as not yet ported. Its current public README lists audio/MIDI recording with takes, multiple editing tools, clip looping, plugin support, and chord features; do not treat every capability in its legacy feature list as current v2 behavior. This is a useful caution for DAWg too: feature tables need explicit status (implemented, planned, experimental), not just aspirational promises.
+
+### 12.4 Browser and collaboration-first DAWs
+
+| Product | Differentiator | Pros | Constraints / DAWg lesson |
+|---|---|---|---|
+| **BandLab Studio** | Browser/mobile creation and social collaboration, with cross-device access | Minimal setup, sharing, collaboration, and a phone-to-desktop path reduce friction to start and share | Published limits and platform constraints matter: its current help page states a 15-minute project limit and up to 16 audio/MIDI tracks. Cloud accounts, connectivity, service continuity, and project portability should be evaluated, not hidden. |
+| **Soundtrap** | Browser-based recording and collaboration with loops, instruments, effects, and autosave/version restore | Live collaboration and recovery history address the “send a session back and forth” problem | A browser/cloud-first app must manage latency, offline access, local media ownership, and version conflicts. DAWg can first solve portable project folders and robust backup/version history without becoming a cloud service. |
+| **Audiotool** | Browser DAW built around connected devices, patching/cables, remixing, and real-time collaboration | The visual modular graph makes signal flow inspectable; open platform hooks invite community instruments/tools | Graph patching and browser/network assumptions can intimidate recording-first users. Put a clear track/mixer path in front, with a graph available when it explains otherwise hidden routing. |
+| **Amped Studio** | Browser DAW with a desktop helper that bridges VST3 plugins | Combines fast browser access with access to local plug-ins through a companion bridge | A bridge adds another install, process, and failure boundary. DAWg should prioritize native desktop stability and use bridges only for a clear cross-platform or collaboration benefit. |
+| **Soundation** | Online production and collaboration with loops/instruments; a macOS desktop app has been offered in beta for reduced latency | Fast onboarding and shared projects can support remote creation | Cloud-centric workflow and subscription/content layers raise questions about offline work and export/project ownership. Treat collaboration as a later service or interoperable format, not a prerequisite for core creation. |
+
+Sources: [BandLab Studio](https://www.bandlab.com/studio) · [BandLab track/project limits](https://help.bandlab.com/hc/en-us/articles/360018930994-What-are-the-limits-of-BandLab) · [Soundtrap features](https://www.soundtrap.com/music-makers) · [Audiotool](https://www.audiotool.com/) · [Amped Studio](https://ampedstudio.com/) · [Amped VST Remote](https://ampedstudio.com/vst-remote/) · [Soundation](https://soundation.com/)
+
+### 12.5 What the larger survey adds
+
+Across this expanded sample, the important competitive differences are about **where each product places the first useful action** and **what it asks the user to understand before getting results**:
+
+- **Idea capture:** eJay-style loop assembly, GarageBand’s guided instruments/loops, Maschine/Serato’s sampler/deck workflows, and browser collaboration each lower the barrier in different ways.
+- **Arrangement:** traditional timelines are predictable for recorded takes; scene/clip launchers make alternatives easy to audition; trackers make repeated events compact and editable. No single arrangement model wins for every task.
+- **Signal-flow understanding:** track/channel mapping makes routing legible; console surfaces make mixing visible; object-based processing makes local edits powerful; modular graphs make connections explicit. Each can become opaque when it is the only allowed abstraction.
+- **Recording depth:** take lanes, comping, punch workflows, object edits, and robust monitoring matter more to recording users than large instrument libraries. Recording needs must be exercised early, not bolted on after a pattern-only prototype.
+- **Finding controls:** Cakewalk’s command/help-search direction, searchable settings, named panels, and contextual controls point to a concrete way to prevent growth from turning into navigation debt.
+- **Portability and collaboration:** browser products excel at sharing/low-friction access; desktop products provide local control, latency predictability, and plug-in access. A project folder that is self-contained, recoverable, and portable can deliver a key benefit without requiring a cloud backend.
+- **Specialization:** post, mastering, notation, tracker, modular, and high-end format tools solve real needs, but they should not dictate the default workspace for a general song producer.
+
+## 13. DAWg opportunity: combine strong defaults with reachable depth
+
+The market does not reveal a single missing “perfect DAW.” It reveals a design opportunity: connect the immediacy of loop and pattern tools to an understandable recording/arrangement/mixing model, then let complexity appear only when the project or user asks for it. This is a product hypothesis grounded in the owner’s history plus observed workflow differences, not a claim that every producer wants the same DAW.
+
+### Proposed product principles to test
+
+1. **First sound fast:** start with a working audio device, an easy way to record/import a sound, and an immediately audible loop or instrument. Do not make users construct a mixer graph before hearing anything.
+2. **A predictable home base:** keep one stable song timeline as the default anchor. Each track has visible clips, a clear instrument/audio identity, and an obvious destination channel. Let a clip launcher, step sequencer, or piano roll open beside the song, not replace the user's map.
+3. **One idea, several forms:** allow a pattern or clip to be auditioned, duplicated, varied, and then placed or performed into the timeline. Make the choice between a linked reusable pattern and an independent copy explicit.
+4. **Context without hidden state:** show relevant controls beside the selected track/clip while preserving one stable route to the mixer, browser, and editor. Provide a searchable command/action palette, searchable settings, contextual tips, named workspaces, and “reset layout.”
+5. **Recording is a core path:** record audio and MIDI, monitor safely, loop/punch, retain takes, audition/comp, undo edits, and keep the media linked through save/reopen. Make the first milestone recording-first in engine validation even if the creative interface also supports patterns.
+6. **Plugins should not destabilize projects:** scan in the background, report scan failures clearly, remember plug-in paths, preserve state, report latency, and later isolate unreliable plugins. Keep third-party plugin hosting behind a stable host-service boundary.
+7. **Projects should survive movement and failure:** use a project folder with explicit media collection, autosave/recovery, named backups, and a portable export/archive operation. Add collaboration later through file-level interoperability before tying creative work to an online account.
+8. **Measure sound claims:** use float internal processing, predictable gain staging, documented resampling/time-stretch choices, and transparent export controls. Compare null tests and reference renders; do not claim a DAW “sounds better” without a specific measurable or algorithmic reason.
+
+### Candidate positioning
+
+> **DAWg helps a musician move from a playable idea to a finished recording in one clear workspace—without losing track of what each sound is, where it goes, or how to find the next control.**
+
+This positioning should be revised if prototype work shows that the owner’s primary joy is specifically a pattern instrument, a recorder, or a hybrid.
+
+### Competitive gap table
+
+| User job | Common strong solution in the surveyed market | Failure mode DAWg can investigate |
+|---|---|---|
+| Start making a beat now | Loops, presets, step sequencers, sampler decks | Can box the user into a beat-centric structure or an opaque collection of panels |
+| Record a real instrument/vocal | Tape-inspired DAWs, take lanes, comping, punch workflows | Can feel engineering-first before the musician has a musical idea |
+| Try alternate arrangements | Scene/clip launchers, pattern/song modes | Can make users learn a second sequencing model or separate data rules |
+| Understand where sound is routed | Track-to-channel mappings, mixer strips, patchbays, modular cables | Flexible routing can make destinations invisible; fixed mapping can feel too restrictive |
+| Discover a feature | Search, workspace layouts, contextual panels, user scripts | High feature count becomes navigation cost if search and contextual disclosure are absent |
+| Collaborate or move between devices | Browser/cloud DAWs and real-time collaboration | Network/account dependence, project limits, plugin incompatibility, or offline constraints |
+| Finish and deliver work | Post/mastering DAWs, loudness tools, stem/format delivery | Specialized formats and panels can dominate a general music workflow |
+
+### Risks in trying to be “best”
+
+- **Feature aggregation is not a product strategy.** Combining every DAW’s most visible feature can produce several competing mental models and a larger learning burden.
+- **One surface cannot optimize every task.** Recording, beat making, notation, sound design, post, and mastering have different information needs. The default should target a defined first user.
+- **Plugin breadth is expensive.** Each format adds scanning, UI, threading, channel-layout, state, preset, automation, latency, and crash-recovery work.
+- **Cross-platform audio has real platform costs.** Device APIs, permissions, drivers, code signing, package/testing, and device QA differ by OS.
+- **“Professional quality” needs measurable acceptance criteria.** Audio engine claims should be tested with latency, dropouts, CPU, render consistency, routing, sample-rate conversion, and export checks—not adjectives.
+
+## 14. Evidence and source notes for the expanded survey
+
+Primary product references used in sections 12–13:
+
+- Fender’s announcement identifies the 2026 rename from Studio One Pro to Fender Studio Pro 8 and documents 8.1 updates: [Fender Studio Pro 8](https://www.fender.com/articles/behind-the-scenes/studio-pro-8-is-here) · [8.1](https://www.fender.com/articles/behind-the-scenes/studio-pro-8-1-is-here).
+- Current Tracktion product descriptions list Waveform Pro features: [Waveform Pro](https://www.tracktion.com/products/waveform-pro).
+- Cakewalk documents its current Sonar offering, tiering, and help/workspace approach: [Sonar](https://www.cakewalk.com/sonar) · [FAQ](https://help.cakewalk.com/hc/en-us/articles/32587898870301-Cakewalk-Sonar-FAQ).
+- Mixcraft records take, overdub, and replace workflows in its manual: [Recording audio](https://acoustica.com/mixcraft-manual/recording-audio.htm).
+- Boris FX describes Samplitude and Sequoia: [Samplitude](https://www.samplitude.com/us/) · [Sequoia](https://www.sequoia-software.com/).
+- Universal Audio describes LUNA: [LUNA](https://www.uaudio.com/products/luna).
+- Apple describes GarageBand: [GarageBand](https://www.apple.com/mac/garageband/).
+- Steinberg describes Nuendo’s specialist post workflows: [ADR](https://www.steinberg.net/nuendo/features/adr/) · [game audio](https://www.steinberg.net/nuendo/features/game-audio/).
+- Merging’s download center lists current Pyramix manuals/releases; older manuals document DXD/DSD project distinctions: [Downloads](https://www.merging.com/support/downloads) · [DSD/DXD guide](https://www.merging.com/uploads/assets/Merging_pdfs/Merging_Technologies_DSD-DXD_Production_Guide.pdf).
+- Serato describes its scene/song, sample and stem workflow: [Serato Studio](https://serato.com/studio/features).
+- NI describes Maschine: [Maschine Software](https://www.native-instruments.com/en/products/maschine/maschine-software/).
+- Renoise describes tracker entry and performance: [Renoise](https://www.renoise.com/products/renoise).
+- OpenMPT lists supported formats and workflow: [Features](https://openmpt.org/features).
+- LMMS lists its composition features: [LMMS](https://lmms.io/).
+- Akai describes MPC software: [MPC Software](https://www.akaipro.com/mpc-software.html).
+- Zrythm's project and feature page describe its current v2 feature status: [GitHub](https://github.com/zrythm/zrythm) · [Features](https://www.zrythm.org/en/features.html).
+- Qtractor’s official site and manual describe Linux audio/MIDI recording, routing, editing, and plugins: [Qtractor](https://www.qtractor.org/) · [manual](https://www.qtractor.org/doc/Manual%20-%201%20Introduction.html).
+- Rosegarden describes its notation-centered composition focus: [Rosegarden](https://www.rosegardenmusic.com/) · [manual introduction](https://www.rosegardenmusic.com/doc/en/introduction.html).
+- MusE's upstream repository describes its Linux audio/MIDI scope: [MusE](https://github.com/muse-sequencer/muse).
+- BandLab documents its browser studio and project limits: [Studio](https://www.bandlab.com/studio) · [limits](https://help.bandlab.com/hc/en-us/articles/360018930994-What-are-the-limits-of-BandLab).
+- Soundtrap, Audiotool, Amped Studio, and Soundation describe browser collaboration, modular workflows, plug-in bridges, and online composition: [Soundtrap](https://www.soundtrap.com/music-makers) · [Audiotool](https://www.audiotool.com/) · [Amped Studio](https://ampedstudio.com/) · [VST Remote](https://ampedstudio.com/vst-remote/) · [Soundation](https://soundation.com/).
+
+The expanded survey intentionally names capabilities and tradeoffs rather than assigning scores. Public product pages are self-descriptions. They are good evidence for intended feature scope and supported workflows, but not independent evidence of usability, sonic superiority, reliability, or value. Several products in specialist, tracker, cloud, and Linux categories require hands-on comparison before DAWg should borrow their interaction patterns.
