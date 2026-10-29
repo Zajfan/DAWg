@@ -221,3 +221,8 @@ Choose a primary workflow only after the owner tries all three against the same 
 ## Visual mockup step
 
 The owner connected the 12ui account and three visual concepts were generated for comparison. Selected representatives and review notes are described in [DAWG_WORKFLOW_VISUALS.md](DAWG_WORKFLOW_VISUALS.md). The images are exploratory concepts, not an approved design or implemented interface. The current GitHub file integration supports UTF-8 text only, so generated PNGs are supplied separately as a review bundle rather than committed as repository assets.
+
+
+## Owner clarification: layout flexibility
+
+The owner selected the track-first visual because it is familiar from time spent in FruityLoops/FL Studio; this is not a preference ranking or final choice. The product direction is to explore all three layouts and more as customizable workspaces over the same project. See [DAWG_WORKBENCH_AND_WORKSPACES.md](DAWG_WORKBENCH_AND_WORKSPACES.md).
