@@ -377,3 +377,8 @@ Primary product references used in sections 12–13:
 - Soundtrap, Audiotool, Amped Studio, and Soundation describe browser collaboration, modular workflows, plug-in bridges, and online composition: [Soundtrap](https://www.soundtrap.com/music-makers) · [Audiotool](https://www.audiotool.com/) · [Amped Studio](https://ampedstudio.com/) · [VST Remote](https://ampedstudio.com/vst-remote/) · [Soundation](https://soundation.com/).
 
 The expanded survey intentionally names capabilities and tradeoffs rather than assigning scores. Public product pages are self-descriptions. They are good evidence for intended feature scope and supported workflows, but not independent evidence of usability, sonic superiority, reliability, or value. Several products in specialist, tracker, cloud, and Linux categories require hands-on comparison before DAWg should borrow their interaction patterns.
+
+
+## 15. Follow-up: first-session interaction prototypes
+
+The three candidate interaction models are described in the [task-based workflow prototype brief](DAWG_WORKFLOW_PROTOTYPES.md). Selected visual concepts and their comparison notes are summarized in [DAWG_WORKFLOW_VISUALS.md](DAWG_WORKFLOW_VISUALS.md). These artifacts are exploratory; the project owner has not selected a workflow or approved the visual style.
