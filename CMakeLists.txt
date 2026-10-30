@@ -17,6 +17,16 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(JUCE)
 
+# VersaTone engine — monorepo sibling, GUI-independent audio core
+set(DAWG_ENGINE_ENABLE_SIMD ON  CACHE BOOL "" FORCE)
+set(DAWG_ENGINE_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    set(DAWG_ENGINE_ENABLE_LTO ON  CACHE BOOL "" FORCE)
+else()
+    set(DAWG_ENGINE_ENABLE_LTO OFF CACHE BOOL "" FORCE)
+endif()
+add_subdirectory(../VersaTone/engine dawg_engine_build)
+
 juce_add_gui_app(DAWg
     PRODUCT_NAME "DAWg"
     COMPANY_NAME "DAWg Project"
@@ -35,12 +45,29 @@ target_compile_features(DAWg PRIVATE cxx_std_26)
 
 target_link_libraries(DAWg
     PRIVATE
+        dawg_engine
         juce::juce_audio_utils
         juce::juce_gui_extra
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
+)
+
+# Zero-warning policy (Zajfan Standard §8)
+target_compile_options(DAWg PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic -Wconversion -Werror>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX>
+)
+
+# Sanitizers for debug builds (Zajfan Standard §10.2 + §6.3)
+target_compile_options(DAWg PRIVATE
+    $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:
+        -fsanitize=address,undefined,thread>
+)
+target_link_options(DAWg PRIVATE
+    $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:
+        -fsanitize=address,undefined,thread>
 )
 
 target_compile_definitions(DAWg
