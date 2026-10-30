@@ -56,18 +56,23 @@ target_link_libraries(DAWg
 
 # Zero-warning policy (Zajfan Standard §8)
 target_compile_options(DAWg PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic -Wconversion -Werror>
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Werror>
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX>
 )
 
-# Sanitizers for debug builds (Zajfan Standard §10.2 + §6.3)
+# Sanitizers for debug builds (Zajfan Standard §6.3, §10.2)
+# ASan+UBSan by default; TSan is incompatible with ASan — enable separately.
+option(DAWG_ENABLE_TSAN "Use ThreadSanitizer instead of AddressSanitizer (mutually exclusive)" OFF)
+if(DAWG_ENABLE_TSAN)
+    set(DAWG_SANITIZER_FLAGS "-fsanitize=thread,undefined")
+else()
+    set(DAWG_SANITIZER_FLAGS "-fsanitize=address,undefined")
+endif()
 target_compile_options(DAWg PRIVATE
-    $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:
-        -fsanitize=address,undefined,thread>
+    $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
 )
 target_link_options(DAWg PRIVATE
-    $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:
-        -fsanitize=address,undefined,thread>
+    $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
 )
 
 target_compile_definitions(DAWg
