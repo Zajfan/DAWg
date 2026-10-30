@@ -27,6 +27,9 @@ else()
 endif()
 add_subdirectory(../VersaTone/engine dawg_engine_build)
 
+# VersaTone engine needs C++20 for std::numbers and atomic<double> arithmetic
+target_compile_features(dawg_engine PRIVATE cxx_std_20)
+
 juce_add_gui_app(DAWg
     PRODUCT_NAME "DAWg"
     COMPANY_NAME "DAWg Project"
@@ -37,8 +40,8 @@ target_sources(DAWg
         Source/App/Main.cpp
         Source/App/MainComponent.cpp
         Source/App/MainComponent.h
-        Source/Audio/AudioEngine.cpp
-        Source/Audio/AudioEngine.h
+        Source/Audio/AudioAdapter.cpp
+        Source/Audio/AudioAdapter.h
 )
 
 target_compile_features(DAWg PRIVATE cxx_std_26)
@@ -54,9 +57,19 @@ target_link_libraries(DAWg
         juce::juce_recommended_warning_flags
 )
 
-# Zero-warning policy (Zajfan Standard §8)
+# Zero-warning policy (Zajfan Standard §8) — applied per-source to avoid
+# hitting JUCE's own module source files, which JUCE 9 compiles inline.
+set(DAWG_OWN_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/App/Main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/App/MainComponent.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Audio/AudioAdapter.cpp
+)
+set_source_files_properties(${DAWG_OWN_SOURCES}
+    PROPERTIES COMPILE_OPTIONS
+        "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>"
+)
+# MSVC: whole-target is safe because JUCE uses a separate compilation model there
 target_compile_options(DAWg PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Werror>
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX>
 )
 

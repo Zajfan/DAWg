@@ -1,11 +1,11 @@
 #pragma once
 
-#include "../Audio/AudioEngine.h"
+#include "../Audio/AudioAdapter.h"
 
 #include <juce_gui_extra/juce_gui_extra.h>
 
-namespace daw::app
-{
+namespace dawg::app {
+
 class MainComponent final : public juce::Component,
                             private juce::Timer
 {
@@ -20,9 +20,10 @@ private:
     void timerCallback() override;
     void refreshAudioStatus();
 
-    daw::audio::AudioEngine audioEngine;
-    juce::Label titleLabel;
-    juce::Label statusLabel;
-    juce::TextButton restartButton { "Restart audio device" };
+    dawg::app::audio::AudioAdapter m_audioAdapter;
+    juce::Label m_titleLabel;
+    juce::Label m_statusLabel;
+    juce::TextButton m_restartButton { "Restart audio device" };
 };
-} // namespace daw::app
+
+} // namespace dawg::app

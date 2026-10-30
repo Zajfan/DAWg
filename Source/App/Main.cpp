@@ -1,6 +1,6 @@
 #include "MainComponent.h"
 
-namespace daw::app
+namespace dawg::app
 {
 class DawApplication final : public juce::JUCEApplication
 {
@@ -43,6 +43,6 @@ private:
 
     std::unique_ptr<MainWindow> mainWindow;
 };
-} // namespace daw::app
+} // namespace dawg::app
 
-START_JUCE_APPLICATION(daw::app::DawApplication)
+START_JUCE_APPLICATION(dawg::app::DawApplication)

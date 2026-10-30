@@ -1,35 +1,35 @@
 #include "MainComponent.h"
 
-namespace daw::app
-{
+namespace dawg::app {
+
 MainComponent::MainComponent()
 {
     setSize(900, 560);
 
-    titleLabel.setText("DAWg", juce::dontSendNotification);
-    titleLabel.setFont(juce::FontOptions(28.0f, juce::Font::bold));
-    addAndMakeVisible(titleLabel);
+    m_titleLabel.setText("DAWg", juce::dontSendNotification);
+    m_titleLabel.setFont(juce::FontOptions(28.0f, juce::Font::bold));
+    addAndMakeVisible(m_titleLabel);
 
-    statusLabel.setJustificationType(juce::Justification::centredLeft);
-    addAndMakeVisible(statusLabel);
+    m_statusLabel.setJustificationType(juce::Justification::centredLeft);
+    addAndMakeVisible(m_statusLabel);
 
-    restartButton.onClick = [this]
+    m_restartButton.onClick = [this]
     {
-        const auto result = audioEngine.initialise();
+        const auto result = m_audioAdapter.initialise();
 
         if (result.failed())
-            statusLabel.setText("Audio device error: " + result.getErrorMessage(),
-                                juce::dontSendNotification);
+            m_statusLabel.setText("Audio device error: " + result.getErrorMessage(),
+                                  juce::dontSendNotification);
         else
             refreshAudioStatus();
     };
-    addAndMakeVisible(restartButton);
+    addAndMakeVisible(m_restartButton);
 
-    const auto result = audioEngine.initialise();
+    const auto result = m_audioAdapter.initialise();
 
     if (result.failed())
-        statusLabel.setText("Audio device error: " + result.getErrorMessage(),
-                            juce::dontSendNotification);
+        m_statusLabel.setText("Audio device error: " + result.getErrorMessage(),
+                              juce::dontSendNotification);
     else
         refreshAudioStatus();
 
@@ -39,7 +39,7 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     stopTimer();
-    audioEngine.shutdown();
+    m_audioAdapter.shutdown();
 }
 
 void MainComponent::paint(juce::Graphics& graphics)
@@ -51,11 +51,11 @@ void MainComponent::resized()
 {
     auto area = getLocalBounds().reduced(28);
 
-    titleLabel.setBounds(area.removeFromTop(52));
+    m_titleLabel.setBounds(area.removeFromTop(52));
     area.removeFromTop(20);
-    statusLabel.setBounds(area.removeFromTop(36));
+    m_statusLabel.setBounds(area.removeFromTop(36));
     area.removeFromTop(12);
-    restartButton.setBounds(area.removeFromTop(36).removeFromLeft(200));
+    m_restartButton.setBounds(area.removeFromTop(36).removeFromLeft(200));
 }
 
 void MainComponent::timerCallback()
@@ -65,16 +65,17 @@ void MainComponent::timerCallback()
 
 void MainComponent::refreshAudioStatus()
 {
-    if (!audioEngine.isDeviceReady())
+    if (!m_audioAdapter.isDeviceReady())
     {
-        statusLabel.setText("No audio device is ready. Check the device settings and retry.",
-                            juce::dontSendNotification);
+        m_statusLabel.setText("No audio device is ready. Check the device settings and retry.",
+                              juce::dontSendNotification);
         return;
     }
 
-    const auto rate = juce::String(audioEngine.getSampleRate(), 0);
-    const auto block = juce::String(audioEngine.getBlockSize());
-    statusLabel.setText("Audio device ready  |  " + rate + " Hz  |  block " + block + " samples",
-                        juce::dontSendNotification);
+    const auto rate  = juce::String(m_audioAdapter.getSampleRate(), 0);
+    const auto block = juce::String(m_audioAdapter.getBlockSize());
+    m_statusLabel.setText("Audio device ready  |  " + rate + " Hz  |  block " + block + " samples",
+                          juce::dontSendNotification);
 }
-} // namespace daw::app
+
+} // namespace dawg::app
