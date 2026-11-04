@@ -48,3 +48,12 @@ No additional plan conflicts were found. The only preflight ruling is the native
 - Task 4 focused verification: `/tmp/dawg-build-window-tests` build and CTest passed (`2/2`); temporary worktree build directories, `/tmp` build, and `../VersaTone` symlink were removed. `Source/App/Main.cpp` remains an unrelated pre-existing dirty change and was not included.
 - Task 5: complete (commit `fa75dc3`, review clean; verification was interrupted before the focused test could run).
 - Task 6 verification: fresh Debug configuration succeeded, registry and integration binaries built, the DAWg Debug link was blocked by the host's missing `/usr/lib64/libasan.so.8.0.0`, and CTest reported the existing test-harness event-loop ordering failure in the modal assertions. A temporary non-sanitized Release build linked `DAWg` successfully. Architectural boundary checks and `git diff --check` passed; all build artifacts and the temporary `../VersaTone` symlink were removed, leaving the worktree clean. No source changes were justified.
+
+## Final whole-branch review fix pass
+
+- Ruling: reject contradictory maximum dimensions when a non-zero maximum is smaller than the normalized minimum; apply the same validation in `WindowRegistry` and `WindowManager`, before mutating or creating state.
+- TDD red phase: `dawg_window_registry_tests` failed with the two expected contradictory-limit assertions before production edits. The new integration regression/placement tests compiled after a test-only JUCE API correction.
+- Fix commit: `bd9a655` (`fix(window): resolve final manager review findings`). It keeps close-request callbacks reusable, centers default-placement modal dialogs around parents, applies manager-controlled parent/child z-order, gates Linux maximize on advertised EWMH atoms, and rejects invalid limits.
+- Green verification: both focused targets built successfully; `dawg_window_registry_tests` exited `0`; Release `DAWg` configured and linked successfully.
+- Environment concern: focused CTest under bare Xvfb exited `8` because JUCE aborts at startup with X11 `BadAtom`; a bounded Mutter-on-Xvfb retry reproduced the same pre-assertion failure. The integration target therefore could not execute its assertions here. No engine files changed.
+- Final cleanup: temporary `/tmp/dawg-window-fixes-red`, `/tmp/dawg-window-fixes-release`, and the isolated-worktree `../VersaTone` symlink were removed.

@@ -103,3 +103,75 @@ The only Task 6 source changes are the focused test-harness correction in `CMake
 
 - Bare Xvfb causes JUCE 9.0.4 to issue `X_ChangeProperty` with atom `0` during integration startup; the suite needs a display environment with the required X11/window-manager support to execute its assertions. The requested harness correction is committed, but this Xvfb run remains blocked before assertions.
 - JUCE continues to warn about the pre-existing bundle identifier containing spaces.
+
+## Final whole-branch review fix pass
+
+Fix commit: `bd9a655` (`fix(window): resolve final manager review findings`)
+
+The pass added regression coverage before production edits, then fixed the
+review findings without touching the reusable engine:
+
+- `ManagedWindow` keeps the close-request callback callable across repeated
+  native attempts until the application closes the window.
+- Contradictory minimum/maximum dimensions are rejected by both
+  `WindowRegistry` and `WindowManager` before registration or peer creation.
+- Parent children are brought into the manager-controlled z-order, and modal
+  dialogs using the default `{ 0, 0, 900, 560 }` placement are centered around
+  their parent.
+- Linux maximize capability and requests now require the three maximize-related
+  EWMH atoms to be advertised by `_NET_SUPPORTED`; bare Xvfb therefore reports
+  maximize as unsupported.
+
+### TDD and verification results
+
+1. Added the repeated-close and contradictory-limit regression tests, plus
+   modal-centering/child-placement coverage. The deterministic red check ran:
+
+   ```bash
+   /tmp/dawg-window-fixes-red/dawg_window_registry_tests
+   ```
+
+   Exit `1`, with the expected failures that contradictory limits were still
+   registered. The integration test initially needed a test-only JUCE API
+   correction (`isFocused()` is not a `ManagedWindow` API); after that correction
+   the target compiled before production edits.
+
+2. After implementation:
+
+   ```bash
+   cmake --build /tmp/dawg-window-fixes-red --target \
+     dawg_window_registry_tests dawg_window_manager_integration_tests --parallel 2
+   ```
+
+   Exit `0`.
+
+   ```bash
+   /tmp/dawg-window-fixes-red/dawg_window_registry_tests
+   ```
+
+   Exit `0`.
+
+3. Focused CTest under bare Xvfb:
+
+   ```bash
+   xvfb-run -a ctest --test-dir /tmp/dawg-window-fixes-red --output-on-failure
+   ```
+
+   Exit `8`: the deterministic registry test passed; the JUCE integration test
+   failed before assertions with X11 `BadAtom` from `X_ChangeProperty`, followed
+   by JUCE leak assertions. One bounded retry with Mutter on Xvfb produced the
+   same startup failure, so this remains an environment limitation rather than
+   a test assertion result. No practical Linux-native maximize assertion could
+   run in that display environment.
+
+4. Production link verification:
+
+   ```bash
+   timeout 180s cmake -S . -B /tmp/dawg-window-fixes-release \
+     -DDAWG_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+   timeout 180s cmake --build /tmp/dawg-window-fixes-release \
+     --target DAWg --parallel 2
+   ```
+
+   Both exited `0`; the Release DAWg executable linked successfully. The only
+   configure warning was the existing JUCE bundle-ID warning about spaces.
