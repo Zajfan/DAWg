@@ -334,6 +334,40 @@ void testWindowStatesAndCapabilities()
     static_cast<void>(manager.closeWindow(*handle));
 }
 
+void testCloseRequestRoutesThroughManager()
+{
+    WindowManager manager;
+    WindowHandle requestedHandle = 0;
+    int closeRequestCount = 0;
+    bool closeSucceeded = false;
+
+    WindowOptions options;
+    options.title = "Close Routing Window";
+    options.bounds = { 120, 120, 480, 320 };
+    options.closeRequested = [&](const WindowHandle handle) {
+        requestedHandle = handle;
+        ++closeRequestCount;
+        closeSucceeded = manager.closeWindow(handle);
+    };
+
+    const auto handle = manager.createWindow(makeContent(), options);
+    expect(handle.has_value(), "close-routing window is created");
+    if (! handle)
+        return;
+
+    auto* managedWindow = findManagedWindow("Close Routing Window");
+    expect(managedWindow != nullptr, "close-routing window is discoverable");
+    if (managedWindow != nullptr)
+        managedWindow->userTriedToCloseWindow();
+
+    dispatchMessagesFor(std::chrono::milliseconds(100));
+    expect(closeRequestCount == 1, "close-routing callback runs exactly once");
+    expect(requestedHandle == *handle, "close-routing callback receives its handle");
+    expect(closeSucceeded, "close-routing callback closes through the manager");
+    expect(!manager.getWindow(*handle).has_value(),
+           "close-routing callback removes the managed window");
+}
+
 void testChildCascadeAndModalCompletion()
 {
     WindowManager manager;
@@ -374,9 +408,6 @@ void testChildCascadeAndModalCompletion()
         expect(dialogSnapshot.has_value() && dialogSnapshot->modal,
                "dialog snapshot reports modal state");
         expect(manager.closeWindow(*parent), "closing a parent window succeeds");
-        dispatchMessagesFor(std::chrono::milliseconds(100));
-        expect(completionCount == 1, "parent-close modal completion runs exactly once");
-        expect(completionResult == 0, "parent-close modal completes with result zero");
         expect(!manager.getWindow(*dialog).has_value(),
                "closing a parent closes its modal descendant");
     }
@@ -410,11 +441,6 @@ void testChildCascadeAndModalCompletion()
         if (escapeWindow)
             expect(!escapeWindow->isCurrentlyModal(false),
                    "escape exits the dialog modal state");
-        dispatchMessagesFor(std::chrono::milliseconds(100));
-        expect(escapeCompletionCount == 1,
-               "escape-enabled dialog completion runs exactly once");
-        expect(!manager.getWindow(*escapeDialog).has_value(),
-               "escape closes the dialog handle");
     }
 
     int noEscapeCompletionCount = 0;
@@ -434,7 +460,16 @@ void testChildCascadeAndModalCompletion()
         expect(manager.getWindow(*noEscapeDialog).has_value(),
                "escape-disabled dialog remains open");
         expect(manager.closeWindow(*noEscapeDialog), "escape-disabled dialog closes explicitly");
+
+        // JUCE's dispatch loop is stopped by the bounded helper and cannot be restarted;
+        // flush all pending modal callbacks in one pass after exercising every close path.
         dispatchMessagesFor(std::chrono::milliseconds(100));
+        expect(completionCount == 1, "parent-close modal completion runs exactly once");
+        expect(completionResult == 0, "parent-close modal completes with result zero");
+        expect(escapeCompletionCount == 1,
+               "escape-enabled dialog completion runs exactly once");
+        expect(!manager.getWindow(*escapeDialog).has_value(),
+               "escape closes the dialog handle");
         expect(noEscapeCompletionCount == 1,
                "escape-disabled dialog completion runs exactly once");
     }
@@ -482,6 +517,7 @@ int main()
 
     using namespace dawg::app::window;
     testCreateResizeAndClose();
+    testCloseRequestRoutesThroughManager();
     testWindowStatesAndCapabilities();
     testChildCascadeAndModalCompletion();
     testDisplaySnapshotAndConversion();

@@ -59,6 +59,7 @@ private:
     WindowCapabilities m_capabilities;
     std::vector<DisplayInfo> m_displays;
     std::unordered_set<WindowHandle> m_closingModals;
+    std::unordered_map<WindowHandle, std::function<void(int)>> m_pendingModalCompletions;
     std::shared_ptr<int> m_lifetime { std::make_shared<int>(0) };
 };
 

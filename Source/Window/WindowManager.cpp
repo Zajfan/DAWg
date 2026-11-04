@@ -93,6 +93,11 @@ WindowManager::~WindowManager()
     m_lifetime.reset();
     while (! m_windows.empty()) {
         const auto handle = m_windows.begin()->first;
+        if (! m_registry.contains(handle)) {
+            m_closingModals.erase(handle);
+            m_windows.erase(handle);
+            continue;
+        }
         destroyTree(handle, 0);
     }
 }
@@ -216,19 +221,30 @@ void WindowManager::destroyTree(const WindowHandle handle, const int result,
             if (modalHandles.contains(closedWindow.handle))
                 m_closingModals.insert(closedWindow.handle);
         }
+        for (auto& closedWindow : closedWindows) {
+            if (modalHandles.contains(closedWindow.handle))
+                m_pendingModalCompletions.emplace(closedWindow.handle,
+                                                  std::move(closedWindow.completion));
+        }
         for (const auto& closedWindow : closedWindows) {
             if (! modalHandles.contains(closedWindow.handle))
                 continue;
             if (const auto it = m_windows.find(closedWindow.handle); it != m_windows.end())
                 it->second->exitModalState(result);
+            if (const auto it = m_windows.find(closedWindow.handle); it != m_windows.end())
+                it->second->setVisible(false);
         }
     }
 
     for (const auto& closedWindow : closedWindows) {
-        m_closingModals.erase(closedWindow.handle);
-        m_windows.erase(closedWindow.handle);
+        if (! (exitModalDescendants && modalHandles.contains(closedWindow.handle))) {
+            m_closingModals.erase(closedWindow.handle);
+            m_windows.erase(closedWindow.handle);
+        }
     }
     for (auto& closedWindow : closedWindows) {
+        if (exitModalDescendants && modalHandles.contains(closedWindow.handle))
+            continue;
         if (closedWindow.completion) {
             auto completion = std::move(closedWindow.completion);
             completion(result);
@@ -264,7 +280,17 @@ void WindowManager::finishModal(const WindowHandle handle, const int result)
         destroyTree(handle, result, false);
     else {
         m_closingModals.erase(handle);
+        const auto pending = m_pendingModalCompletions.find(handle);
+        if (pending == m_pendingModalCompletions.end()) {
+            m_windows.erase(handle);
+            return;
+        }
+
+        auto completion = std::move(pending->second);
+        m_pendingModalCompletions.erase(pending);
         m_windows.erase(handle);
+        if (completion)
+            completion(result);
     }
 }
 
