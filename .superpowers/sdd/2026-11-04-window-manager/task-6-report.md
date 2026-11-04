@@ -2,7 +2,7 @@
 
 Date: 2026-11-04
 
-Implementation commit verified: `fa75dc3` (`feat(app): create DAWg main window through window manager`)
+Final reviewed HEAD before this report commit: `c61535e` (`docs(window): record scoped re-review`)
 
 Final reviewed baseline: `c686726`, including the prior fix commit
 `bd9a655`. Current scoped follow-up head: `dfa50a2`.
