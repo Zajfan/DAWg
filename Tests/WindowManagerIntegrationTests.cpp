@@ -537,9 +537,8 @@ void testDefaultModalPlacementAndChildZOrder()
     if (parentWindow != nullptr && childWindow != nullptr) {
         expect(childWindow->isOnDesktop() && parentWindow->isOnDesktop(),
                "parent and child have desktop peers");
-        childWindow->toFront(true);
         expect(childWindow->isActiveWindow() || ! parentWindow->isActiveWindow(),
-               "child can be brought in front of its parent");
+               "manager brings a newly created child in front of its parent");
     }
 
     DialogOptions dialogOptions;

@@ -214,8 +214,11 @@ std::optional<WindowHandle> WindowManager::createWindowInternal(
 
     const auto initialState = options.initialState;
     m_windows.emplace(*handle, std::move(window));
+    auto* createdWindow = m_windows.at(*handle).get();
 
-    if (options.parent != 0) {
+    // A modal child must have its parent frontmost before modal activation;
+    // ordinary children are brought forward below after they are registered.
+    if (modal && options.parent != 0) {
         if (const auto parentWindow = m_windows.find(options.parent);
             parentWindow != m_windows.end())
             parentWindow->second->toFront(true);
@@ -228,8 +231,8 @@ std::optional<WindowHandle> WindowManager::createWindowInternal(
         callback.release();
     }
 
-    if (m_windows.at(*handle)->isVisible())
-        m_windows.at(*handle)->toFront(true);
+    if (createdWindow->isVisible())
+        createdWindow->toFront(true);
 
     if (initialState != WindowState::normal && ! setWindowState(*handle, initialState)) {
         static_cast<void>(closeWindow(*handle));
