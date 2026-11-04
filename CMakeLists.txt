@@ -112,4 +112,25 @@ if(DAWG_BUILD_TESTS)
     )
     add_test(NAME dawg.window_registry COMMAND dawg_window_registry_tests)
     set_tests_properties(dawg.window_registry PROPERTIES LABELS "window-manager")
+
+    add_executable(dawg_window_manager_integration_tests
+        Tests/WindowManagerIntegrationTests.cpp
+    )
+    target_include_directories(dawg_window_manager_integration_tests PRIVATE Source/Window)
+    target_compile_features(dawg_window_manager_integration_tests PRIVATE cxx_std_26)
+    target_compile_options(dawg_window_manager_integration_tests PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4;/WX>
+    )
+    target_link_libraries(dawg_window_manager_integration_tests PRIVATE
+        juce::juce_gui_basics
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags
+    )
+    add_test(NAME dawg.window_manager_integration
+        COMMAND dawg_window_manager_integration_tests)
+    set_tests_properties(dawg.window_manager_integration PROPERTIES
+        LABELS "window-manager"
+        SKIP_RETURN_CODE 77
+    )
 endif()
