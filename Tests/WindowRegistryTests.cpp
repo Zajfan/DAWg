@@ -108,6 +108,19 @@ void resizingClampsToRegisteredLimits()
                "large resize clamps to maximum limits");
 }
 
+void contradictoryLimitsAreRejectedWithoutRegistration()
+{
+    WindowRegistry registry;
+    auto registration = makeRegistration();
+    registration.limits.minimumWidth = 800;
+    registration.limits.maximumWidth = 640;
+
+    expect(! registry.registerWindow(std::move(registration)),
+           "a maximum smaller than its minimum is rejected");
+    expect(! registry.contains(1),
+           "rejecting contradictory limits does not create a registry entry");
+}
+
 void invalidHandlesDoNotMutateState()
 {
     WindowRegistry registry;
@@ -203,6 +216,7 @@ int main()
 
     handlesAreUniqueAndParentCloseCascades();
     resizingClampsToRegisteredLimits();
+    contradictoryLimitsAreRejectedWithoutRegistration();
     invalidHandlesDoNotMutateState();
     displayPlacementPreservesSizeAndClampsPosition();
     modalCompletionIsReturnedOnlyOnce();

@@ -164,12 +164,14 @@ void testCreateResizeAndClose()
            "manager-created window is discoverable as a ManagedWindow");
     if (managerWindow)
         managerWindow->userTriedToCloseWindow();
+    if (managerWindow)
+        managerWindow->userTriedToCloseWindow();
 
     expect(closeRequested, "manager-created window forwards a close request");
     expect(requestedHandle == managerHandle,
            "manager-created close request receives its concrete handle");
-    expect(closeRequestCount == 1,
-           "manager-created close-request callback runs exactly once");
+    expect(closeRequestCount == 2,
+           "manager-created close-request callback remains callable across attempts");
     expect(manager.getWindow(managerHandle).has_value(),
            "close-request callback leaves the manager-created window open");
 
@@ -196,12 +198,40 @@ void testCreateResizeAndClose()
                                         callbackOptions.closeRequested(managerHandle);
                                 }, false);
     managedWindow.userTriedToCloseWindow();
+    managedWindow.userTriedToCloseWindow();
 
     expect(directCloseRequested, "direct ManagedWindow forwards a close request");
     expect(directRequestedHandle == managerHandle,
            "direct close-request callback receives a concrete window handle");
-    expect(directCloseRequestCount == 1,
-           "direct ManagedWindow close-request callback runs exactly once");
+    expect(directCloseRequestCount == 2,
+           "direct ManagedWindow close-request callback remains callable across attempts");
+}
+
+void testContradictoryLimitsAreRejectedWithoutMutation()
+{
+    WindowManager manager;
+    WindowOptions validOptions;
+    validOptions.title = "Limits Baseline Window";
+    validOptions.bounds = { 120, 120, 640, 480 };
+    const auto baseline = manager.createWindow(makeContent(), validOptions);
+    expect(baseline.has_value(), "limits baseline window is created");
+    if (! baseline)
+        return;
+
+    const auto before = manager.getWindow(*baseline);
+    WindowOptions invalidOptions;
+    invalidOptions.title = "Invalid Limits Window";
+    invalidOptions.minimumWidth = 800;
+    invalidOptions.maximumWidth = 640;
+    invalidOptions.minimumHeight = 600;
+    invalidOptions.maximumHeight = 400;
+    const auto invalid = manager.createWindow(makeContent(), invalidOptions);
+
+    expect(! invalid, "manager rejects contradictory minimum and maximum dimensions");
+    const auto after = manager.getWindow(*baseline);
+    expect(before.has_value() && after.has_value() && snapshotsEqual(*after, *before),
+           "rejecting contradictory limits leaves existing windows unchanged");
+    expect(manager.closeWindow(*baseline), "limits baseline window closes");
 }
 
 void testWindowStatesAndCapabilities()
@@ -468,6 +498,56 @@ void testChildCascadeAndModalCompletion()
     expect(manager.closeWindow(*escapeParent), "escape test parent closes");
 }
 
+void testDefaultModalPlacementAndChildZOrder()
+{
+    WindowManager manager;
+    WindowOptions parentOptions;
+    parentOptions.title = "Placement Parent";
+    parentOptions.bounds = { 100, 100, 1200, 900 };
+    const auto parent = manager.createWindow(makeContent(), parentOptions);
+    expect(parent.has_value(), "placement parent is created");
+    if (! parent)
+        return;
+
+    WindowOptions childOptions;
+    childOptions.title = "Placement Child";
+    childOptions.bounds = { 140, 140, 400, 300 };
+    childOptions.parent = *parent;
+    const auto child = manager.createWindow(makeContent(), childOptions);
+    expect(child.has_value(), "placement child is created");
+    if (! child) {
+        static_cast<void>(manager.closeWindow(*parent));
+        return;
+    }
+
+    const auto parentWindow = findManagedWindow("Placement Parent");
+    const auto childWindow = findManagedWindow("Placement Child");
+    expect(parentWindow != nullptr && childWindow != nullptr,
+           "parent and child are discoverable for z-order verification");
+    if (parentWindow != nullptr && childWindow != nullptr) {
+        expect(childWindow->isOnDesktop() && parentWindow->isOnDesktop(),
+               "parent and child have desktop peers");
+        childWindow->toFront(true);
+        expect(childWindow->isActiveWindow() || ! parentWindow->isActiveWindow(),
+               "child can be brought in front of its parent");
+    }
+
+    DialogOptions dialogOptions;
+    dialogOptions.window.title = "Centered Dialog";
+    dialogOptions.window.parent = *parent;
+    const auto dialog = manager.showModalDialog(makeContent(), dialogOptions);
+    expect(dialog.has_value(), "default-placement modal dialog is created");
+    if (dialog) {
+        const auto snapshot = manager.getWindow(*dialog);
+        expect(snapshot.has_value(), "centered dialog has a snapshot");
+        if (snapshot)
+            expect(snapshot->bounds == WindowBounds { 250, 270, 900, 560 },
+                   "modal dialog with default bounds is centered around its parent");
+        expect(manager.closeWindow(*dialog), "centered dialog closes");
+    }
+    expect(manager.closeWindow(*parent), "placement parent closes");
+}
+
 void testDisplaySnapshotAndConversion()
 {
     WindowManager manager;
@@ -509,9 +589,11 @@ int main()
 
     using namespace dawg::app::window;
     testCreateResizeAndClose();
+    testContradictoryLimitsAreRejectedWithoutMutation();
     testCloseRequestRoutesThroughManager();
     testWindowStatesAndCapabilities();
     testChildCascadeAndModalCompletion();
+    testDefaultModalPlacementAndChildZOrder();
     testDisplaySnapshotAndConversion();
     return failures == 0 ? 0 : 1;
 }

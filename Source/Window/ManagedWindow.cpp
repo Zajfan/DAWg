@@ -46,17 +46,14 @@ ManagedWindow::~ManagedWindow() = default;
 
 void ManagedWindow::userTriedToCloseWindow()
 {
-    if (m_closeRequested) {
-        auto callback = std::move(m_closeRequested);
-        callback();
-    }
+    if (m_closeRequested)
+        m_closeRequested();
 }
 
 bool ManagedWindow::keyPressed(const juce::KeyPress& key)
 {
     if (m_closeOnEscape && key == juce::KeyPress::escapeKey && m_closeRequested) {
-        auto callback = std::move(m_closeRequested);
-        callback();
+        m_closeRequested();
         return true;
     }
 

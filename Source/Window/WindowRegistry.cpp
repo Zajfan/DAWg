@@ -12,6 +12,14 @@ std::optional<WindowHandle> WindowRegistry::registerWindow(WindowRegistration re
     if (parent != 0 && !contains(parent))
         return std::nullopt;
 
+    registration.limits.minimumWidth = std::max(1, registration.limits.minimumWidth);
+    registration.limits.minimumHeight = std::max(1, registration.limits.minimumHeight);
+    if ((registration.limits.maximumWidth != 0
+         && registration.limits.maximumWidth < registration.limits.minimumWidth)
+        || (registration.limits.maximumHeight != 0
+            && registration.limits.maximumHeight < registration.limits.minimumHeight))
+        return std::nullopt;
+
     const auto handle = m_nextHandle++;
     registration.snapshot.handle = handle;
 

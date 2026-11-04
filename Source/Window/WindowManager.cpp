@@ -28,13 +28,34 @@ WindowBounds clampedBounds(WindowBounds bounds, const WindowSizeLimits limits)
     return bounds;
 }
 
-WindowSizeLimits limitsFor(const WindowOptions& options)
+std::optional<WindowSizeLimits> limitsFor(const WindowOptions& options)
 {
-    return {
+    WindowSizeLimits limits {
         std::max(1, options.minimumWidth),
         std::max(1, options.minimumHeight),
         options.maximumWidth,
         options.maximumHeight,
+    };
+
+    if ((limits.maximumWidth != 0 && limits.maximumWidth < limits.minimumWidth)
+        || (limits.maximumHeight != 0 && limits.maximumHeight < limits.minimumHeight))
+        return std::nullopt;
+
+    return limits;
+}
+
+constexpr WindowBounds defaultWindowBounds() noexcept
+{
+    return { 0, 0, 900, 560 };
+}
+
+WindowBounds centeredAround(const WindowBounds child, const WindowBounds parent) noexcept
+{
+    return {
+        parent.x + (parent.width - child.width) / 2,
+        parent.y + (parent.height - child.height) / 2,
+        child.width,
+        child.height,
     };
 }
 
@@ -138,8 +159,16 @@ std::optional<WindowHandle> WindowManager::createWindowInternal(
     if (options.parent != 0 && ! m_registry.contains(options.parent))
         return std::nullopt;
 
+    if (modal && options.parent != 0 && options.bounds == defaultWindowBounds()) {
+        const auto parentSnapshot = m_registry.snapshot(options.parent);
+        if (parentSnapshot)
+            options.bounds = centeredAround(options.bounds, parentSnapshot->bounds);
+    }
+
     const auto limits = limitsFor(options);
-    options.bounds = clampedBounds(options.bounds, limits);
+    if (! limits)
+        return std::nullopt;
+    options.bounds = clampedBounds(options.bounds, *limits);
     WindowRegistration registration;
     registration.snapshot.title = options.title;
     registration.snapshot.bounds = options.bounds;
@@ -150,7 +179,7 @@ std::optional<WindowHandle> WindowManager::createWindowInternal(
     registration.snapshot.parent = options.parent;
     if (const auto* display = displayForBounds(options.bounds); display != nullptr)
         registration.snapshot.display = display->id;
-    registration.limits = limits;
+    registration.limits = *limits;
     registration.completion = std::move(completion);
 
     const auto handle = m_registry.registerWindow(std::move(registration));
@@ -183,20 +212,24 @@ std::optional<WindowHandle> WindowManager::createWindowInternal(
     if (! m_capabilities.supportsMaximize)
         m_capabilities.supportsMaximize = native::queryCapabilities(window->getPeer()).supportsMaximize;
 
-    const auto parent = options.parent;
     const auto initialState = options.initialState;
     m_windows.emplace(*handle, std::move(window));
+
+    if (options.parent != 0) {
+        if (const auto parentWindow = m_windows.find(options.parent);
+            parentWindow != m_windows.end())
+            parentWindow->second->toFront(true);
+    }
 
     if (modal) {
         auto* modalWindow = m_windows.at(*handle).get();
         auto callback = std::make_unique<ModalCallback>(*this, *handle, m_lifetime);
         modalWindow->enterModalState(true, callback.get(), false);
         callback.release();
-        if (parent != 0) {
-            if (const auto parentWindow = m_windows.find(parent); parentWindow != m_windows.end())
-                parentWindow->second->toFront(true);
-        }
     }
+
+    if (m_windows.at(*handle)->isVisible())
+        m_windows.at(*handle)->toFront(true);
 
     if (initialState != WindowState::normal && ! setWindowState(*handle, initialState)) {
         static_cast<void>(closeWindow(*handle));

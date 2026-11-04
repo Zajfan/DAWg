@@ -23,29 +23,35 @@ Display* openDisplay() noexcept
     return XOpenDisplay(nullptr);
 }
 
-Atom stateAtom(Display* display)
+struct MaximizeAtoms {
+    Atom supported { None };
+    Atom state { None };
+    Atom horizontal { None };
+    Atom vertical { None };
+};
+
+MaximizeAtoms maximizeAtoms(Display* display)
 {
-    return XInternAtom(display, "_NET_WM_STATE", False);
+    return {
+        XInternAtom(display, "_NET_SUPPORTED", True),
+        XInternAtom(display, "_NET_WM_STATE", True),
+        XInternAtom(display, "_NET_WM_STATE_MAXIMIZED_HORZ", True),
+        XInternAtom(display, "_NET_WM_STATE_MAXIMIZED_VERT", True),
+    };
 }
 
-Atom horizontalAtom(Display* display)
+bool propertyContainsAtom(Display* display, const ::Window window,
+                          const Atom property, const Atom wanted) noexcept
 {
-    return XInternAtom(display, "_NET_WM_STATE_MAXIMIZED_HORZ", False);
-}
+    if (property == None || wanted == None)
+        return false;
 
-Atom verticalAtom(Display* display)
-{
-    return XInternAtom(display, "_NET_WM_STATE_MAXIMIZED_VERT", False);
-}
-
-bool hasAtom(Display* display, const ::Window window, const Atom wanted) noexcept
-{
     Atom actualType = None;
     int actualFormat = 0;
     unsigned long itemCount = 0;
     unsigned long bytesAfter = 0;
     unsigned char* data = nullptr;
-    const auto result = XGetWindowProperty(display, window, stateAtom(display), 0, 1024,
+    const auto result = XGetWindowProperty(display, window, property, 0, 1024,
                                            False, XA_ATOM, &actualType, &actualFormat,
                                            &itemCount, &bytesAfter, &data);
     if (result != Success || data == nullptr)
@@ -66,6 +72,18 @@ bool hasAtom(Display* display, const ::Window window, const Atom wanted) noexcep
     return found;
 }
 
+bool ewmhSupportsMaximize(Display* display, const MaximizeAtoms atoms) noexcept
+{
+    if (display == nullptr || atoms.supported == None || atoms.state == None
+        || atoms.horizontal == None || atoms.vertical == None)
+        return false;
+
+    const auto root = DefaultRootWindow(display);
+    return propertyContainsAtom(display, root, atoms.supported, atoms.state)
+           && propertyContainsAtom(display, root, atoms.supported, atoms.horizontal)
+           && propertyContainsAtom(display, root, atoms.supported, atoms.vertical);
+}
+
 } // namespace
 
 WindowCapabilities queryCapabilities(const juce::ComponentPeer* peer) noexcept
@@ -76,7 +94,7 @@ WindowCapabilities queryCapabilities(const juce::ComponentPeer* peer) noexcept
         return capabilities;
 
     if (auto* display = openDisplay()) {
-        capabilities.supportsMaximize = true;
+        capabilities.supportsMaximize = ewmhSupportsMaximize(display, maximizeAtoms(display));
         XCloseDisplay(display);
     }
     return capabilities;
@@ -92,14 +110,20 @@ bool setMaximized(juce::ComponentPeer& peer, const bool shouldBeMaximized) noexc
     if (display == nullptr)
         return false;
 
+    const auto atoms = maximizeAtoms(display);
+    if (! ewmhSupportsMaximize(display, atoms)) {
+        XCloseDisplay(display);
+        return false;
+    }
+
     XEvent event{};
     event.xclient.window = window;
     event.xclient.type = ClientMessage;
     event.xclient.format = 32;
-    event.xclient.message_type = stateAtom(display);
+    event.xclient.message_type = atoms.state;
     event.xclient.data.l[0] = shouldBeMaximized ? 1 : 0;
-    event.xclient.data.l[1] = static_cast<long>(horizontalAtom(display));
-    event.xclient.data.l[2] = static_cast<long>(verticalAtom(display));
+    event.xclient.data.l[1] = static_cast<long>(atoms.horizontal);
+    event.xclient.data.l[2] = static_cast<long>(atoms.vertical);
     event.xclient.data.l[3] = 1;
 
     const auto root = DefaultRootWindow(display);
@@ -120,8 +144,10 @@ bool isMaximized(const juce::ComponentPeer& peer) noexcept
     if (display == nullptr)
         return false;
 
-    const auto maximized = hasAtom(display, window, horizontalAtom(display))
-                           && hasAtom(display, window, verticalAtom(display));
+    const auto atoms = maximizeAtoms(display);
+    const auto maximized = ewmhSupportsMaximize(display, atoms)
+                           && propertyContainsAtom(display, window, atoms.state, atoms.horizontal)
+                           && propertyContainsAtom(display, window, atoms.state, atoms.vertical);
     XCloseDisplay(display);
     return maximized;
 }
