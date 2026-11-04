@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <limits>
-#include <iostream>
 #include <utility>
 
 namespace dawg::app::window {
@@ -58,7 +57,6 @@ public:
 
     void modalStateFinished(const int result) override
     {
-        std::cerr << "modal callback " << m_handle << " expired=" << m_lifetime.expired() << '\\n';
         if (! m_lifetime.expired())
             m_manager->finishModal(m_handle, result);
     }
@@ -260,7 +258,6 @@ bool WindowManager::closeWindow(const WindowHandle handle)
 
 void WindowManager::finishModal(const WindowHandle handle, const int result)
 {
-    std::cerr << "finish modal " << handle << " registry=" << m_registry.contains(handle) << '\\n';
     if (! isMessageThread())
         return;
     if (m_registry.contains(handle))
