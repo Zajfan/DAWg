@@ -13,27 +13,29 @@ Status: DONE_WITH_CONCERNS
 
 No audio-engine source was modified.
 
-## Commit
+## Commits
 
-- `40a605f` — `feat(window): add JUCE window manager and native state support`
+- Base implementation: `9d7e79e` — `feat(window): add JUCE window manager and native state support`
+- Follow-up implementation: `933dac1` — `fix(window): close JUCE manager review gaps`
 
 ## Verification
 
-The bounded focused command was:
+The bounded focused build and test commands were:
 
 ```bash
-timeout 120s bash -c 'cmake --build build-window-tests --target dawg_window_manager_integration_tests --parallel 2 && ctest --test-dir build-window-tests -R "dawg.window_(registry|manager_integration)" --output-on-failure'
+timeout 180s cmake --build /tmp/dawg-window-build --target dawg_window_registry_tests dawg_window_manager_integration_tests --parallel 2
+timeout 90s xvfb-run -a /tmp/dawg-window-build/dawg_window_manager_integration_tests
+timeout 60s /tmp/dawg-window-build/dawg_window_registry_tests
 ```
 
-Result: passed, exit code `0`.
+Result: all commands passed, exit code `0`.
 
 ```text
 [100%] Built target dawg_window_manager_integration_tests
-2/2 Test #2: dawg.window_manager_integration ... Passed
-100% tests passed, 0 tests failed out of 2
+JUCE v9.0.4
 ```
 
-The integration test ran successfully on the available desktop; the return-code-`77` headless skip path remains registered in CTest.
+The integration test ran successfully under Xvfb; the return-code-`77` headless skip path remains registered in CTest. The registry test also passed.
 
 `git diff --check` passed before commit. Generated `build-window-tests/` artifacts and the temporary `../VersaTone` symlink were removed before committing.
 
