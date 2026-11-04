@@ -168,7 +168,10 @@ void modalCompletionIsReturnedOnlyOnce()
         return;
 
     const auto closedWindows = registry.removeTree(*handle);
+    expect(callbackCount == 0, "modal completion is not delivered by removeTree");
     expect(closedWindows.size() == 1, "modal removal returns one closed window");
+    expect(!closedWindows.empty() && static_cast<bool>(closedWindows.front().completion),
+           "modal removal returns a completion callback");
     for (const auto& closedWindow : closedWindows) {
         if (closedWindow.completion)
             closedWindow.completion(7);
@@ -180,7 +183,6 @@ void modalCompletionIsReturnedOnlyOnce()
 
 void displayConversionUsesScaleAndOrigins()
 {
-    WindowRegistry registry;
     const auto display = makeDisplay();
     const WindowBounds logicalBounds{ 110, 70, 300, 200 };
     const auto physicalBounds = WindowRegistry::logicalToPhysical(display, logicalBounds);
