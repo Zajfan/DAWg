@@ -71,6 +71,17 @@ std::unique_ptr<juce::Component> makeContent()
     return std::make_unique<juce::Component>();
 }
 
+ManagedWindow* findManagedWindow(const char* name)
+{
+    for (int index = 0; index < juce::TopLevelWindow::getNumTopLevelWindows(); ++index) {
+        auto* topLevelWindow = juce::TopLevelWindow::getTopLevelWindow(index);
+        auto* candidate = dynamic_cast<ManagedWindow*>(topLevelWindow);
+        if (candidate != nullptr && candidate->getName() == juce::String(name))
+            return candidate;
+    }
+    return nullptr;
+}
+
 void testCreateResizeAndClose()
 {
     WindowManager manager;
@@ -104,6 +115,8 @@ void testCreateResizeAndClose()
         expect(initialSnapshot->bounds == WindowBounds { 80, 80, 640, 480 },
                "snapshot reports initial bounds");
         expect(initialSnapshot->visible, "created window is visible");
+        expect(initialSnapshot->display.has_value(),
+               "created window reports its initial display");
     }
 
     expect(manager.resizeWindow(*handle, { 120, 100, 800, 600 }),
@@ -152,15 +165,7 @@ void testCreateResizeAndClose()
                && snapshotsEqual(*afterUnknownDisplay, *beforeUnknownDisplay),
            "unknown-display calls leave the valid snapshot unchanged");
 
-    ManagedWindow* managerWindow = nullptr;
-    for (int index = 0; index < juce::TopLevelWindow::getNumTopLevelWindows(); ++index) {
-        auto* topLevelWindow = juce::TopLevelWindow::getTopLevelWindow(index);
-        auto* candidate = dynamic_cast<ManagedWindow*>(topLevelWindow);
-        if (candidate != nullptr && candidate->getName() == juce::String("Test Window")) {
-            managerWindow = candidate;
-            break;
-        }
-    }
+    auto* managerWindow = findManagedWindow("Test Window");
     expect(managerWindow != nullptr,
            "manager-created window is discoverable as a ManagedWindow");
     if (managerWindow)
@@ -195,7 +200,7 @@ void testCreateResizeAndClose()
                                 callbackOptions, makeContent(), [&callbackOptions, managerHandle] {
                                     if (callbackOptions.closeRequested)
                                         callbackOptions.closeRequested(managerHandle);
-                                });
+                                }, false);
     managedWindow.userTriedToCloseWindow();
 
     expect(directCloseRequested, "direct ManagedWindow forwards a close request");
@@ -262,6 +267,26 @@ void testWindowStatesAndCapabilities()
                "failed maximize leaves state unchanged");
     }
 
+    WindowOptions initialMaximizeOptions;
+    initialMaximizeOptions.title = "Initial Maximized Window";
+    initialMaximizeOptions.bounds = { 140, 140, 400, 300 };
+    initialMaximizeOptions.initialState = WindowState::maximized;
+    const auto initiallyMaximized =
+        manager.createWindow(makeContent(), initialMaximizeOptions);
+    if (capabilities.supportsMaximize) {
+        expect(initiallyMaximized.has_value(),
+               "supported initial maximize creates a window");
+        if (initiallyMaximized) {
+            const auto initialSnapshot = manager.getWindow(*initiallyMaximized);
+            expect(initialSnapshot.has_value()
+                       && initialSnapshot->state == WindowState::maximized,
+                   "initial maximize is reported");
+        }
+    } else {
+        expect(!initiallyMaximized,
+               "unsupported initial maximize is rejected after peer capability check");
+    }
+
     WindowOptions framelessOptions;
     framelessOptions.title = "Frameless Window";
     framelessOptions.bounds = { 140, 140, 400, 300 };
@@ -304,6 +329,8 @@ void testWindowStatesAndCapabilities()
         static_cast<void>(manager.closeWindow(*frameless));
     if (transparent)
         static_cast<void>(manager.closeWindow(*transparent));
+    if (initiallyMaximized)
+        static_cast<void>(manager.closeWindow(*initiallyMaximized));
     static_cast<void>(manager.closeWindow(*handle));
 }
 
@@ -346,16 +373,72 @@ void testChildCascadeAndModalCompletion()
         const auto dialogSnapshot = manager.getWindow(*dialog);
         expect(dialogSnapshot.has_value() && dialogSnapshot->modal,
                "dialog snapshot reports modal state");
-        expect(manager.closeWindow(*dialog), "modal dialog closes through the manager");
+        expect(manager.closeWindow(*parent), "closing a parent window succeeds");
         dispatchMessagesFor(std::chrono::milliseconds(100));
-        expect(completionCount == 1, "modal completion runs exactly once");
-        expect(completionResult == 0, "explicit modal close completes with result zero");
+        expect(completionCount == 1, "parent-close modal completion runs exactly once");
+        expect(completionResult == 0, "parent-close modal completes with result zero");
+        expect(!manager.getWindow(*dialog).has_value(),
+               "closing a parent closes its modal descendant");
     }
 
-    expect(manager.closeWindow(*parent), "closing a parent window succeeds");
     expect(!manager.getWindow(*parent).has_value(), "closed parent is no longer queryable");
     if (child)
         expect(!manager.getWindow(*child).has_value(), "closing a parent closes its child");
+
+    WindowOptions escapeParentOptions;
+    escapeParentOptions.title = "Escape Parent";
+    escapeParentOptions.bounds = { 180, 180, 640, 480 };
+    const auto escapeParent = manager.createWindow(makeContent(), escapeParentOptions);
+    expect(escapeParent.has_value(), "escape test parent is created");
+    if (!escapeParent)
+        return;
+
+    int escapeCompletionCount = 0;
+    DialogOptions escapeOptions;
+    escapeOptions.window.title = "Escape Dialog";
+    escapeOptions.window.parent = *escapeParent;
+    escapeOptions.closeOnEscape = true;
+    escapeOptions.completion = [&](int) { ++escapeCompletionCount; };
+    const auto escapeDialog = manager.showModalDialog(makeContent(), escapeOptions);
+    expect(escapeDialog.has_value(), "escape-enabled dialog is created");
+    if (escapeDialog) {
+        auto* escapeWindow = findManagedWindow("Escape Dialog");
+        expect(escapeWindow != nullptr, "escape-enabled dialog is discoverable");
+        if (escapeWindow)
+            expect(escapeWindow->keyPressed(juce::KeyPress(juce::KeyPress::escapeKey)),
+                   "escape closes an escape-enabled dialog");
+        if (escapeWindow)
+            expect(!escapeWindow->isCurrentlyModal(false),
+                   "escape exits the dialog modal state");
+        dispatchMessagesFor(std::chrono::milliseconds(100));
+        expect(escapeCompletionCount == 1,
+               "escape-enabled dialog completion runs exactly once");
+        expect(!manager.getWindow(*escapeDialog).has_value(),
+               "escape closes the dialog handle");
+    }
+
+    int noEscapeCompletionCount = 0;
+    DialogOptions noEscapeOptions;
+    noEscapeOptions.window.title = "No Escape Dialog";
+    noEscapeOptions.window.parent = *escapeParent;
+    noEscapeOptions.closeOnEscape = false;
+    noEscapeOptions.completion = [&](int) { ++noEscapeCompletionCount; };
+    const auto noEscapeDialog = manager.showModalDialog(makeContent(), noEscapeOptions);
+    expect(noEscapeDialog.has_value(), "escape-disabled dialog is created");
+    if (noEscapeDialog) {
+        auto* noEscapeWindow = findManagedWindow("No Escape Dialog");
+        expect(noEscapeWindow != nullptr, "escape-disabled dialog is discoverable");
+        if (noEscapeWindow)
+            expect(!noEscapeWindow->keyPressed(juce::KeyPress(juce::KeyPress::escapeKey)),
+                   "escape does not close an escape-disabled dialog");
+        expect(manager.getWindow(*noEscapeDialog).has_value(),
+               "escape-disabled dialog remains open");
+        expect(manager.closeWindow(*noEscapeDialog), "escape-disabled dialog closes explicitly");
+        dispatchMessagesFor(std::chrono::milliseconds(100));
+        expect(noEscapeCompletionCount == 1,
+               "escape-disabled dialog completion runs exactly once");
+    }
+    expect(manager.closeWindow(*escapeParent), "escape test parent closes");
 }
 
 void testDisplaySnapshotAndConversion()

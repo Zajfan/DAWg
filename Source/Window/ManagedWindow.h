@@ -14,13 +14,15 @@ public:
     using CloseRequested = std::function<void()>;
 
     ManagedWindow(const juce::String&, juce::Colour, WindowOptions,
-                  std::unique_ptr<juce::Component>, CloseRequested);
+                  std::unique_ptr<juce::Component>, CloseRequested, bool closeOnEscape);
     ~ManagedWindow() override;
 
     void userTriedToCloseWindow() override;
+    bool keyPressed(const juce::KeyPress&) override;
 
 private:
     CloseRequested m_closeRequested;
+    bool m_closeOnEscape { false };
 };
 
 } // namespace dawg::app::window

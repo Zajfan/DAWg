@@ -23,9 +23,11 @@ ManagedWindow::ManagedWindow(const juce::String& name,
                              const juce::Colour backgroundColour,
                              WindowOptions options,
                              std::unique_ptr<juce::Component> content,
-                             CloseRequested closeRequested)
+                             CloseRequested closeRequested,
+                             const bool closeOnEscape)
     : juce::ResizableWindow(name, backgroundColour, true),
-      m_closeRequested(std::move(closeRequested))
+      m_closeRequested(std::move(closeRequested)),
+      m_closeOnEscape(closeOnEscape)
 {
     setUsingNativeTitleBar(options.useNativeTitleBar);
     setResizable(options.resizable, false);
@@ -48,6 +50,17 @@ void ManagedWindow::userTriedToCloseWindow()
         auto callback = std::move(m_closeRequested);
         callback();
     }
+}
+
+bool ManagedWindow::keyPressed(const juce::KeyPress& key)
+{
+    if (m_closeOnEscape && key == juce::KeyPress::escapeKey && m_closeRequested) {
+        auto callback = std::move(m_closeRequested);
+        callback();
+        return true;
+    }
+
+    return juce::ResizableWindow::keyPressed(key);
 }
 
 } // namespace dawg::app::window

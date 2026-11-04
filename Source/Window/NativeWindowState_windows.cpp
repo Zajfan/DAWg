@@ -19,7 +19,11 @@ bool setMaximized(juce::ComponentPeer& peer, const bool shouldBeMaximized) noexc
     if (window == nullptr)
         return false;
 
-    return ShowWindow(window, shouldBeMaximized ? SW_MAXIMIZE : SW_RESTORE) != 0;
+    if (IsWindow(window) == FALSE)
+        return false;
+
+    ShowWindow(window, shouldBeMaximized ? SW_MAXIMIZE : SW_RESTORE);
+    return IsZoomed(window) == (shouldBeMaximized ? TRUE : FALSE);
 }
 
 bool isMaximized(const juce::ComponentPeer& peer) noexcept

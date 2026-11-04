@@ -47,17 +47,19 @@ private:
 
     [[nodiscard]] bool isMessageThread() const noexcept;
     [[nodiscard]] std::optional<WindowHandle> createWindowInternal(
-        std::unique_ptr<juce::Component>, WindowOptions, bool,
+        std::unique_ptr<juce::Component>, WindowOptions, bool, bool,
         std::function<void(int)>);
     [[nodiscard]] const DisplayInfo* findDisplay(DisplayId) const noexcept;
+    [[nodiscard]] const DisplayInfo* displayForBounds(WindowBounds) const noexcept;
     void finishModal(WindowHandle, int);
-    void destroyTree(WindowHandle, int);
+    void destroyTree(WindowHandle, int, bool exitModalDescendants = true);
 
     WindowRegistry m_registry;
     std::unordered_map<WindowHandle, std::unique_ptr<ManagedWindow>> m_windows;
     WindowCapabilities m_capabilities;
     std::vector<DisplayInfo> m_displays;
     std::unordered_set<WindowHandle> m_closingModals;
+    std::shared_ptr<int> m_lifetime { std::make_shared<int>(0) };
 };
 
 } // namespace dawg::app::window

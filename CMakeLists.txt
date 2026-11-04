@@ -53,14 +53,15 @@ target_sources(DAWg
 )
 
 if(WIN32)
-    target_sources(DAWg PRIVATE Source/Window/NativeWindowState_windows.cpp)
+    set(DAWG_NATIVE_WINDOW_SOURCE Source/Window/NativeWindowState_windows.cpp)
 elseif(APPLE)
-    target_sources(DAWg PRIVATE Source/Window/NativeWindowState_mac.mm)
+    set(DAWG_NATIVE_WINDOW_SOURCE Source/Window/NativeWindowState_mac.mm)
 elseif(UNIX)
-    target_sources(DAWg PRIVATE Source/Window/NativeWindowState_linux.cpp)
+    set(DAWG_NATIVE_WINDOW_SOURCE Source/Window/NativeWindowState_linux.cpp)
 else()
-    target_sources(DAWg PRIVATE Source/Window/NativeWindowState_fallback.cpp)
+    set(DAWG_NATIVE_WINDOW_SOURCE Source/Window/NativeWindowState_fallback.cpp)
 endif()
+target_sources(DAWg PRIVATE ${DAWG_NATIVE_WINDOW_SOURCE})
 
 target_compile_features(DAWg PRIVATE cxx_std_26)
 
@@ -89,6 +90,7 @@ set(DAWG_OWN_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Window/WindowRegistry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Window/ManagedWindow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Window/WindowManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/${DAWG_NATIVE_WINDOW_SOURCE}
 )
 set_source_files_properties(${DAWG_OWN_SOURCES}
     PROPERTIES COMPILE_OPTIONS
@@ -163,15 +165,7 @@ if(DAWG_BUILD_TESTS)
     if(UNIX AND NOT APPLE)
         target_link_libraries(dawg_window_manager_integration_tests PRIVATE X11::X11)
     endif()
-    if(WIN32)
-        target_sources(dawg_window_manager_integration_tests PRIVATE Source/Window/NativeWindowState_windows.cpp)
-    elseif(APPLE)
-        target_sources(dawg_window_manager_integration_tests PRIVATE Source/Window/NativeWindowState_mac.mm)
-    elseif(UNIX)
-        target_sources(dawg_window_manager_integration_tests PRIVATE Source/Window/NativeWindowState_linux.cpp)
-    else()
-        target_sources(dawg_window_manager_integration_tests PRIVATE Source/Window/NativeWindowState_fallback.cpp)
-    endif()
+    target_sources(dawg_window_manager_integration_tests PRIVATE ${DAWG_NATIVE_WINDOW_SOURCE})
     add_test(NAME dawg.window_manager_integration
         COMMAND dawg_window_manager_integration_tests)
     set_tests_properties(dawg.window_manager_integration PROPERTIES
