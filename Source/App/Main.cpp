@@ -1,5 +1,10 @@
 #include "MainComponent.h"
 
+#include "../Window/WindowManager.h"
+
+#include <memory>
+#include <utility>
+
 namespace dawg::app
 {
 class DawApplication final : public juce::JUCEApplication
@@ -11,37 +16,35 @@ public:
 
     void initialise(const juce::String&) override
     {
-        mainWindow = std::make_unique<MainWindow>(getApplicationName());
+        dawg::app::window::WindowOptions options;
+        options.title = getApplicationName().toStdString();
+        options.bounds = { 0, 0, 900, 560 };
+        options.minimumWidth = 640;
+        options.minimumHeight = 360;
+        options.useNativeTitleBar = true;
+        options.resizable = true;
+        options.closeRequested = [this](const dawg::app::window::WindowHandle) {
+            systemRequestedQuit();
+        };
+
+        const auto handle =
+            m_windowManager.createWindow(std::make_unique<MainComponent>(), std::move(options));
+        jassert(handle.has_value());
+        if (handle)
+            m_mainWindow = *handle;
     }
 
     void shutdown() override
     {
-        mainWindow.reset();
+        if (m_mainWindow != 0) {
+            static_cast<void>(m_windowManager.closeWindow(m_mainWindow));
+            m_mainWindow = {};
+        }
     }
 
 private:
-    class MainWindow final : public juce::DocumentWindow
-    {
-    public:
-        explicit MainWindow(const juce::String& name)
-            : juce::DocumentWindow(name,
-                                   juce::Colour::fromRGB(25, 28, 34),
-                                   juce::DocumentWindow::allButtons)
-        {
-            setUsingNativeTitleBar(true);
-            setContentOwned(new MainComponent(), true);
-            centreWithSize(getWidth(), getHeight());
-            setResizable(true, true);
-            setVisible(true);
-        }
-
-        void closeButtonPressed() override
-        {
-            juce::JUCEApplication::getInstance()->systemRequestedQuit();
-        }
-    };
-
-    std::unique_ptr<MainWindow> mainWindow;
+    dawg::app::window::WindowManager m_windowManager;
+    dawg::app::window::WindowHandle m_mainWindow {};
 };
 } // namespace dawg::app
 
