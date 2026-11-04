@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <string_view>
 
@@ -37,6 +38,15 @@ bool boundsAreWithinOneLogicalPixel(const WindowBounds& actual,
            && withinOneLogicalPixel(actual.height, expected.height);
 }
 
+bool snapshotsEqual(const WindowSnapshot& actual, const WindowSnapshot& expected)
+{
+    return actual.handle == expected.handle && actual.parent == expected.parent
+           && actual.title == expected.title && actual.bounds == expected.bounds
+           && actual.state == expected.state && actual.visible == expected.visible
+           && actual.modal == expected.modal && actual.opacity == expected.opacity
+           && actual.display == expected.display;
+}
+
 std::unique_ptr<juce::Component> makeContent()
 {
     return std::make_unique<juce::Component>();
@@ -65,6 +75,7 @@ void testCreateResizeAndClose()
     expect(handle.has_value(), "creating a real window returns a handle");
     if (!handle)
         return;
+    const auto managerHandle = *handle;
 
     const auto initialSnapshot = manager.getWindow(*handle);
     expect(initialSnapshot.has_value(), "created window has a snapshot");
@@ -84,28 +95,95 @@ void testCreateResizeAndClose()
         expect(resizedSnapshot->bounds == WindowBounds { 120, 100, 800, 600 },
                "snapshot reports resized bounds");
 
-    expect(manager.closeWindow(*handle), "closing a real window succeeds");
-    expect(!manager.getWindow(*handle).has_value(), "closed handle is no longer queryable");
-    expect(!closeRequested, "explicit close does not invoke close-request callback");
+    const auto beforeInvalidHandle = manager.getWindow(managerHandle);
+    expect(beforeInvalidHandle.has_value(), "valid snapshot exists before invalid-handle calls");
+    constexpr WindowHandle invalidHandle = 0;
+    expect(!manager.getWindow(invalidHandle).has_value(),
+           "invalid handle lookup returns no snapshot");
+    expect(!manager.closeWindow(invalidHandle), "invalid handle close fails");
+    expect(!manager.resizeWindow(invalidHandle, { 20, 20, 200, 160 }),
+           "invalid handle resize fails");
+    expect(!manager.setWindowState(invalidHandle, WindowState::minimized),
+           "invalid handle state update fails");
+    expect(!manager.setWindowOpacity(invalidHandle, 0.5f),
+           "invalid handle opacity update fails");
+    expect(!manager.moveToDisplay(invalidHandle, 1),
+           "invalid handle display move fails");
+    const auto afterInvalidHandle = manager.getWindow(managerHandle);
+    expect(afterInvalidHandle.has_value() && beforeInvalidHandle.has_value()
+               && snapshotsEqual(*afterInvalidHandle, *beforeInvalidHandle),
+           "invalid-handle calls leave the valid snapshot unchanged");
+
+    const auto beforeUnknownDisplay = manager.getWindow(managerHandle);
+    expect(beforeUnknownDisplay.has_value(),
+           "valid snapshot exists before unknown-display calls");
+    constexpr DisplayId unknownDisplay = std::numeric_limits<DisplayId>::max();
+    const auto displays = manager.getDisplays();
+    expect(std::none_of(displays.begin(), displays.end(), [unknownDisplay](const auto& display) {
+        return display.id == unknownDisplay;
+    }), "chosen display id is unknown");
+    expect(!manager.moveToDisplay(managerHandle, unknownDisplay),
+           "unknown display move fails");
+    expect(!manager.logicalToPhysical(unknownDisplay, { 0, 0, 100, 100 }).has_value(),
+           "unknown display logical conversion fails");
+    expect(!manager.physicalToLogical(unknownDisplay, { 0, 0, 100, 100 }).has_value(),
+           "unknown display physical conversion fails");
+    const auto afterUnknownDisplay = manager.getWindow(managerHandle);
+    expect(afterUnknownDisplay.has_value() && beforeUnknownDisplay.has_value()
+               && snapshotsEqual(*afterUnknownDisplay, *beforeUnknownDisplay),
+           "unknown-display calls leave the valid snapshot unchanged");
+
+    ManagedWindow* managerWindow = nullptr;
+    for (int index = 0; index < juce::TopLevelWindow::getNumTopLevelWindows(); ++index) {
+        auto* topLevelWindow = juce::TopLevelWindow::getTopLevelWindow(index);
+        auto* candidate = dynamic_cast<ManagedWindow*>(topLevelWindow);
+        if (candidate != nullptr && candidate->getName() == juce::String("Test Window")) {
+            managerWindow = candidate;
+            break;
+        }
+    }
+    expect(managerWindow != nullptr,
+           "manager-created window is discoverable as a ManagedWindow");
+    if (managerWindow)
+        managerWindow->userTriedToCloseWindow();
+
+    expect(closeRequested, "manager-created window forwards a close request");
+    expect(requestedHandle == managerHandle,
+           "manager-created close request receives its concrete handle");
+    expect(closeRequestCount == 1,
+           "manager-created close-request callback runs exactly once");
+    expect(manager.getWindow(managerHandle).has_value(),
+           "close-request callback leaves the manager-created window open");
+
+    expect(manager.closeWindow(managerHandle), "closing a real window succeeds");
+    expect(!manager.getWindow(managerHandle).has_value(),
+           "closed handle is no longer queryable");
+    expect(closeRequestCount == 1,
+           "explicit close does not invoke the close-request callback again");
 
     WindowOptions callbackOptions;
     callbackOptions.title = "Callback Window";
     callbackOptions.bounds = { 100, 100, 320, 240 };
+    bool directCloseRequested = false;
+    WindowHandle directRequestedHandle = 0;
+    int directCloseRequestCount = 0;
     callbackOptions.closeRequested = [&](WindowHandle callbackHandle) {
-        closeRequested = true;
-        requestedHandle = callbackHandle;
-        ++closeRequestCount;
+        directCloseRequested = true;
+        directRequestedHandle = callbackHandle;
+        ++directCloseRequestCount;
     };
     ManagedWindow managedWindow("Callback Window", juce::Colours::darkgrey,
-                                callbackOptions, makeContent(), [&callbackOptions, handle] {
+                                callbackOptions, makeContent(), [&callbackOptions, managerHandle] {
                                     if (callbackOptions.closeRequested)
-                                        callbackOptions.closeRequested(handle);
+                                        callbackOptions.closeRequested(managerHandle);
                                 });
     managedWindow.userTriedToCloseWindow();
 
-    expect(closeRequested, "managed window forwards a close request");
-    expect(requestedHandle == *handle, "close-request callback receives the window handle");
-    expect(closeRequestCount == 1, "close-request callback runs exactly once");
+    expect(directCloseRequested, "direct ManagedWindow forwards a close request");
+    expect(directRequestedHandle == managerHandle,
+           "direct close-request callback receives a concrete window handle");
+    expect(directCloseRequestCount == 1,
+           "direct ManagedWindow close-request callback runs exactly once");
 }
 
 void testWindowStatesAndCapabilities()
