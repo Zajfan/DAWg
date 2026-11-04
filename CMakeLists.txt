@@ -93,3 +93,23 @@ target_compile_definitions(DAWg
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
 )
+
+option(DAWG_BUILD_TESTS "Build DAWg tests" OFF)
+
+if(DAWG_BUILD_TESTS)
+    include(CTest)
+    enable_testing()
+
+    add_executable(dawg_window_registry_tests
+        Tests/WindowRegistryTests.cpp
+        Source/Window/WindowRegistry.cpp
+    )
+    target_include_directories(dawg_window_registry_tests PRIVATE Source/Window)
+    target_compile_features(dawg_window_registry_tests PRIVATE cxx_std_26)
+    target_compile_options(dawg_window_registry_tests PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4;/WX>
+    )
+    add_test(NAME dawg.window_registry COMMAND dawg_window_registry_tests)
+    set_tests_properties(dawg.window_registry PROPERTIES LABELS "window-manager")
+endif()
