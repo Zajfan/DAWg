@@ -152,6 +152,7 @@ if(DAWG_BUILD_TESTS)
     target_compile_definitions(dawg_window_manager_integration_tests PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
+        JUCE_MODAL_LOOPS_PERMITTED=1
     )
     target_compile_options(dawg_window_manager_integration_tests PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>

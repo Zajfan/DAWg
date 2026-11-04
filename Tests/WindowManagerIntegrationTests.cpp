@@ -11,7 +11,6 @@
 #include <limits>
 #include <memory>
 #include <string_view>
-#include <thread>
 
 namespace dawg::app::window {
 namespace {
@@ -58,12 +57,7 @@ bool opacityEquals(const float actual, const float expected)
 void dispatchMessagesFor(std::chrono::milliseconds duration)
 {
     auto* messageManager = juce::MessageManager::getInstance();
-    std::thread stopper([messageManager, duration] {
-        std::this_thread::sleep_for(duration);
-        messageManager->stopDispatchLoop();
-    });
-    messageManager->runDispatchLoop();
-    stopper.join();
+    static_cast<void>(messageManager->runDispatchLoopUntil(static_cast<int>(duration.count())));
 }
 
 std::unique_ptr<juce::Component> makeContent()
@@ -461,8 +455,6 @@ void testChildCascadeAndModalCompletion()
                "escape-disabled dialog remains open");
         expect(manager.closeWindow(*noEscapeDialog), "escape-disabled dialog closes explicitly");
 
-        // JUCE's dispatch loop is stopped by the bounded helper and cannot be restarted;
-        // flush all pending modal callbacks in one pass after exercising every close path.
         dispatchMessagesFor(std::chrono::milliseconds(100));
         expect(completionCount == 1, "parent-close modal completion runs exactly once");
         expect(completionResult == 0, "parent-close modal completes with result zero");
