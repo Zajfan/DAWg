@@ -114,6 +114,7 @@ struct WindowOptions {
     bool visible { true };
     WindowState initialState { WindowState::normal };
     WindowHandle parent {};
+    std::function<void(WindowHandle)> closeRequested;
 };
 ```
 
@@ -176,7 +177,7 @@ state, visibility, opacity, and monitor identity. `DisplayInfo` reports a
 stable-in-snapshot display id, primary status, logical user bounds, logical
 total bounds, physical bounds, scale factor, and DPI.
 
-`WindowCapabilities` contains four boolean capabilities:
+`WindowCapabilities` contains five boolean capabilities:
 
 ```cpp
 struct WindowCapabilities {
@@ -184,13 +185,20 @@ struct WindowCapabilities {
     bool supportsFramelessWindows { true };
     bool supportsFullscreen { true };
     bool supportsPerWindowOpacity { false };
+    bool supportsMaximize { false };
 };
 ```
 
 `WindowCapabilities` reports whether the current platform backend supports
-transparent windows, frameless windows, fullscreen, and per-window opacity.
-The conversion helpers return `std::nullopt` for an unknown display id and
-delegate to JUCE's display-aware conversion functions.
+transparent windows, frameless windows, fullscreen, per-window opacity, and
+programmatic maximize. The conversion helpers return `std::nullopt` for an
+unknown display id and delegate to JUCE's display-aware conversion functions.
+
+If `closeRequested` is empty, the manager closes the window after a native
+close request. If it is set, the manager invokes the callback with the window
+handle and leaves the final decision to the application. This is how the main
+DAW window routes a close button to `systemRequestedQuit()` while ordinary
+child windows retain automatic close behavior.
 
 Operations on an invalid handle return `false` or `std::nullopt` and do not
 throw. Creating a window with a null content component fails. Unsupported
@@ -213,6 +221,17 @@ content component and forwards `userTriedToCloseWindow()` to the manager.
   from `WindowOptions`.
 - Minimized, fullscreen, and restoration behavior delegates to JUCE's
   `ResizableWindow` state methods.
+
+JUCE's public `ResizableWindow` API does not provide one portable
+programmatic-maximize method. `NativeWindowState` therefore uses the JUCE
+peer's native handle for the platform-specific maximize/query operation:
+
+- Windows uses `ShowWindow`/`IsZoomed` on the `HWND`.
+- macOS uses `-[NSWindow zoom:]`/`-[NSWindow isZoomed]` on the `NSWindow`.
+- Linux/X11 sends the EWMH maximize-state client message and reports the
+  capability only when an X11 peer is available.
+- Unsupported backends report `supportsMaximize = false` and return failure
+  for programmatic maximize rather than pretending fullscreen is maximize.
 
 The manager keeps `std::unique_ptr<ManagedWindow>` instances in a registry
 keyed by `WindowHandle`. Destruction always removes the registry entry before
@@ -325,6 +344,11 @@ feature-specific test label.
 - Create: `Source/Window/WindowManager.cpp`
 - Create: `Source/Window/ManagedWindow.h`
 - Create: `Source/Window/ManagedWindow.cpp`
+- Create: `Source/Window/NativeWindowState.h`
+- Create: `Source/Window/NativeWindowState_windows.cpp`
+- Create: `Source/Window/NativeWindowState_mac.mm`
+- Create: `Source/Window/NativeWindowState_linux.cpp`
+- Create: `Source/Window/NativeWindowState_fallback.cpp`
 - Modify: `Source/App/Main.cpp`
 - Modify: `CMakeLists.txt`
 
