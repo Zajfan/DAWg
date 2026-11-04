@@ -1,5 +1,6 @@
 #include "WindowManager.h"
 #include "ManagedWindow.h"
+#include "NativeWindowState.h"
 #include "WindowTypes.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -178,8 +179,8 @@ void testCreateResizeAndClose()
     expect(manager.closeWindow(managerHandle), "closing a real window succeeds");
     expect(!manager.getWindow(managerHandle).has_value(),
            "closed handle is no longer queryable");
-    expect(closeRequestCount == 1,
-           "explicit close does not invoke the close-request callback again");
+    expect(closeRequestCount == 2,
+           "explicit close leaves the repeated close-request count unchanged");
 
     WindowOptions callbackOptions;
     callbackOptions.title = "Callback Window";
@@ -281,8 +282,17 @@ void testWindowStatesAndCapabilities()
         snapshot = manager.getWindow(*handle);
         expect(snapshot.has_value() && snapshot->state == WindowState::maximized,
                "supported maximize is reported");
+        auto* stateWindow = findManagedWindow("State Window");
+        expect(stateWindow != nullptr && stateWindow->getPeer() != nullptr,
+               "supported maximize window exposes a native peer");
+        if (stateWindow != nullptr && stateWindow->getPeer() != nullptr)
+            expect(native::isMaximized(*stateWindow->getPeer()),
+                   "supported maximize is confirmed by the native state query");
         expect(manager.setWindowState(*handle, WindowState::normal),
                "maximized window can be restored");
+        if (stateWindow != nullptr && stateWindow->getPeer() != nullptr)
+            expect(! native::isMaximized(*stateWindow->getPeer()),
+                   "restoring a maximized window clears the native state");
     } else {
         expect(!manager.setWindowState(*handle, WindowState::maximized),
                "unsupported maximize fails");

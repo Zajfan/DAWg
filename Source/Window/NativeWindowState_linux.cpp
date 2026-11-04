@@ -5,7 +5,9 @@
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
 
+#include <chrono>
 #include <cstdint>
+#include <thread>
 
 namespace dawg::app::window::native {
 namespace {
@@ -84,6 +86,29 @@ bool ewmhSupportsMaximize(Display* display, const MaximizeAtoms atoms) noexcept
            && propertyContainsAtom(display, root, atoms.supported, atoms.vertical);
 }
 
+bool hasMaximizedState(Display* display, const ::Window window,
+                       const MaximizeAtoms atoms) noexcept
+{
+    return propertyContainsAtom(display, window, atoms.state, atoms.horizontal)
+           && propertyContainsAtom(display, window, atoms.state, atoms.vertical);
+}
+
+bool waitForMaximizedState(Display* display, const ::Window window,
+                           const MaximizeAtoms atoms, const bool shouldBeMaximized) noexcept
+{
+    constexpr auto attempts = 25;
+    for (int attempt = 0; attempt < attempts; ++attempt) {
+        XSync(display, False);
+        if (hasMaximizedState(display, window, atoms) == shouldBeMaximized)
+            return true;
+
+        if (attempt + 1 < attempts)
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+
+    return false;
+}
+
 } // namespace
 
 WindowCapabilities queryCapabilities(const juce::ComponentPeer* peer) noexcept
@@ -129,9 +154,10 @@ bool setMaximized(juce::ComponentPeer& peer, const bool shouldBeMaximized) noexc
     const auto root = DefaultRootWindow(display);
     const auto sent = XSendEvent(display, root, False,
                                  SubstructureRedirectMask | SubstructureNotifyMask, &event);
-    XFlush(display);
+    const auto applied = sent != 0
+                         && waitForMaximizedState(display, window, atoms, shouldBeMaximized);
     XCloseDisplay(display);
-    return sent != 0;
+    return applied;
 }
 
 bool isMaximized(const juce::ComponentPeer& peer) noexcept
@@ -146,8 +172,7 @@ bool isMaximized(const juce::ComponentPeer& peer) noexcept
 
     const auto atoms = maximizeAtoms(display);
     const auto maximized = ewmhSupportsMaximize(display, atoms)
-                           && propertyContainsAtom(display, window, atoms.state, atoms.horizontal)
-                           && propertyContainsAtom(display, window, atoms.state, atoms.vertical);
+                           && hasMaximizedState(display, window, atoms);
     XCloseDisplay(display);
     return maximized;
 }
