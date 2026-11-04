@@ -5,11 +5,13 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <limits>
 #include <memory>
 #include <string_view>
+#include <thread>
 
 namespace dawg::app::window {
 namespace {
@@ -43,8 +45,25 @@ bool snapshotsEqual(const WindowSnapshot& actual, const WindowSnapshot& expected
     return actual.handle == expected.handle && actual.parent == expected.parent
            && actual.title == expected.title && actual.bounds == expected.bounds
            && actual.state == expected.state && actual.visible == expected.visible
-           && actual.modal == expected.modal && actual.opacity == expected.opacity
+           && actual.modal == expected.modal
+           && std::abs(actual.opacity - expected.opacity) <= 0.00001f
            && actual.display == expected.display;
+}
+
+bool opacityEquals(const float actual, const float expected)
+{
+    return std::abs(actual - expected) <= 0.00001f;
+}
+
+void dispatchMessagesFor(std::chrono::milliseconds duration)
+{
+    auto* messageManager = juce::MessageManager::getInstance();
+    std::thread stopper([messageManager, duration] {
+        std::this_thread::sleep_for(duration);
+        messageManager->stopDispatchLoop();
+    });
+    messageManager->runDispatchLoop();
+    stopper.join();
 }
 
 std::unique_ptr<juce::Component> makeContent()
@@ -270,11 +289,11 @@ void testWindowStatesAndCapabilities()
     if (capabilities.supportsPerWindowOpacity) {
         expect(upperOpacityResult, "supported opacity update accepts an upper value");
         snapshot = manager.getWindow(*handle);
-        expect(snapshot.has_value() && snapshot->opacity == 1.0f,
+        expect(snapshot.has_value() && opacityEquals(snapshot->opacity, 1.0f),
                "opacity is clamped to one");
         expect(lowerOpacityResult, "supported opacity update accepts a lower value");
         snapshot = manager.getWindow(*handle);
-        expect(snapshot.has_value() && snapshot->opacity == 0.0f,
+        expect(snapshot.has_value() && opacityEquals(snapshot->opacity, 0.0f),
                "opacity is clamped to zero");
     } else {
         expect(!upperOpacityResult, "unsupported opacity update fails");
@@ -282,10 +301,10 @@ void testWindowStatesAndCapabilities()
     }
 
     if (frameless)
-        manager.closeWindow(*frameless);
+        static_cast<void>(manager.closeWindow(*frameless));
     if (transparent)
-        manager.closeWindow(*transparent);
-    manager.closeWindow(*handle);
+        static_cast<void>(manager.closeWindow(*transparent));
+    static_cast<void>(manager.closeWindow(*handle));
 }
 
 void testChildCascadeAndModalCompletion()
@@ -328,7 +347,7 @@ void testChildCascadeAndModalCompletion()
         expect(dialogSnapshot.has_value() && dialogSnapshot->modal,
                "dialog snapshot reports modal state");
         expect(manager.closeWindow(*dialog), "modal dialog closes through the manager");
-        juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+        dispatchMessagesFor(std::chrono::milliseconds(100));
         expect(completionCount == 1, "modal completion runs exactly once");
         expect(completionResult == 0, "explicit modal close completes with result zero");
     }

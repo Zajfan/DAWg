@@ -1,0 +1,53 @@
+#include "ManagedWindow.h"
+
+#include <algorithm>
+#include <limits>
+#include <utility>
+
+namespace dawg::app::window {
+namespace {
+
+juce::Rectangle<int> toJuceBounds(const WindowBounds bounds)
+{
+    return { bounds.x, bounds.y, bounds.width, bounds.height };
+}
+
+int unlimitedSize()
+{
+    return std::numeric_limits<int>::max() / 2;
+}
+
+} // namespace
+
+ManagedWindow::ManagedWindow(const juce::String& name,
+                             const juce::Colour backgroundColour,
+                             WindowOptions options,
+                             std::unique_ptr<juce::Component> content,
+                             CloseRequested closeRequested)
+    : juce::ResizableWindow(name, backgroundColour, true),
+      m_closeRequested(std::move(closeRequested))
+{
+    setUsingNativeTitleBar(options.useNativeTitleBar);
+    setResizable(options.resizable, false);
+    setResizeLimits(std::max(1, options.minimumWidth), std::max(1, options.minimumHeight),
+                    options.maximumWidth > 0 ? options.maximumWidth : unlimitedSize(),
+                    options.maximumHeight > 0 ? options.maximumHeight : unlimitedSize());
+    setAlwaysOnTop(options.alwaysOnTop);
+    setOpaque(! options.transparent);
+    setContentOwned(content.release(), true);
+    setBounds(toJuceBounds(options.bounds));
+    setAlpha(std::clamp(options.opacity, 0.0f, 1.0f));
+    setVisible(options.visible);
+}
+
+ManagedWindow::~ManagedWindow() = default;
+
+void ManagedWindow::userTriedToCloseWindow()
+{
+    if (m_closeRequested) {
+        auto callback = std::move(m_closeRequested);
+        callback();
+    }
+}
+
+} // namespace dawg::app::window

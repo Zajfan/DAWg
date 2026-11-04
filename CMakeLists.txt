@@ -42,7 +42,25 @@ target_sources(DAWg
         Source/App/MainComponent.h
         Source/Audio/AudioAdapter.cpp
         Source/Audio/AudioAdapter.h
+        Source/Window/WindowRegistry.cpp
+        Source/Window/WindowRegistry.h
+        Source/Window/WindowTypes.h
+        Source/Window/ManagedWindow.cpp
+        Source/Window/ManagedWindow.h
+        Source/Window/WindowManager.cpp
+        Source/Window/WindowManager.h
+        Source/Window/NativeWindowState.h
 )
+
+if(WIN32)
+    target_sources(DAWg PRIVATE Source/Window/NativeWindowState_windows.cpp)
+elseif(APPLE)
+    target_sources(DAWg PRIVATE Source/Window/NativeWindowState_mac.mm)
+elseif(UNIX)
+    target_sources(DAWg PRIVATE Source/Window/NativeWindowState_linux.cpp)
+else()
+    target_sources(DAWg PRIVATE Source/Window/NativeWindowState_fallback.cpp)
+endif()
 
 target_compile_features(DAWg PRIVATE cxx_std_26)
 
@@ -57,12 +75,20 @@ target_link_libraries(DAWg
         juce::juce_recommended_warning_flags
 )
 
+if(UNIX AND NOT APPLE)
+    find_package(X11 REQUIRED)
+    target_link_libraries(DAWg PRIVATE X11::X11)
+endif()
+
 # Zero-warning policy (Zajfan Standard §8) — applied per-source to avoid
 # hitting JUCE's own module source files, which JUCE 9 compiles inline.
 set(DAWG_OWN_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/App/Main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/App/MainComponent.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Audio/AudioAdapter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Window/WindowRegistry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Window/ManagedWindow.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Window/WindowManager.cpp
 )
 set_source_files_properties(${DAWG_OWN_SOURCES}
     PROPERTIES COMPILE_OPTIONS
@@ -115,9 +141,16 @@ if(DAWG_BUILD_TESTS)
 
     add_executable(dawg_window_manager_integration_tests
         Tests/WindowManagerIntegrationTests.cpp
+        Source/Window/WindowRegistry.cpp
+        Source/Window/ManagedWindow.cpp
+        Source/Window/WindowManager.cpp
     )
-    target_include_directories(dawg_window_manager_integration_tests PRIVATE Source/Window)
+    target_include_directories(dawg_window_manager_integration_tests PRIVATE Source Source/Window)
     target_compile_features(dawg_window_manager_integration_tests PRIVATE cxx_std_26)
+    target_compile_definitions(dawg_window_manager_integration_tests PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+    )
     target_compile_options(dawg_window_manager_integration_tests PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>
         $<$<CXX_COMPILER_ID:MSVC>:/W4;/WX>
@@ -127,6 +160,18 @@ if(DAWG_BUILD_TESTS)
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags
     )
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(dawg_window_manager_integration_tests PRIVATE X11::X11)
+    endif()
+    if(WIN32)
+        target_sources(dawg_window_manager_integration_tests PRIVATE Source/Window/NativeWindowState_windows.cpp)
+    elseif(APPLE)
+        target_sources(dawg_window_manager_integration_tests PRIVATE Source/Window/NativeWindowState_mac.mm)
+    elseif(UNIX)
+        target_sources(dawg_window_manager_integration_tests PRIVATE Source/Window/NativeWindowState_linux.cpp)
+    else()
+        target_sources(dawg_window_manager_integration_tests PRIVATE Source/Window/NativeWindowState_fallback.cpp)
+    endif()
     add_test(NAME dawg.window_manager_integration
         COMMAND dawg_window_manager_integration_tests)
     set_tests_properties(dawg.window_manager_integration PROPERTIES
