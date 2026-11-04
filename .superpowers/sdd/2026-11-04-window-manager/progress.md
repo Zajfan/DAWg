@@ -57,3 +57,6 @@ No additional plan conflicts were found. The only preflight ruling is the native
 - Green verification: both focused targets built successfully; `dawg_window_registry_tests` exited `0`; Release `DAWg` configured and linked successfully.
 - Environment concern: focused CTest under bare Xvfb exited `8` because JUCE aborts at startup with X11 `BadAtom`; a bounded Mutter-on-Xvfb retry reproduced the same pre-assertion failure. The integration target therefore could not execute its assertions here. No engine files changed.
 - Final cleanup: temporary `/tmp/dawg-window-fixes-red`, `/tmp/dawg-window-fixes-release`, and the isolated-worktree `../VersaTone` symlink were removed.
+- Scoped re-review follow-up: `dfa50a2` corrects repeated-close assertions and verifies Linux maximize requests against synchronized `_NET_WM_STATE` results before reporting success; the manager updates its snapshot only after that result.
+- Follow-up verification: registry/integration targets built (`0`), registry test passed (`0`), bare-Xvfb integration failed before assertions with JUCE/X11 `BadAtom` (`1`), and the bounded incremental Release link timed out during LTO (`124`).
+- Follow-up report metadata records baseline `c686726`, prior implementation `bd9a655`, and current head `dfa50a2`.

@@ -4,6 +4,9 @@ Date: 2026-11-04
 
 Implementation commit verified: `fa75dc3` (`feat(app): create DAWg main window through window manager`)
 
+Final reviewed baseline: `c686726`, including the prior fix commit
+`bd9a655`. Current scoped follow-up head: `dfa50a2`.
+
 Result: `DONE_WITH_CONCERNS`
 
 The only Task 6 source changes are the focused test-harness correction in `CMakeLists.txt` and `Tests/WindowManagerIntegrationTests.cpp`; no production source change was required.
@@ -175,3 +178,26 @@ review findings without touching the reusable engine:
 
    Both exited `0`; the Release DAWg executable linked successfully. The only
    configure warning was the existing JUCE bundle-ID warning about spaces.
+
+## Scoped re-review follow-up
+
+Follow-up commit: `dfa50a2` (`fix(window): verify native maximize state`)
+
+This follow-up corrects the post-review close-count assertion so both the
+manager-backed and direct `ManagedWindow` repeated-request checks remain at
+`2` after explicit close handling. It also adds native-state assertions to the
+supported maximize integration path and changes Linux `setMaximized()` to wait
+for a synchronized `_NET_WM_STATE` result before returning success. The manager
+already records `WindowState::maximized` only after that native call succeeds.
+
+Exact follow-up verification:
+
+- `cmake -S . -B /tmp/dawg-window-followup -DDAWG_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release` — exit `0`; existing JUCE bundle-ID spaces warning.
+- `cmake --build /tmp/dawg-window-followup --target dawg_window_registry_tests dawg_window_manager_integration_tests --parallel 2` — exit `0`.
+- `/tmp/dawg-window-followup/dawg_window_registry_tests` — exit `0`.
+- `timeout 30s xvfb-run -a /tmp/dawg-window-followup/dawg_window_manager_integration_tests` — exit `1` before assertions with JUCE/X11 `BadAtom` from `X_ChangeProperty`; this is the same bare-Xvfb environmental blocker.
+- `timeout 60s cmake --build /tmp/dawg-window-followup --target DAWg --parallel 2` — exit `124` while Release LTO was still linking. The Release link is therefore not claimed as passed for this follow-up.
+
+The follow-up touched no engine files. Temporary build output and the sibling
+VersaTone symlink are removed after handoff; the worktree is expected to remain
+clean.
