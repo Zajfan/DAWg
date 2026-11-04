@@ -2,14 +2,19 @@
 
 Date: 2026-11-04
 
-Final reviewed HEAD before this report commit: `c61535e` (`docs(window): record scoped re-review`)
+Final reviewed HEAD before this report update: `c61535e` (`docs(window): record scoped re-review`)
 
 Final reviewed baseline: `c686726`, including the prior fix commit
-`bd9a655`. Current scoped follow-up head: `dfa50a2`.
+`bd9a655`. Current scoped follow-up baseline: `dfa50a2`.
 
 Result: `DONE_WITH_CONCERNS`
 
-The only Task 6 source changes are the focused test-harness correction in `CMakeLists.txt` and `Tests/WindowManagerIntegrationTests.cpp`; no production source change was required.
+The initial Task 6 verification pass only required the focused test-harness
+correction in `CMakeLists.txt` and `Tests/WindowManagerIntegrationTests.cpp`;
+it did not require a production change at that stage. Later scoped follow-ups
+did change production window-management code: `bd9a655` resolved the final
+manager review findings, and `dfa50a2` completed native maximize-state
+verification. This report records the verification status across both phases.
 
 ## Commands and results
 
@@ -201,3 +206,24 @@ Exact follow-up verification:
 The follow-up touched no engine files. Temporary build output and the sibling
 VersaTone symlink are removed after handoff; the worktree is expected to remain
 clean.
+
+## Final scoped review follow-up
+
+Follow-up commit: `1559f20` (`fix(window): enforce child front ordering`)
+
+This focused follow-up makes the window-manager ordering explicit: modal
+parents are brought frontmost before modal activation, while the newly created
+window is brought forward after registration. The integration test now checks
+the child immediately after `WindowManager::createWindow()` without manually
+calling `toFront()`.
+
+Bounded verification for this follow-up:
+
+- `cmake -S . -B /tmp/dawg-window-scoped -DDAWG_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug` — exit `0`; existing JUCE bundle-ID spaces warning.
+- `cmake --build /tmp/dawg-window-scoped --target dawg_window_registry_tests dawg_window_manager_integration_tests --parallel 2` — exit `0`.
+- `timeout 30s /tmp/dawg-window-scoped/dawg_window_registry_tests` — exit `0`.
+- `timeout 30s xvfb-run -a /tmp/dawg-window-scoped/dawg_window_manager_integration_tests` — exit `1` before assertions with the known JUCE/X11 `BadAtom` from `X_ChangeProperty`; subsequent leak assertions are cleanup fallout.
+- `git diff --check` — exit `0`.
+
+The temporary build directory and sibling VersaTone symlink were removed after
+verification. VersaTone engine sources were not modified.
