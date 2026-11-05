@@ -1,4 +1,7 @@
-add_library(dawg_engine_core STATIC src/AudioEngine.cpp)
+add_library(dawg_engine_core STATIC
+    src/AudioEngine.cpp
+    src/TransportCommandQueue.cpp
+)
 target_include_directories(dawg_engine_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(dawg_engine_core PUBLIC cxx_std_20)
 target_compile_options(dawg_engine_core PRIVATE

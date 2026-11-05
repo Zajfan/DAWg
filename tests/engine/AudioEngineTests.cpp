@@ -15,6 +15,82 @@ void require(const bool condition, const char* message)
     }
 }
 
+using dawg::engine::EngineCommandType;
+
+void testTransportCommands()
+{
+    dawg::engine::AudioEngine engine;
+    require(engine.prepare({48000.0, 32, 2}), "engine prepares for transport");
+    std::array<float, 32> samples {};
+    samples.fill(1.0f);
+    std::array<float*, 1> channels {samples.data()};
+    const dawg::engine::AudioBufferView output {channels.data(), 1, samples.size()};
+    require(! engine.transportState().playing, "new transport is stopped");
+    require(engine.transportState().samplePosition == 0, "new transport starts at zero");
+
+    require(engine.enqueueCommand({EngineCommandType::play, 0}), "play command is accepted");
+    require(! engine.transportState().playing, "enqueue does not mutate transport");
+    engine.process(output, {}, {});
+    require(engine.transportState().playing, "audio thread applies play command");
+    for (const auto sample : samples)
+        require(sample == 0.0f, "transport processing preserves silent output");
+
+    require(engine.enqueueCommand({EngineCommandType::seekSamples, 96000}),
+            "seek command is accepted");
+    require(engine.transportState().samplePosition == 0, "seek waits for processing");
+    engine.process(output, {}, {});
+    require(engine.transportState().samplePosition == 96000, "audio thread applies seek command");
+    require(engine.transportState().playing, "seek preserves playing state");
+
+    require(engine.enqueueCommand({EngineCommandType::stop, 0}), "stop command is accepted");
+    engine.process(output, {}, {});
+    require(! engine.transportState().playing, "audio thread applies stop command");
+    require(engine.transportState().samplePosition == 96000, "stop preserves sample position");
+    engine.process(output, {}, {true, 123, 90.0});
+    require(! engine.transportState().playing && engine.transportState().samplePosition == 96000,
+            "empty queue and supplied snapshot do not change command-owned state");
+}
+
+void testTransportFifoAndEmptyBlocks()
+{
+    dawg::engine::AudioEngine engine;
+    require(engine.enqueueCommand({EngineCommandType::play, 0}), "FIFO play queues");
+    require(engine.enqueueCommand({EngineCommandType::seekSamples, 96000}), "FIFO seek queues");
+    require(engine.enqueueCommand({EngineCommandType::seekSamples, 48000}), "second seek queues");
+    require(engine.enqueueCommand({EngineCommandType::stop, 0}), "FIFO stop queues");
+    engine.process({}, {}, {});
+    require(! engine.transportState().playing, "last play/stop command wins in FIFO order");
+    require(engine.transportState().samplePosition == 48000, "last seek wins in FIFO order");
+
+    require(engine.enqueueCommand({EngineCommandType::stop, 0}), "second FIFO stop queues");
+    require(engine.enqueueCommand({EngineCommandType::play, 0}), "second FIFO play queues");
+    engine.process({nullptr, 2, 32}, {}, {});
+    require(engine.transportState().playing, "commands apply before null-output early return");
+    require(engine.transportState().samplePosition == 48000, "play preserves sample position");
+}
+
+void testTransportCapacityAndReuse()
+{
+    dawg::engine::AudioEngine engine;
+    // Refill beyond one ring lap to catch lost slots and stale commands.
+    for (std::int64_t batch = 0; batch < 3; ++batch)
+    {
+        for (std::int64_t index = 0; index < 64; ++index)
+            require(engine.enqueueCommand({EngineCommandType::seekSamples, batch * 64 + index}),
+                    "all 64 queue slots accept commands");
+        require(! engine.enqueueCommand({EngineCommandType::seekSamples, 999999}),
+                "65th command is rejected without overwriting queued commands");
+        engine.process({}, {}, {});
+        require(engine.transportState().samplePosition == batch * 64 + 63,
+                "full queue drains in FIFO order and rejected command is absent");
+    }
+    require(engine.enqueueCommand({EngineCommandType::play, 0}), "queue accepts play after draining");
+    engine.process({}, {}, {});
+    require(engine.transportState().playing, "reused queue applies play");
+    engine.process({}, {}, {});
+    require(engine.transportState().samplePosition == 191, "drained commands are not replayed");
+}
+
 void testLifecycleAndValidation()
 {
     dawg::engine::AudioEngine engine;
@@ -93,6 +169,9 @@ void testViewBoundsAndEmptyOutput()
 
 int main()
 {
+    testTransportCommands();
+    testTransportFifoAndEmptyBlocks();
+    testTransportCapacityAndReuse();
     testLifecycleAndValidation();
     testSilentOutput();
     testViewBoundsAndEmptyOutput();
