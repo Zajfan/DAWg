@@ -3,6 +3,8 @@
 #include <dawg/project/ProjectCommand.h>
 #include <dawg/project/ProjectSnapshot.h>
 
+#include <optional>
+
 namespace dawg::project {
 
 // The message thread owns the editable project and performs every call.
@@ -11,9 +13,15 @@ class Project final
 {
 public:
     [[nodiscard]] static Project create(std::string name, ProjectId id);
+    // Reconstructs owned state without JUCE or persistence dependencies.
+    // Returns nullopt for unsupported versions (only 1 is supported), zero
+    // project/track IDs, empty project/track names or duplicate track IDs.
+    // Preserves track order and flags; allocation resumes above the largest ID.
+    // A loaded maximum TrackId is valid but leaves further allocation exhausted.
+    [[nodiscard]] static std::optional<Project> fromSnapshot(ProjectSnapshot snapshot);
     [[nodiscard]] ProjectSnapshot snapshot() const;
 
-    // IDs start at 1, increase on successful adds and are never reused.
+    // New-project IDs start at 1; successful adds increase IDs without reuse.
     // Returns 0 for an empty name or exhausted IDs, without changing state.
     TrackId addAudioTrack(std::string name);
     // Empty names and unknown IDs fail without changing state.
@@ -22,7 +30,7 @@ public:
     [[nodiscard]] bool apply(const ProjectCommand& command);
 
 private:
-    Project(std::string name, ProjectId id);
+    Project(ProjectSnapshot state, TrackId nextTrackId);
 
     ProjectSnapshot m_state;
     TrackId m_nextTrackId {1};

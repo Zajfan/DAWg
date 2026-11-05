@@ -1,18 +1,39 @@
 #include <dawg/project/Project.h>
 
 #include <algorithm>
+#include <limits>
+#include <unordered_set>
 #include <utility>
 
 namespace dawg::project {
 
-Project::Project(std::string name, const ProjectId id)
-    : m_state {1, id, std::move(name), {}}
+Project::Project(ProjectSnapshot state, const TrackId nextTrackId)
+    : m_state {std::move(state)}, m_nextTrackId {nextTrackId}
 {
 }
 
 Project Project::create(std::string name, const ProjectId id)
 {
-    return Project {std::move(name), id};
+    return Project {{1, id, std::move(name), {}}, 1};
+}
+
+std::optional<Project> Project::fromSnapshot(ProjectSnapshot snapshot)
+{
+    if (snapshot.formatVersion != 1 || snapshot.id == 0 || snapshot.name.empty())
+        return std::nullopt;
+
+    std::unordered_set<TrackId> ids;
+    TrackId largestId {};
+    for (const auto& track : snapshot.tracks)
+    {
+        if (track.id == 0 || track.name.empty() || ! ids.insert(track.id).second)
+            return std::nullopt;
+
+        largestId = std::max(largestId, track.id);
+    }
+
+    const TrackId nextId = largestId == std::numeric_limits<TrackId>::max() ? 0 : largestId + 1;
+    return Project {std::move(snapshot), nextId};
 }
 
 ProjectSnapshot Project::snapshot() const

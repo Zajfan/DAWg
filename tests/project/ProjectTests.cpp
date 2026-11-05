@@ -167,6 +167,86 @@ void testSnapshotIsolation()
     require(original.tracks == std::vector<Track> {{first, "Original", false, false}},
             "project edits leave earlier snapshot storage intact");
 }
+
+void testSnapshotReconstruction()
+{
+    ProjectSnapshot loaded {1, 42, "Loaded arrangement", {
+        {17, "Same name", true, false}, {4000, "Lead", false, true},
+        {3, "Same name", true, true}, {900, "Drums", false, false}}};
+    const auto before = serialize(loaded);
+    auto project = Project::fromSnapshot(loaded);
+    require(project.has_value(), "valid sparse snapshot can reconstruct an editable project");
+    require(serialize(project->snapshot()) == before,
+            "reconstruction preserves every metadata field, track ID, name, flag and order");
+    loaded.name = "Changed input";
+    loaded.tracks.front() = {1, "Changed input", false, false};
+    require(serialize(project->snapshot()) == before,
+            "reconstructed project owns its metadata and track storage");
+    require(project->addAudioTrack("") == 0, "empty add after reconstruction is rejected");
+    require(serialize(project->snapshot()) == before,
+            "failed add preserves the loaded snapshot");
+    require(project->removeTrack(4000), "largest loaded ID can be removed");
+    require(project->addAudioTrack("New") == 4001,
+            "next ID exceeds the largest loaded ID even after its removal");
+    require(project->apply(AddAudioTrack {"Command"}), "loaded project accepts add commands");
+    require(project->snapshot().tracks == std::vector<Track> {
+                {17, "Same name", true, false}, {3, "Same name", true, true},
+                {900, "Drums", false, false}, {4001, "New", false, false},
+                {4002, "Command", false, false}},
+            "subsequent allocations append in order with default flags and monotonic IDs");
+
+    auto empty = Project::fromSnapshot(ProjectSnapshot {1, 9, "Empty", {}});
+    require(empty.has_value(), "empty snapshot can reconstruct a project");
+    require(empty->addAudioTrack("First") == 1, "empty loaded project allocates from ID one");
+}
+
+void testSnapshotIdExhaustion()
+{
+    constexpr auto maximum = std::numeric_limits<TrackId>::max();
+    auto nearLimit = Project::fromSnapshot(ProjectSnapshot {
+        1, 1, "Near limit", {{maximum - 1, "Existing", false, false}}});
+    require(nearLimit.has_value(), "snapshot with penultimate track ID is accepted");
+    require(nearLimit->addAudioTrack("Last") == maximum,
+            "largest representable ID can be allocated exactly once after loading");
+    const auto full = serialize(nearLimit->snapshot());
+    require(nearLimit->addAudioTrack("Overflow") == 0, "allocation rejects exhausted loaded IDs");
+    require(! nearLimit->apply(AddAudioTrack {"Overflow command"}),
+            "add command also rejects exhausted loaded IDs");
+    require(serialize(nearLimit->snapshot()) == full, "exhausted adds leave snapshot unchanged");
+    require(nearLimit->removeTrack(maximum) && nearLimit->removeTrack(maximum - 1),
+            "tracks can still be removed after ID exhaustion");
+    require(nearLimit->addAudioTrack("Reuse") == 0, "removal cannot reset exhausted IDs");
+
+    auto exhausted = Project::fromSnapshot(ProjectSnapshot {
+        1, 2, "Exhausted", {{maximum, "Maximum", true, true}, {4, "Lower", false, false}}});
+    require(exhausted.has_value(), "snapshot containing maximum ID remains loadable");
+    const auto before = serialize(exhausted->snapshot());
+    require(exhausted->addAudioTrack("Overflow") == 0,
+            "loaded maximum ID prevents allocation without unsigned wraparound reuse");
+    require(serialize(exhausted->snapshot()) == before, "loaded exhaustion preserves state");
+    require(exhausted->renameTrack(maximum, "Renamed"), "exhausted project remains editable");
+}
+
+void testInvalidSnapshots()
+{
+    const std::array<ProjectSnapshot, 8> invalid {{
+        {0, 1, "Version zero", {}},
+        {2, 1, "Unsupported version", {}},
+        {std::numeric_limits<std::uint32_t>::max(), 1, "Unsupported version", {}},
+        {1, 0, "Invalid project ID", {}},
+        {1, 1, "", {}},
+        {1, 1, "Invalid track ID", {{0, "Track", false, false}}},
+        {1, 1, "Empty track name", {{5, "", false, false}}},
+        {1, 1, "Duplicate track IDs", {
+            {7, "First", false, false}, {9, "Middle", true, false}, {7, "Last", false, true}}}
+    }};
+    for (const auto& snapshot : invalid)
+    {
+        const auto before = serialize(snapshot);
+        require(! Project::fromSnapshot(snapshot).has_value(), "invalid snapshot is rejected");
+        require(serialize(snapshot) == before, "rejected reconstruction leaves input unchanged");
+    }
+}
 }
 
 int main()
@@ -176,5 +256,8 @@ int main()
     testRejectedEdits();
     testCommands();
     testSnapshotIsolation();
-    std::puts("PASS: 5 project behavior tests");
+    testSnapshotReconstruction();
+    testSnapshotIdExhaustion();
+    testInvalidSnapshots();
+    std::puts("PASS: 8 project behavior tests");
 }
