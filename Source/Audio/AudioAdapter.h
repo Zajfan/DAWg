@@ -1,14 +1,10 @@
 #pragma once
 
 #include <dawg/engine/AudioEngine.h>
-#include <dawg/engine/AudioBuffer.h>
-#include <dawg/engine/Transport.h>
-#include <dawg/engine/VoiceScheduler.h>
 
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include <atomic>
-#include <memory>
 
 namespace dawg::app::audio {
 
@@ -28,10 +24,6 @@ public:
     [[nodiscard]] double getSampleRate()  const noexcept;
     [[nodiscard]] int    getBlockSize()   const noexcept;
 
-    // Engine sub-system access for transport commands (play/stop/seek/tempo)
-    [[nodiscard]] dawg::engine::Transport&       getTransport()       noexcept;
-    [[nodiscard]] dawg::engine::VoiceScheduler&  getVoiceScheduler()  noexcept;
-
 private:
     // juce::AudioIODeviceCallback
     void audioDeviceIOCallbackWithContext(
@@ -47,9 +39,6 @@ private:
 
     juce::AudioDeviceManager m_deviceManager;
     dawg::engine::AudioEngine m_engine;
-
-    // Pre-allocated at device start; never touched inside the callback
-    std::unique_ptr<dawg::engine::AudioBuffer> m_processingBuffer;
 
     std::atomic<bool>   m_deviceReady { false };
     std::atomic<double> m_sampleRate  { 0.0 };

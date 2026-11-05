@@ -1,7 +1,5 @@
 #include "AudioAdapter.h"
 
-#include <cstring>
-
 namespace dawg::app::audio {
 
 AudioAdapter::~AudioAdapter()
@@ -25,11 +23,8 @@ juce::Result AudioAdapter::initialise()
 void AudioAdapter::shutdown() noexcept
 {
     m_deviceManager.removeAudioCallback(this);
-    m_engine.stop();
-    m_engine.shutdown();
     m_deviceManager.closeAudioDevice();
-
-    m_processingBuffer.reset();
+    m_engine.release();
     m_deviceReady.store(false, std::memory_order_release);
     m_sampleRate.store(0.0,   std::memory_order_relaxed);
     m_blockSize.store(0,      std::memory_order_relaxed);
@@ -50,39 +45,26 @@ int AudioAdapter::getBlockSize() const noexcept
     return m_blockSize.load(std::memory_order_relaxed);
 }
 
-dawg::engine::Transport& AudioAdapter::getTransport() noexcept
-{
-    return m_engine.getTransport();
-}
-
-dawg::engine::VoiceScheduler& AudioAdapter::getVoiceScheduler() noexcept
-{
-    return m_engine.getVoiceScheduler();
-}
-
 // --- Device callbacks --------------------------------------------------------
 
 void AudioAdapter::audioDeviceAboutToStart(juce::AudioIODevice* device)
 {
+    m_deviceReady.store(false, std::memory_order_release);
+    m_engine.release();
     if (device == nullptr)
         return;
 
-    const auto sr        = device->getCurrentSampleRate();
-    const auto blockSize = static_cast<uint32_t>(device->getCurrentBufferSizeSamples());
-    const auto channels  = static_cast<uint16_t>(2);
+    const auto sr = device->getCurrentSampleRate();
+    const auto blockSize = device->getCurrentBufferSizeSamples();
+    const auto channels = device->getActiveOutputChannels().countNumberOfSetBits();
+    if (blockSize <= 0 || channels <= 0
+        || ! m_engine.prepare({sr, static_cast<std::size_t>(blockSize),
+                               static_cast<std::size_t>(channels)}))
+        return;
 
-    dawg::engine::EngineConfig config;
-    config.sampleRate  = static_cast<uint32_t>(sr);
-    config.bufferSize  = blockSize;
-    config.channels    = channels;
-
-    m_engine.initialize(config);
-    m_processingBuffer = std::make_unique<dawg::engine::AudioBuffer>(channels, blockSize);
-    m_engine.start();
-
-    m_sampleRate.store(sr,                        std::memory_order_relaxed);
-    m_blockSize.store(static_cast<int>(blockSize), std::memory_order_relaxed);
-    m_deviceReady.store(true,                     std::memory_order_release);
+    m_sampleRate.store(sr, std::memory_order_relaxed);
+    m_blockSize.store(blockSize, std::memory_order_relaxed);
+    m_deviceReady.store(true, std::memory_order_release);
 }
 
 void AudioAdapter::audioDeviceIOCallbackWithContext(
@@ -93,33 +75,16 @@ void AudioAdapter::audioDeviceIOCallbackWithContext(
     int                 numSamples,
     const juce::AudioIODeviceCallbackContext& /*context*/)
 {
-    // Real-time safe: no alloc, no mutex, no I/O.
-    if (m_processingBuffer == nullptr)
-    {
-        for (int ch = 0; ch < numOutputChannels; ++ch)
-            if (outputChannelData[ch] != nullptr)
-                std::memset(outputChannelData[ch], 0, sizeof(float) * static_cast<size_t>(numSamples));
+    if (numOutputChannels <= 0 || numSamples <= 0)
         return;
-    }
 
-    m_processingBuffer->clear();
-    m_engine.processAudio(*m_processingBuffer, nullptr);
-
-    for (int ch = 0; ch < numOutputChannels; ++ch)
-    {
-        if (outputChannelData[ch] == nullptr)
-            continue;
-        const float* src = m_processingBuffer->getChannelData(static_cast<uint16_t>(ch));
-        if (src != nullptr)
-            std::memcpy(outputChannelData[ch], src, sizeof(float) * static_cast<size_t>(numSamples));
-        else
-            std::memset(outputChannelData[ch], 0, sizeof(float) * static_cast<size_t>(numSamples));
-    }
+    m_engine.process({outputChannelData, static_cast<std::size_t>(numOutputChannels),
+                      static_cast<std::size_t>(numSamples)}, {}, {});
 }
 
 void AudioAdapter::audioDeviceStopped()
 {
-    m_engine.stop();
+    m_engine.release();
     m_deviceReady.store(false, std::memory_order_release);
 }
 

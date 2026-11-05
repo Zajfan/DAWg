@@ -6,6 +6,39 @@ project(DAWg
     LANGUAGES C CXX
 )
 
+option(DAWG_BUILD_APP "Build the JUCE application and platform tests" ON)
+option(DAWG_BUILD_TESTS "Build DAWg tests" OFF)
+
+# Sanitizers for debug builds (Zajfan Standard §6.3, §10.2)
+# ASan+UBSan by default; TSan is incompatible with ASan — enable separately.
+option(DAWG_ENABLE_TSAN "Use ThreadSanitizer instead of AddressSanitizer (mutually exclusive)" OFF)
+if(DAWG_ENABLE_TSAN)
+    set(DAWG_SANITIZER_FLAGS "-fsanitize=thread,undefined")
+else()
+    set(DAWG_SANITIZER_FLAGS "-fsanitize=address,undefined")
+endif()
+
+add_subdirectory(engine)
+
+if(DAWG_BUILD_TESTS)
+    include(CTest)
+    enable_testing()
+
+    add_executable(dawg_engine_core_tests tests/engine/AudioEngineTests.cpp)
+    target_link_libraries(dawg_engine_core_tests PRIVATE dawg_engine_core)
+    target_compile_features(dawg_engine_core_tests PRIVATE cxx_std_20)
+    target_compile_options(dawg_engine_core_tests PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4;/WX>
+        $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
+    )
+    add_test(NAME dawg.engine_core COMMAND dawg_engine_core_tests)
+endif()
+
+if(NOT DAWG_BUILD_APP)
+    return()
+endif()
+
 include(FetchContent)
 
 FetchContent_Declare(
@@ -16,19 +49,6 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(JUCE)
-
-# VersaTone engine — monorepo sibling, GUI-independent audio core
-set(DAWG_ENGINE_ENABLE_SIMD ON  CACHE BOOL "" FORCE)
-set(DAWG_ENGINE_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-    set(DAWG_ENGINE_ENABLE_LTO ON  CACHE BOOL "" FORCE)
-else()
-    set(DAWG_ENGINE_ENABLE_LTO OFF CACHE BOOL "" FORCE)
-endif()
-add_subdirectory(../VersaTone/engine dawg_engine_build)
-
-# VersaTone engine needs C++20 for std::numbers and atomic<double> arithmetic
-target_compile_features(dawg_engine PRIVATE cxx_std_20)
 
 juce_add_gui_app(DAWg
     PRODUCT_NAME "DAWg"
@@ -67,7 +87,7 @@ target_compile_features(DAWg PRIVATE cxx_std_26)
 
 target_link_libraries(DAWg
     PRIVATE
-        dawg_engine
+        dawg_engine_core
         juce::juce_audio_utils
         juce::juce_gui_extra
     PUBLIC
@@ -101,14 +121,6 @@ target_compile_options(DAWg PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX>
 )
 
-# Sanitizers for debug builds (Zajfan Standard §6.3, §10.2)
-# ASan+UBSan by default; TSan is incompatible with ASan — enable separately.
-option(DAWG_ENABLE_TSAN "Use ThreadSanitizer instead of AddressSanitizer (mutually exclusive)" OFF)
-if(DAWG_ENABLE_TSAN)
-    set(DAWG_SANITIZER_FLAGS "-fsanitize=thread,undefined")
-else()
-    set(DAWG_SANITIZER_FLAGS "-fsanitize=address,undefined")
-endif()
 target_compile_options(DAWg PRIVATE
     $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
 )
@@ -122,12 +134,7 @@ target_compile_definitions(DAWg
         JUCE_USE_CURL=0
 )
 
-option(DAWG_BUILD_TESTS "Build DAWg tests" OFF)
-
 if(DAWG_BUILD_TESTS)
-    include(CTest)
-    enable_testing()
-
     add_executable(dawg_window_registry_tests
         Tests/WindowRegistryTests.cpp
         Source/Window/WindowRegistry.cpp
