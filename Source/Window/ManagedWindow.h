@@ -21,6 +21,10 @@ public:
     bool keyPressed(const juce::KeyPress&) override;
 
 private:
+#if JUCE_LINUX || JUCE_BSD
+    int getDesktopWindowStyleFlags() const override;
+#endif
+
     CloseRequested m_closeRequested;
     bool m_closeOnEscape { false };
 };

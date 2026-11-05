@@ -44,6 +44,16 @@ ManagedWindow::ManagedWindow(const juce::String& name,
 
 ManagedWindow::~ManagedWindow() = default;
 
+#if JUCE_LINUX || JUCE_BSD
+int ManagedWindow::getDesktopWindowStyleFlags() const
+{
+    // JUCE translates this into MWM_FUNC_MAXIMIZE. Without it, GNOME rejects
+    // EWMH maximize requests even when the window is resizable.
+    const auto styleFlags = juce::ResizableWindow::getDesktopWindowStyleFlags();
+    return isResizable() ? styleFlags | juce::ComponentPeer::windowHasMaximiseButton : styleFlags;
+}
+#endif
+
 void ManagedWindow::userTriedToCloseWindow()
 {
     if (m_closeRequested)

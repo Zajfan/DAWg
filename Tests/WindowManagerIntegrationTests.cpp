@@ -368,6 +368,41 @@ void testWindowStatesAndCapabilities()
     static_cast<void>(manager.closeWindow(*handle));
 }
 
+void testNativeMaximizeConfirmsStateBeforeReturning()
+{
+    WindowOptions options;
+    options.bounds = { 180, 180, 640, 480 };
+    ManagedWindow window("Native Maximize Regression", juce::Colours::darkgrey,
+                         options, makeContent(), [] {}, false);
+    auto* peer = window.getPeer();
+    expect(peer != nullptr, "native maximize regression has a peer");
+    if (peer == nullptr)
+        return;
+
+    if (! native::queryCapabilities(peer).supportsMaximize) {
+        expect(! native::setMaximized(*peer, true),
+               "native maximize fails when the window manager does not support it");
+        expect(! native::isMaximized(*peer),
+               "unsupported maximize leaves native state normal");
+        return;
+    }
+
+    // No dispatch delay here: requests must also work immediately after mapping,
+    // as required for WindowOptions::initialState.
+    expect(native::setMaximized(*peer, true),
+           "native maximize immediately after creation succeeds");
+    expect(native::isMaximized(*peer),
+           "native maximize confirms both maximize atoms before returning");
+    expect(native::setMaximized(*peer, false),
+           "native restore immediately after maximize succeeds");
+    expect(! native::isMaximized(*peer),
+           "native restore confirms maximize state cleared before returning");
+    expect(native::setMaximized(*peer, true),
+           "native maximize succeeds again after restore");
+    expect(native::isMaximized(*peer),
+           "repeated native maximize confirms the resulting state");
+}
+
 void testCloseRequestRoutesThroughManager()
 {
     WindowManager manager;
@@ -600,6 +635,7 @@ int main()
     testCreateResizeAndClose();
     testContradictoryLimitsAreRejectedWithoutMutation();
     testCloseRequestRoutesThroughManager();
+    testNativeMaximizeConfirmsStateBeforeReturning();
     testWindowStatesAndCapabilities();
     testChildCascadeAndModalCompletion();
     testDefaultModalPlacementAndChildZOrder();
