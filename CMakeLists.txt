@@ -20,6 +20,7 @@ endif()
 
 add_subdirectory(engine)
 add_subdirectory(project)
+add_subdirectory(services)
 
 if(DAWG_BUILD_TESTS)
     include(CTest)
@@ -44,6 +45,15 @@ if(DAWG_BUILD_TESTS)
         $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
     )
     add_test(NAME dawg.project COMMAND dawg_project_tests)
+
+    add_executable(dawg_project_file_tests tests/services/ProjectFileTests.cpp)
+    target_link_libraries(dawg_project_file_tests PRIVATE dawg_services_persistence)
+    target_compile_options(dawg_project_file_tests PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4;/WX>
+        $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
+    )
+    add_test(NAME dawg.project_file COMMAND dawg_project_file_tests)
 endif()
 
 if(NOT DAWG_BUILD_APP)
