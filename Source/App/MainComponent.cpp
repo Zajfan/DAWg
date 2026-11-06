@@ -1,8 +1,12 @@
 #include "MainComponent.h"
 
+#include "audio/JuceAudioDeviceBridge.h"
+
 namespace dawg::app {
 
-MainComponent::MainComponent()
+MainComponent::MainComponent(dawg::platform::juce::JuceAudioDeviceBridge& audioBridge,
+                             const juce::Result& initialisationResult)
+    : m_audioBridge(audioBridge)
 {
     setSize(900, 560);
 
@@ -25,10 +29,8 @@ MainComponent::MainComponent()
     };
     addAndMakeVisible(m_restartButton);
 
-    const auto result = m_audioBridge.initialise();
-
-    if (result.failed())
-        m_statusLabel.setText("Audio device error: " + result.getErrorMessage(),
+    if (initialisationResult.failed())
+        m_statusLabel.setText("Audio device error: " + initialisationResult.getErrorMessage(),
                               juce::dontSendNotification);
     else
         refreshAudioStatus();
@@ -39,7 +41,6 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     stopTimer();
-    m_audioBridge.shutdown();
 }
 
 void MainComponent::paint(juce::Graphics& graphics)

@@ -1,3 +1,7 @@
-# The existing shell still lives in Source/App until application composition
-# is migrated. Only its audio platform dependency changes in this step.
+# The application shell remains in Source/App until the Task 7 relocation.
 target_link_libraries(DAWg PRIVATE dawg_platform_juce)
+
+if(DAWG_BUILD_TESTS)
+    # Compile the UI's borrowed-audio contract with the real application.
+    target_sources(DAWg PRIVATE ../../tests/app/MainComponentOwnershipTests.cpp)
+endif()

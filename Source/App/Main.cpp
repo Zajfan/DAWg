@@ -1,5 +1,9 @@
 #include "MainComponent.h"
 
+#include "audio/JuceAudioDeviceBridge.h"
+
+#include <dawg/engine/AudioEngine.h>
+
 #include "../Window/WindowManager.h"
 
 #include <memory>
@@ -16,6 +20,8 @@ public:
 
     void initialise(const juce::String&) override
     {
+        const auto audioResult = m_audioBridge.initialise();
+
         dawg::app::window::WindowOptions options;
         options.title = getApplicationName().toStdString();
         options.bounds = { 0, 0, 900, 560 };
@@ -28,7 +34,8 @@ public:
         };
 
         const auto handle =
-            m_windowManager.createWindow(std::make_unique<MainComponent>(), std::move(options));
+            m_windowManager.createWindow(
+                std::make_unique<MainComponent>(m_audioBridge, audioResult), std::move(options));
         jassert(handle.has_value());
         if (handle)
             m_mainWindow = *handle;
@@ -40,9 +47,13 @@ public:
             static_cast<void>(m_windowManager.closeWindow(m_mainWindow));
             m_mainWindow = {};
         }
+        m_audioBridge.shutdown();
     }
 
 private:
+    // Reverse destruction order: windows, bridge, then the engine it borrows.
+    dawg::engine::AudioEngine m_engine;
+    dawg::platform::juce::JuceAudioDeviceBridge m_audioBridge {m_engine};
     dawg::app::window::WindowManager m_windowManager;
     dawg::app::window::WindowHandle m_mainWindow {};
 };
