@@ -4,7 +4,7 @@
 #include <cmath>
 #include <utility>
 
-namespace dawg::app::window {
+namespace dawg::platform::juce::window {
 
 std::optional<WindowHandle> WindowRegistry::registerWindow(WindowRegistration registration)
 {
@@ -162,4 +162,4 @@ WindowBounds WindowRegistry::physicalToLogical(const DisplayInfo& display, Windo
     };
 }
 
-} // namespace dawg::app::window
+} // namespace dawg::platform::juce::window

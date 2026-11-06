@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace dawg::app::window {
+namespace dawg::platform::juce::window {
 
 using WindowHandle = std::uint64_t;
 using DisplayId = std::uint32_t;
@@ -105,4 +105,4 @@ struct ClosedWindow {
     ClosedWindow& operator=(ClosedWindow&&) noexcept = default;
 };
 
-} // namespace dawg::app::window
+} // namespace dawg::platform::juce::window

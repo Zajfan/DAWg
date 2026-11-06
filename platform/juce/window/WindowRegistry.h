@@ -4,7 +4,7 @@
 
 #include <unordered_map>
 
-namespace dawg::app::window {
+namespace dawg::platform::juce::window {
 
 class WindowRegistry final {
 public:
@@ -33,4 +33,4 @@ private:
     WindowHandle m_nextHandle { 1 };
 };
 
-} // namespace dawg::app::window
+} // namespace dawg::platform::juce::window

@@ -10,7 +10,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace dawg::app::window {
+namespace dawg::platform::juce::window {
 
 class ManagedWindow;
 
@@ -20,11 +20,11 @@ public:
     ~WindowManager();
 
     [[nodiscard]] std::optional<WindowHandle> createWindow(
-        std::unique_ptr<juce::Component> content,
+        std::unique_ptr<::juce::Component> content,
         WindowOptions options = {});
 
     [[nodiscard]] std::optional<WindowHandle> showModalDialog(
-        std::unique_ptr<juce::Component> content,
+        std::unique_ptr<::juce::Component> content,
         DialogOptions options = {});
 
     [[nodiscard]] bool closeWindow(WindowHandle);
@@ -47,7 +47,7 @@ private:
 
     [[nodiscard]] bool isMessageThread() const noexcept;
     [[nodiscard]] std::optional<WindowHandle> createWindowInternal(
-        std::unique_ptr<juce::Component>, WindowOptions, bool, bool,
+        std::unique_ptr<::juce::Component>, WindowOptions, bool, bool,
         std::function<void(int)>);
     [[nodiscard]] const DisplayInfo* findDisplay(DisplayId) const noexcept;
     [[nodiscard]] const DisplayInfo* displayForBounds(WindowBounds) const noexcept;
@@ -63,4 +63,4 @@ private:
     std::shared_ptr<int> m_lifetime { std::make_shared<int>(0) };
 };
 
-} // namespace dawg::app::window
+} // namespace dawg::platform::juce::window

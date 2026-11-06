@@ -7,12 +7,14 @@
 #include <limits>
 #include <utility>
 
-namespace dawg::app::window {
+namespace dawg::platform::juce::window {
+// JUCE assertion macros use relative juce:: names inside this platform namespace.
+namespace juce = ::juce;
 namespace {
 
-juce::Colour windowBackground()
+::juce::Colour windowBackground()
 {
-    return juce::Colours::darkgrey;
+    return ::juce::Colours::darkgrey;
 }
 
 WindowBounds clampedBounds(WindowBounds bounds, const WindowSizeLimits limits)
@@ -59,7 +61,7 @@ WindowBounds centeredAround(const WindowBounds child, const WindowBounds parent)
     };
 }
 
-WindowBounds fromJuceBounds(const juce::Rectangle<int> bounds)
+WindowBounds fromJuceBounds(const ::juce::Rectangle<int> bounds)
 {
     return { bounds.getX(), bounds.getY(), bounds.getWidth(), bounds.getHeight() };
 }
@@ -68,7 +70,7 @@ using WindowMap = std::unordered_map<WindowHandle, std::unique_ptr<ManagedWindow
 
 } // namespace
 
-class WindowManager::ModalCallback final : public juce::ModalComponentManager::Callback {
+class WindowManager::ModalCallback final : public ::juce::ModalComponentManager::Callback {
 public:
     ModalCallback(WindowManager& manager, const WindowHandle handle,
                   const std::weak_ptr<int> lifetime)
@@ -90,7 +92,7 @@ private:
 
 WindowManager::WindowManager()
 {
-    m_capabilities.supportsTransparency = juce::Desktop::canUseSemiTransparentWindows();
+    m_capabilities.supportsTransparency = ::juce::Desktop::canUseSemiTransparentWindows();
     m_capabilities.supportsPerWindowOpacity = m_capabilities.supportsTransparency;
     m_capabilities.supportsFramelessWindows = true;
     m_capabilities.supportsFullscreen = true;
@@ -103,7 +105,7 @@ WindowManager::~WindowManager()
         jassertfalse;
         m_lifetime.reset();
         auto* deferredWindows = new WindowMap(std::move(m_windows));
-        const auto queued = juce::MessageManager::callAsync([deferredWindows] {
+        const auto queued = ::juce::MessageManager::callAsync([deferredWindows] {
             delete deferredWindows;
         });
         if (! queued)
@@ -125,18 +127,18 @@ WindowManager::~WindowManager()
 
 bool WindowManager::isMessageThread() const noexcept
 {
-    const auto* messageManager = juce::MessageManager::getInstanceWithoutCreating();
+    const auto* messageManager = ::juce::MessageManager::getInstanceWithoutCreating();
     return messageManager != nullptr && messageManager->isThisTheMessageThread();
 }
 
 std::optional<WindowHandle> WindowManager::createWindow(
-    std::unique_ptr<juce::Component> content, WindowOptions options)
+    std::unique_ptr<::juce::Component> content, WindowOptions options)
 {
     return createWindowInternal(std::move(content), std::move(options), false, false, {});
 }
 
 std::optional<WindowHandle> WindowManager::showModalDialog(
-    std::unique_ptr<juce::Component> content, DialogOptions options)
+    std::unique_ptr<::juce::Component> content, DialogOptions options)
 {
     return createWindowInternal(std::move(content), std::move(options.window), true,
                                 options.closeOnEscape,
@@ -144,7 +146,7 @@ std::optional<WindowHandle> WindowManager::showModalDialog(
 }
 
 std::optional<WindowHandle> WindowManager::createWindowInternal(
-    std::unique_ptr<juce::Component> content,
+    std::unique_ptr<::juce::Component> content,
     WindowOptions options,
     const bool modal,
     const bool closeOnEscape,
@@ -196,7 +198,7 @@ std::optional<WindowHandle> WindowManager::createWindowInternal(
 
     std::unique_ptr<ManagedWindow> window;
     try {
-        window = std::make_unique<ManagedWindow>(juce::String(options.title), windowBackground(),
+        window = std::make_unique<ManagedWindow>(::juce::String(options.title), windowBackground(),
                                                  std::move(options), std::move(content),
                                                  std::move(closeCallback), closeOnEscape);
     } catch (...) {
@@ -464,7 +466,7 @@ bool WindowManager::refreshDisplays()
     if (! isMessageThread())
         return false;
 
-    const auto& displays = juce::Desktop::getInstance().getDisplays().displays;
+    const auto& displays = ::juce::Desktop::getInstance().getDisplays().displays;
     std::vector<DisplayInfo> refreshed;
     refreshed.reserve(static_cast<std::size_t>(displays.size()));
     DisplayId nextId = 1;
@@ -534,4 +536,4 @@ std::optional<WindowBounds> WindowManager::physicalToLogical(
                                     *display, bounds));
 }
 
-} // namespace dawg::app::window
+} // namespace dawg::platform::juce::window

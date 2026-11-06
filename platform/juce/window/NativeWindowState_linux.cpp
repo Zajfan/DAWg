@@ -10,10 +10,10 @@
 #include <chrono>
 #include <cstdint>
 
-namespace dawg::app::window::native {
+namespace dawg::platform::juce::window::native {
 namespace {
 
-::Window nativeWindow(const juce::ComponentPeer* peer) noexcept
+::Window nativeWindow(const ::juce::ComponentPeer* peer) noexcept
 {
     if (peer == nullptr || peer->getNativeHandle() == nullptr)
         return 0;
@@ -132,7 +132,7 @@ bool waitForMaximizedState(Display* display, const ::Window window,
 
 } // namespace
 
-WindowCapabilities queryCapabilities(const juce::ComponentPeer* peer) noexcept
+WindowCapabilities queryCapabilities(const ::juce::ComponentPeer* peer) noexcept
 {
     WindowCapabilities capabilities;
     const auto window = nativeWindow(peer);
@@ -146,7 +146,7 @@ WindowCapabilities queryCapabilities(const juce::ComponentPeer* peer) noexcept
     return capabilities;
 }
 
-bool setMaximized(juce::ComponentPeer& peer, const bool shouldBeMaximized) noexcept
+bool setMaximized(::juce::ComponentPeer& peer, const bool shouldBeMaximized) noexcept
 {
     const auto window = nativeWindow(&peer);
     if (window == 0)
@@ -188,7 +188,7 @@ bool setMaximized(juce::ComponentPeer& peer, const bool shouldBeMaximized) noexc
     return applied;
 }
 
-bool isMaximized(const juce::ComponentPeer& peer) noexcept
+bool isMaximized(const ::juce::ComponentPeer& peer) noexcept
 {
     const auto window = nativeWindow(&peer);
     if (window == 0)
@@ -205,6 +205,6 @@ bool isMaximized(const juce::ComponentPeer& peer) noexcept
     return maximized;
 }
 
-} // namespace dawg::app::window::native
+} // namespace dawg::platform::juce::window::native
 
 #endif

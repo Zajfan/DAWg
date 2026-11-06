@@ -4,10 +4,10 @@
 #include <limits>
 #include <utility>
 
-namespace dawg::app::window {
+namespace dawg::platform::juce::window {
 namespace {
 
-juce::Rectangle<int> toJuceBounds(const WindowBounds bounds)
+::juce::Rectangle<int> toJuceBounds(const WindowBounds bounds)
 {
     return { bounds.x, bounds.y, bounds.width, bounds.height };
 }
@@ -19,14 +19,14 @@ int unlimitedSize()
 
 } // namespace
 
-ManagedWindow::ManagedWindow(const juce::String& name,
-                             const juce::Colour backgroundColour,
+ManagedWindow::ManagedWindow(const ::juce::String& name,
+                             const ::juce::Colour backgroundColour,
                              WindowOptions options,
-                             std::unique_ptr<juce::Component> content,
+                             std::unique_ptr<::juce::Component> content,
                              CloseRequested closeRequested,
                              const bool closeOnEscape)
-    : juce::ResizableWindow(name, backgroundColour, true),
-      m_closeRequested(std::move(closeRequested)),
+    : ::juce::ResizableWindow(name, backgroundColour, true),
+      m_closeRequested(std::make_shared<CloseRequested>(std::move(closeRequested))),
       m_closeOnEscape(closeOnEscape)
 {
     setUsingNativeTitleBar(options.useNativeTitleBar);
@@ -49,25 +49,26 @@ int ManagedWindow::getDesktopWindowStyleFlags() const
 {
     // JUCE translates this into MWM_FUNC_MAXIMIZE. Without it, GNOME rejects
     // EWMH maximize requests even when the window is resizable.
-    const auto styleFlags = juce::ResizableWindow::getDesktopWindowStyleFlags();
-    return isResizable() ? styleFlags | juce::ComponentPeer::windowHasMaximiseButton : styleFlags;
+    const auto styleFlags = ::juce::ResizableWindow::getDesktopWindowStyleFlags();
+    return isResizable() ? styleFlags | ::juce::ComponentPeer::windowHasMaximiseButton : styleFlags;
 }
 #endif
 
 void ManagedWindow::userTriedToCloseWindow()
 {
-    if (m_closeRequested)
-        m_closeRequested();
+    const auto closeRequested = m_closeRequested;
+    if (*closeRequested)
+        (*closeRequested)();
 }
 
-bool ManagedWindow::keyPressed(const juce::KeyPress& key)
+bool ManagedWindow::keyPressed(const ::juce::KeyPress& key)
 {
-    if (m_closeOnEscape && key == juce::KeyPress::escapeKey && m_closeRequested) {
-        m_closeRequested();
+    if (m_closeOnEscape && key == ::juce::KeyPress::escapeKey && *m_closeRequested) {
+        userTriedToCloseWindow();
         return true;
     }
 
-    return juce::ResizableWindow::keyPressed(key);
+    return ::juce::ResizableWindow::keyPressed(key);
 }
 
-} // namespace dawg::app::window
+} // namespace dawg::platform::juce::window

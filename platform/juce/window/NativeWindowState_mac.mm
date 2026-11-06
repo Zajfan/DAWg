@@ -4,16 +4,16 @@
 
 #import <AppKit/AppKit.h>
 
-namespace dawg::app::window::native {
+namespace dawg::platform::juce::window::native {
 
-WindowCapabilities queryCapabilities(const juce::ComponentPeer* peer) noexcept
+WindowCapabilities queryCapabilities(const ::juce::ComponentPeer* peer) noexcept
 {
     WindowCapabilities capabilities;
     capabilities.supportsMaximize = peer != nullptr && peer->getNativeHandle() != nullptr;
     return capabilities;
 }
 
-bool setMaximized(juce::ComponentPeer& peer, const bool shouldBeMaximized) noexcept
+bool setMaximized(::juce::ComponentPeer& peer, const bool shouldBeMaximized) noexcept
 {
     auto* window = static_cast<NSWindow*>(peer.getNativeHandle());
     if (window == nullptr)
@@ -24,12 +24,12 @@ bool setMaximized(juce::ComponentPeer& peer, const bool shouldBeMaximized) noexc
     return window.zoomed == shouldBeMaximized;
 }
 
-bool isMaximized(const juce::ComponentPeer& peer) noexcept
+bool isMaximized(const ::juce::ComponentPeer& peer) noexcept
 {
     auto* window = static_cast<NSWindow*>(peer.getNativeHandle());
     return window != nullptr && window.zoomed;
 }
 
-} // namespace dawg::app::window::native
+} // namespace dawg::platform::juce::window::native
 
 #endif

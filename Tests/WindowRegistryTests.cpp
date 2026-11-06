@@ -5,7 +5,7 @@
 #include <utility>
 #include <vector>
 
-namespace dawg::app::window {
+namespace dawg::platform::juce::window {
 namespace {
 
 int failureCount = 0;
@@ -208,11 +208,11 @@ void displayConversionUsesScaleAndOrigins()
 }
 
 } // namespace
-} // namespace dawg::app::window
+} // namespace dawg::platform::juce::window
 
 int main()
 {
-    using namespace dawg::app::window;
+    using namespace dawg::platform::juce::window;
 
     handlesAreUniqueAndParentCloseCascades();
     resizingClampsToRegisteredLimits();

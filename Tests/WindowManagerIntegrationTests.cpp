@@ -12,8 +12,9 @@
 #include <limits>
 #include <memory>
 #include <string_view>
+#include <vector>
 
-namespace dawg::app::window {
+namespace dawg::platform::juce::window {
 namespace {
 
 int failures = 0;
@@ -57,21 +58,21 @@ bool opacityEquals(const float actual, const float expected)
 
 void dispatchMessagesFor(std::chrono::milliseconds duration)
 {
-    auto* messageManager = juce::MessageManager::getInstance();
+    auto* messageManager = ::juce::MessageManager::getInstance();
     static_cast<void>(messageManager->runDispatchLoopUntil(static_cast<int>(duration.count())));
 }
 
-std::unique_ptr<juce::Component> makeContent()
+std::unique_ptr<::juce::Component> makeContent()
 {
-    return std::make_unique<juce::Component>();
+    return std::make_unique<::juce::Component>();
 }
 
 ManagedWindow* findManagedWindow(const char* name)
 {
-    for (int index = 0; index < juce::TopLevelWindow::getNumTopLevelWindows(); ++index) {
-        auto* topLevelWindow = juce::TopLevelWindow::getTopLevelWindow(index);
+    for (int index = 0; index < ::juce::TopLevelWindow::getNumTopLevelWindows(); ++index) {
+        auto* topLevelWindow = ::juce::TopLevelWindow::getTopLevelWindow(index);
         auto* candidate = dynamic_cast<ManagedWindow*>(topLevelWindow);
-        if (candidate != nullptr && candidate->getName() == juce::String(name))
+        if (candidate != nullptr && candidate->getName() == ::juce::String(name))
             return candidate;
     }
     return nullptr;
@@ -193,7 +194,7 @@ void testCreateResizeAndClose()
         directRequestedHandle = callbackHandle;
         ++directCloseRequestCount;
     };
-    ManagedWindow managedWindow("Callback Window", juce::Colours::darkgrey,
+    ManagedWindow managedWindow("Callback Window", ::juce::Colours::darkgrey,
                                 callbackOptions, makeContent(), [&callbackOptions, managerHandle] {
                                     if (callbackOptions.closeRequested)
                                         callbackOptions.closeRequested(managerHandle);
@@ -372,7 +373,7 @@ void testNativeMaximizeConfirmsStateBeforeReturning()
 {
     WindowOptions options;
     options.bounds = { 180, 180, 640, 480 };
-    ManagedWindow window("Native Maximize Regression", juce::Colours::darkgrey,
+    ManagedWindow window("Native Maximize Regression", ::juce::Colours::darkgrey,
                          options, makeContent(), [] {}, false);
     auto* peer = window.getPeer();
     expect(peer != nullptr, "native maximize regression has a peer");
@@ -435,6 +436,45 @@ void testCloseRequestRoutesThroughManager()
     expect(closeSucceeded, "close-routing callback closes through the manager");
     expect(!manager.getWindow(*handle).has_value(),
            "close-routing callback removes the managed window");
+}
+
+void testCloseCallbackLifetimeAndMutableState()
+{
+    std::vector<int> attempts;
+    WindowOptions options;
+    options.title = "Mutable Close Callback";
+    ManagedWindow reusable("Mutable Close Callback", ::juce::Colours::darkgrey,
+                           options, makeContent(), [attempt = 0, &attempts]() mutable {
+                               attempts.push_back(++attempt);
+                           }, true);
+    reusable.userTriedToCloseWindow();
+    reusable.userTriedToCloseWindow();
+    expect(reusable.keyPressed(::juce::KeyPress(::juce::KeyPress::escapeKey)),
+           "escape routes through the reusable close callback");
+    expect(attempts == std::vector<int> {1, 2, 3},
+           "close attempts preserve mutable callback state");
+
+    for (const bool viaEscape : {false, true}) {
+        std::unique_ptr<ManagedWindow> selfClosing;
+        bool aliveAfterClose = false;
+        auto lifetime = std::make_shared<int>(0);
+        std::weak_ptr<int> weakLifetime = lifetime;
+        selfClosing = std::make_unique<ManagedWindow>(
+            "Self Closing Callback", ::juce::Colours::darkgrey, options, makeContent(),
+            [lifetime, &weakLifetime, &selfClosing, &aliveAfterClose] {
+                selfClosing.reset();
+                aliveAfterClose = ! weakLifetime.expired();
+            }, true);
+        lifetime.reset();
+        if (viaEscape)
+            expect(selfClosing->keyPressed(::juce::KeyPress(::juce::KeyPress::escapeKey)),
+                   "escape can close its own non-modal window");
+        else
+            selfClosing->userTriedToCloseWindow();
+        expect(selfClosing == nullptr, "callback destroys the window synchronously");
+        expect(aliveAfterClose, "executing callback retains its captures after window destruction");
+        expect(weakLifetime.expired(), "callback captures are released after the call returns");
+    }
 }
 
 void testChildCascadeAndModalCompletion()
@@ -505,7 +545,7 @@ void testChildCascadeAndModalCompletion()
         auto* escapeWindow = findManagedWindow("Escape Dialog");
         expect(escapeWindow != nullptr, "escape-enabled dialog is discoverable");
         if (escapeWindow)
-            expect(escapeWindow->keyPressed(juce::KeyPress(juce::KeyPress::escapeKey)),
+            expect(escapeWindow->keyPressed(::juce::KeyPress(::juce::KeyPress::escapeKey)),
                    "escape closes an escape-enabled dialog");
         if (escapeWindow)
             expect(!escapeWindow->isCurrentlyModal(false),
@@ -524,7 +564,7 @@ void testChildCascadeAndModalCompletion()
         auto* noEscapeWindow = findManagedWindow("No Escape Dialog");
         expect(noEscapeWindow != nullptr, "escape-disabled dialog is discoverable");
         if (noEscapeWindow)
-            expect(!noEscapeWindow->keyPressed(juce::KeyPress(juce::KeyPress::escapeKey)),
+            expect(!noEscapeWindow->keyPressed(::juce::KeyPress(::juce::KeyPress::escapeKey)),
                    "escape does not close an escape-disabled dialog");
         expect(manager.getWindow(*noEscapeDialog).has_value(),
                "escape-disabled dialog remains open");
@@ -623,17 +663,18 @@ void testDisplaySnapshotAndConversion()
 }
 
 } // namespace
-} // namespace dawg::app::window
+} // namespace dawg::platform::juce::window
 
 int main()
 {
-    juce::ScopedJuceInitialiser_GUI juceInitialiser;
-    if (juce::Desktop::getInstance().getDisplays().displays.isEmpty())
+    ::juce::ScopedJuceInitialiser_GUI juceInitialiser;
+    if (::juce::Desktop::getInstance().getDisplays().displays.isEmpty())
         return 77;
 
-    using namespace dawg::app::window;
+    using namespace dawg::platform::juce::window;
     testCreateResizeAndClose();
     testContradictoryLimitsAreRejectedWithoutMutation();
+    testCloseCallbackLifetimeAndMutableState();
     testCloseRequestRoutesThroughManager();
     testNativeMaximizeConfirmsStateBeforeReturning();
     testWindowStatesAndCapabilities();
