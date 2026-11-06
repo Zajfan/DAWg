@@ -80,6 +80,23 @@ if(DAWG_BUILD_TESTS)
         $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
     )
     add_test(NAME dawg.project_file COMMAND dawg_project_file_tests)
+
+    add_executable(dawg_foundation_vertical_slice_tests
+        tests/integration/FoundationVerticalSliceTests.cpp
+    )
+    target_link_libraries(dawg_foundation_vertical_slice_tests PRIVATE
+        dawg_services_commands
+        dawg_services_persistence
+    )
+    target_compile_features(dawg_foundation_vertical_slice_tests PRIVATE cxx_std_23)
+    target_compile_options(dawg_foundation_vertical_slice_tests PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4;/WX>
+        $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
+    )
+    add_test(NAME dawg.foundation_vertical_slice
+        COMMAND dawg_foundation_vertical_slice_tests)
+    set_tests_properties(dawg.foundation_vertical_slice PROPERTIES LABELS "integration;headless")
 endif()
 
 if(NOT DAWG_BUILD_APP)

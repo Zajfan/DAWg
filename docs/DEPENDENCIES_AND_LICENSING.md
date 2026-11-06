@@ -28,3 +28,13 @@ No license has been selected for DAWg itself. Add a project license only after c
 
 DAWg requests C++26 for the application. The reusable engine and project model
 request C++20; persistence and its consumers require C++23 for `std::expected`. JUCE's published minimum C++ standard is C++17, with C++20 required for the optional Windows MIDI Services configuration. C++26 compiler and standard-library support varies by toolchain; confirm it on each target platform.
+
+## Dependency boundaries
+
+The JUCE and X11 dependencies stop at `platform/juce` and the `DAWg` application
+target. `dawg_engine_core`, `dawg_project_model`, and
+`dawg_services_commands` are display-free and can be built with
+`DAWG_BUILD_APP=OFF`. `dawg_services_persistence` depends on nlohmann/json only
+at its filesystem boundary and exposes standard-library project values to its
+callers. This separation is intentional: another future host can reuse the
+engine and project services without importing DAWg's desktop framework.
