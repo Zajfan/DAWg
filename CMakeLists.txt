@@ -36,6 +36,21 @@ if(DAWG_BUILD_TESTS)
     )
     add_test(NAME dawg.engine_core COMMAND dawg_engine_core_tests)
 
+    # This seam uses the real engine without fetching JUCE or requiring a device.
+    add_executable(dawg_juce_audio_callback_adapter_tests
+        tests/platform/JuceAudioCallbackAdapterTests.cpp
+        platform/juce/audio/JuceAudioCallbackAdapter.cpp
+    )
+    target_include_directories(dawg_juce_audio_callback_adapter_tests PRIVATE platform/juce)
+    target_link_libraries(dawg_juce_audio_callback_adapter_tests PRIVATE dawg_engine_core)
+    target_compile_options(dawg_juce_audio_callback_adapter_tests PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4;/WX>
+        $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
+    )
+    add_test(NAME dawg.juce_audio_callback_adapter COMMAND dawg_juce_audio_callback_adapter_tests)
+    set_tests_properties(dawg.juce_audio_callback_adapter PROPERTIES LABELS "platform;headless")
+
     add_executable(dawg_project_tests tests/project/ProjectTests.cpp)
     target_link_libraries(dawg_project_tests PRIVATE dawg_project_model)
     target_compile_features(dawg_project_tests PRIVATE cxx_std_20)
@@ -71,6 +86,8 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(JUCE)
 
+add_subdirectory(platform/juce)
+
 juce_add_gui_app(DAWg
     PRODUCT_NAME "DAWg"
     COMPANY_NAME "DAWg Project"
@@ -81,8 +98,6 @@ target_sources(DAWg
         Source/App/Main.cpp
         Source/App/MainComponent.cpp
         Source/App/MainComponent.h
-        Source/Audio/AudioAdapter.cpp
-        Source/Audio/AudioAdapter.h
         Source/Window/WindowRegistry.cpp
         Source/Window/WindowRegistry.h
         Source/Window/WindowTypes.h
@@ -108,7 +123,6 @@ target_compile_features(DAWg PRIVATE cxx_std_26)
 
 target_link_libraries(DAWg
     PRIVATE
-        dawg_engine_core
         juce::juce_audio_utils
         juce::juce_gui_extra
     PUBLIC
@@ -116,6 +130,8 @@ target_link_libraries(DAWg
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
 )
+
+add_subdirectory(apps/dawg)
 
 if(UNIX AND NOT APPLE)
     find_package(X11 REQUIRED)
@@ -127,7 +143,6 @@ endif()
 set(DAWG_OWN_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/App/Main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/App/MainComponent.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Audio/AudioAdapter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Window/WindowRegistry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Window/ManagedWindow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Window/WindowManager.cpp

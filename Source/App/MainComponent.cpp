@@ -15,7 +15,7 @@ MainComponent::MainComponent()
 
     m_restartButton.onClick = [this]
     {
-        const auto result = m_audioAdapter.initialise();
+        const auto result = m_audioBridge.initialise();
 
         if (result.failed())
             m_statusLabel.setText("Audio device error: " + result.getErrorMessage(),
@@ -25,7 +25,7 @@ MainComponent::MainComponent()
     };
     addAndMakeVisible(m_restartButton);
 
-    const auto result = m_audioAdapter.initialise();
+    const auto result = m_audioBridge.initialise();
 
     if (result.failed())
         m_statusLabel.setText("Audio device error: " + result.getErrorMessage(),
@@ -39,7 +39,7 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     stopTimer();
-    m_audioAdapter.shutdown();
+    m_audioBridge.shutdown();
 }
 
 void MainComponent::paint(juce::Graphics& graphics)
@@ -65,15 +65,15 @@ void MainComponent::timerCallback()
 
 void MainComponent::refreshAudioStatus()
 {
-    if (!m_audioAdapter.isDeviceReady())
+    if (!m_audioBridge.isDeviceReady())
     {
         m_statusLabel.setText("No audio device is ready. Check the device settings and retry.",
                               juce::dontSendNotification);
         return;
     }
 
-    const auto rate  = juce::String(m_audioAdapter.getSampleRate(), 0);
-    const auto block = juce::String(m_audioAdapter.getBlockSize());
+    const auto rate  = juce::String(m_audioBridge.sampleRate(), 0);
+    const auto block = juce::String(m_audioBridge.blockSize());
     m_statusLabel.setText("Audio device ready  |  " + rate + " Hz  |  block " + block + " samples",
                           juce::dontSendNotification);
 }

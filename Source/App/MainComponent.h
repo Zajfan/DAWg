@@ -1,6 +1,8 @@
 #pragma once
 
-#include "../Audio/AudioAdapter.h"
+#include "audio/JuceAudioDeviceBridge.h"
+
+#include <dawg/engine/AudioEngine.h>
 
 #include <juce_gui_extra/juce_gui_extra.h>
 
@@ -20,7 +22,8 @@ private:
     void timerCallback() override;
     void refreshAudioStatus();
 
-    dawg::app::audio::AudioAdapter m_audioAdapter;
+    dawg::engine::AudioEngine m_engine;
+    dawg::platform::juce::JuceAudioDeviceBridge m_audioBridge {m_engine};
     juce::Label m_titleLabel;
     juce::Label m_statusLabel;
     juce::TextButton m_restartButton { "Restart audio device" };
