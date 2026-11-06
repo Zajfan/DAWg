@@ -359,21 +359,38 @@ bool WindowManager::setWindowState(const WindowHandle handle, const WindowState 
 
     auto* window = it->second.get();
     bool success = true;
+
+    // JUCE implements Linux fullscreen for native-title-bar windows by sending
+    // an asynchronous maximize/unmaximize request on its own X11 connection.
+    // Reconcile that request on the native state connection before issuing a
+    // subsequent state transition, otherwise a later maximize can be cleared
+    // by the still-pending fullscreen restore.
+    const auto settleFullscreenRestore = [&]() {
+        if (! m_capabilities.supportsMaximize)
+            return true;
+        auto* peer = window->getPeer();
+        return peer != nullptr && native::setMaximized(*peer, false);
+    };
+
     switch (state) {
     case WindowState::normal:
-        if (snapshot->state == WindowState::maximized) {
+        if (success && snapshot->state == WindowState::maximized) {
             auto* peer = window->getPeer();
             success = peer != nullptr && native::setMaximized(*peer, false);
         }
         if (success && window->isMinimised())
             window->setMinimised(false);
-        if (success && window->isFullScreen())
+        if (success && window->isFullScreen()) {
             window->setFullScreen(false);
+            success = settleFullscreenRestore();
+        }
         break;
     case WindowState::minimized:
-        if (window->isFullScreen())
+        if (window->isFullScreen()) {
             window->setFullScreen(false);
-        if (snapshot->state == WindowState::maximized) {
+            success = settleFullscreenRestore();
+        }
+        if (success && snapshot->state == WindowState::maximized) {
             auto* peer = window->getPeer();
             success = peer != nullptr && native::setMaximized(*peer, false);
         }
@@ -397,10 +414,13 @@ bool WindowManager::setWindowState(const WindowHandle handle, const WindowState 
             return false;
         if (window->isMinimised())
             window->setMinimised(false);
-        if (window->isFullScreen())
+        if (window->isFullScreen()) {
             window->setFullScreen(false);
+            success = settleFullscreenRestore();
+        }
         auto* peer = window->getPeer();
-        success = peer != nullptr && native::setMaximized(*peer, true);
+        if (success)
+            success = peer != nullptr && native::setMaximized(*peer, true);
         break;
     }
     }
