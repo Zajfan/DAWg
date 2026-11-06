@@ -4,6 +4,7 @@
 #include <dawg/engine/EngineCommand.h>
 #include <dawg/engine/EngineConfig.h>
 #include <dawg/engine/MidiEvent.h>
+#include <dawg/engine/RenderSnapshotPublisher.h>
 #include <dawg/engine/TransportSnapshot.h>
 #include <dawg/engine/TransportState.h>
 
@@ -33,11 +34,20 @@ public:
     // retry later. Enqueue never mutates transport state, waits, or allocates.
     [[nodiscard]] bool enqueueCommand(const EngineCommand& command) noexcept;
 
+    // Single message-thread producer, independent of preparation. False means
+    // the caller should retry later; accepted edits coalesce until process().
+    [[nodiscard]] bool publishRenderSnapshot(RenderSnapshot snapshot) noexcept;
+
+    // Audio-thread observation, or read only while processing is stopped and
+    // synchronized with the reader. This is not concurrent UI telemetry.
+    [[nodiscard]] std::uint64_t renderSnapshotGeneration() const noexcept;
+
     // Audio-thread observation, or read only while processing is stopped and
     // synchronized with the reader. This is not a concurrent UI snapshot.
     [[nodiscard]] TransportState transportState() const noexcept;
 
-    // Applies at most 64 queued commands in FIFO order before rendering.
+    // Adopts the latest render snapshot, then applies at most 64 queued commands
+    // in FIFO order before rendering.
     // Bounded by queue capacity and supplied view; no allocation, I/O, blocking.
     // The initial renderer clears output even when unprepared, skips null
     // channels, and leaves the supplied MIDI and TransportSnapshot untouched.
@@ -47,6 +57,8 @@ public:
 
 private:
     std::unique_ptr<TransportCommandQueue> m_commandQueue;
+    RenderSnapshotPublisher m_snapshotPublisher;
+    RenderSnapshot m_renderSnapshot {};
     TransportState m_transportState {};
     bool m_prepared {};
 };

@@ -1,5 +1,6 @@
 add_library(dawg_engine_core STATIC
     src/AudioEngine.cpp
+    src/RenderSnapshotPublisher.cpp
     src/TransportCommandQueue.cpp
 )
 target_include_directories(dawg_engine_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

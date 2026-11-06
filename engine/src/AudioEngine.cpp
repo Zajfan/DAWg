@@ -19,6 +19,16 @@ bool AudioEngine::enqueueCommand(const EngineCommand& command) noexcept
     return m_commandQueue->enqueue(command);
 }
 
+bool AudioEngine::publishRenderSnapshot(const RenderSnapshot snapshot) noexcept
+{
+    return m_snapshotPublisher.publish(snapshot);
+}
+
+std::uint64_t AudioEngine::renderSnapshotGeneration() const noexcept
+{
+    return m_renderSnapshot.generation;
+}
+
 TransportState AudioEngine::transportState() const noexcept
 {
     return m_transportState;
@@ -43,6 +53,8 @@ void AudioEngine::reset() noexcept
 void AudioEngine::process(const AudioBufferView output, const MidiBufferView,
                           const TransportSnapshot&) noexcept
 {
+    m_renderSnapshot = m_snapshotPublisher.consume();
+
     EngineCommand command {};
     for (std::size_t count = 0; count < TransportCommandQueue::capacity; ++count)
     {
