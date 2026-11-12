@@ -128,7 +128,7 @@ ClipId addAudioClip(AudioClip clip);
 
 The methods assign the next monotonic nonzero ID when the incoming ID is zero, reject an explicit nonzero ID that collides, reject empty paths, unknown path kinds, zero sample rate, zero channels, zero frame count, unknown asset IDs, source offsets beyond the asset, lengths of zero, and lengths that exceed `frameCount - sourceOffset`. Use checked subtraction before comparing the clip length. Continue allocating above the largest loaded asset/clip ID and return zero on rejection without mutating state.
 
-Update `Project::fromSnapshot()` to accept only the normalized current version 2, validate unique nonzero track/asset/clip IDs, validate every clip asset reference and range, and preserve all vector order. Track, asset, and clip high-water marks must be computed independently.
+Update `Project::fromSnapshot()` to accept version 1 or normalized current version 2. For version 1, add empty asset/clip collections and normalize the owned state to format version 2 before validation; this keeps the existing v1 persistence loader compatible while Task 2 adds explicit file normalization. Validate unique nonzero track/asset/clip IDs, validate every clip asset reference and range, and preserve all vector order. Track, asset, and clip high-water marks must be computed independently.
 
 - [ ] **Step 6: Add the clip command and controller asset registration seam.**
 
