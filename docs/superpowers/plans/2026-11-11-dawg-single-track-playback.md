@@ -40,21 +40,21 @@
 
 **Interfaces:**
 - Consumes: existing `Project`, `ProjectSnapshot`, `ProjectCommand`, and `ProjectController` track-edit contracts.
-- Produces: `AudioAssetId`, `ClipId`, `AudioAsset`, `AudioClip`, a version-2 `ProjectSnapshot`, `Project::addAudioAsset(AudioAsset)`, `Project::addAudioClip(AudioClip)`, `project::AddAudioClip`, and `ProjectController::addAudioAsset(AudioAsset)`.
+- Produces: `MediaAssetId`, `ClipId`, `AudioAsset`, `AudioClip`, a version-2 `ProjectSnapshot`, `Project::addAudioAsset(AudioAsset)`, `Project::addAudioClip(AudioClip)`, `project::AddAudioClip`, and `ProjectController::addAudioAsset(AudioAsset)`.
 
 - [ ] **Step 1: Write the failing value-type and snapshot tests.**
 
 Add tests that compile and express the exact new values:
 
 ```cpp
-static_assert(std::is_same_v<AudioAssetId, std::uint64_t>);
+static_assert(std::is_same_v<MediaAssetId, std::uint64_t>);
 static_assert(std::is_same_v<ClipId, std::uint64_t>);
 
 const ProjectSnapshot snapshot {
     2,
     1,
     "Playback",
-    {{1, "fixtures/tone.wav", 48000, 1, 8}},
+    {{1, "fixtures/tone.wav", AudioAssetPathKind::projectRelative, 48000, 1, 8}},
     {{1, 1, 0, 0, 8}}
 };
 require(snapshot.assets.front().path == "fixtures/tone.wav", "asset path is owned");
@@ -79,12 +79,15 @@ Expected: compilation fails because the new IDs, collections, and asset/clip ope
 In `ProjectTypes.h`, add:
 
 ```cpp
-using AudioAssetId = std::uint64_t;
+using MediaAssetId = std::uint64_t;
 using ClipId = std::uint64_t;
 
+enum class AudioAssetPathKind : std::uint8_t { projectRelative, absolute };
+
 struct AudioAsset {
-    AudioAssetId id {};
+    MediaAssetId id {};
     std::string path;
+    AudioAssetPathKind pathKind {AudioAssetPathKind::projectRelative};
     std::uint32_t sampleRate {};
     std::uint16_t channelCount {};
     std::uint64_t frameCount {};
@@ -93,7 +96,7 @@ struct AudioAsset {
 
 struct AudioClip {
     ClipId id {};
-    AudioAssetId assetId {};
+    MediaAssetId assetId {};
     std::uint64_t startSample {};
     std::uint64_t sourceOffset {};
     std::uint64_t lengthSamples {};
@@ -119,11 +122,11 @@ Change `Project::create()` to create version 2. Keep the existing track ordering
 Implement these exact methods:
 
 ```cpp
-AudioAssetId addAudioAsset(AudioAsset asset);
+MediaAssetId addAudioAsset(AudioAsset asset);
 ClipId addAudioClip(AudioClip clip);
 ```
 
-The methods assign the next monotonic nonzero ID when the incoming ID is zero, reject an explicit nonzero ID that collides, reject empty paths, zero sample rate, zero channels, zero frame count, unknown asset IDs, source offsets beyond the asset, lengths of zero, and lengths that exceed `frameCount - sourceOffset`. Use checked subtraction before comparing the clip length. Continue allocating above the largest loaded asset/clip ID and return zero on rejection without mutating state.
+The methods assign the next monotonic nonzero ID when the incoming ID is zero, reject an explicit nonzero ID that collides, reject empty paths, unknown path kinds, zero sample rate, zero channels, zero frame count, unknown asset IDs, source offsets beyond the asset, lengths of zero, and lengths that exceed `frameCount - sourceOffset`. Use checked subtraction before comparing the clip length. Continue allocating above the largest loaded asset/clip ID and return zero on rejection without mutating state.
 
 Update `Project::fromSnapshot()` to accept only the normalized current version 2, validate unique nonzero track/asset/clip IDs, validate every clip asset reference and range, and preserve all vector order. Track, asset, and clip high-water marks must be computed independently.
 
@@ -139,7 +142,7 @@ using ProjectCommand = std::variant<AddAudioTrack, RemoveTrack, RenameTrack, Add
 Add:
 
 ```cpp
-[[nodiscard]] std::optional<AudioAssetId> addAudioAsset(project::AudioAsset asset);
+[[nodiscard]] std::optional<MediaAssetId> addAudioAsset(project::AudioAsset asset);
 ```
 
 to `ProjectController`. The controller must publish a new generation after a successful asset registration or clip command. `latestRenderSnapshot()` must continue to expose track count and generation without exposing mutable project storage. The controller must reject generation overflow before either operation mutates the project.
@@ -150,7 +153,8 @@ Cover these cases explicitly:
 
 ```cpp
 auto project = Project::create("Playback", 1);
-const auto assetId = project.addAudioAsset({0, "tone.wav", 48000, 1, 8});
+const auto assetId = project.addAudioAsset({0, "tone.wav", AudioAssetPathKind::projectRelative,
+                                           48000, 1, 8});
 require(assetId == 1, "first asset receives ID one");
 require(project.addAudioClip({0, assetId, 0, 0, 8}) == 1, "first clip receives ID one");
 require(project.addAudioClip({0, 999, 0, 0, 8}) == 0, "unknown asset is rejected");
@@ -224,8 +228,8 @@ In `ProjectFile.cpp`, emit exactly these public fields:
   "projectId": 1,
   "name": "Playback",
   "tracks": [],
-  "assets": [{"id": 1, "path": "audio/tone.wav", "sampleRate": 48000,
-               "channelCount": 1, "frameCount": 960}],
+  "assets": [{"id": 1, "path": "audio/tone.wav", "pathKind": "projectRelative",
+              "sampleRate": 48000, "channelCount": 1, "frameCount": 960}],
   "clips": [{"id": 1, "assetId": 1, "startSample": 0,
              "sourceOffset": 0, "lengthSamples": 960}]
 }
@@ -235,7 +239,7 @@ Require `formatVersion == 2` for saves, validate the complete snapshot through `
 
 - [ ] **Step 4: Implement strict v1/v2 decoding with normalization.**
 
-Accept integer version 1 or 2. Decode the common project and track fields. For version 1, treat absent `assets` and `clips` as empty arrays and set `snapshot.formatVersion = 2` before model validation. For version 2, require both arrays and require every asset/clip field to have the expected JSON type. Route duplicate IDs, references, and range failures through the existing `invalidFormat` error code with a nonempty diagnostic. Continue rejecting unsupported versions before narrowing values.
+Accept integer version 1 or 2. Decode the common project and track fields. For version 1, treat absent `assets` and `clips` as empty arrays and set `snapshot.formatVersion = 2` before model validation. For version 2, require both arrays, require every asset/clip field to have the expected JSON type, and decode `pathKind` as the exact strings `projectRelative` or `absolute`. Route duplicate IDs, unknown path kinds, references, and range failures through the existing `invalidFormat` error code with a nonempty diagnostic. Continue rejecting unsupported versions before narrowing values.
 
 - [ ] **Step 5: Update persistence tests for replacement and failure atomicity.**
 
@@ -522,8 +526,8 @@ void setPlaybackBuffer(engine::PlaybackRingBuffer*) noexcept;
 [[nodiscard]] bool play() noexcept;
 [[nodiscard]] bool stop() noexcept;
 [[nodiscard]] bool returnToStart() noexcept;
-[[nodiscard]] bool addAudioAsset(project::AudioAsset);
-[[nodiscard]] bool addAudioClip(project::AudioClip);
+[[nodiscard]] std::optional<project::MediaAssetId> addAudioAsset(project::AudioAsset);
+[[nodiscard]] std::optional<project::ClipId> addAudioClip(project::AudioClip);
 ```
 
 `flushRenderSnapshot()` must copy the controller snapshot, choose the first valid clip and its asset for the single-track renderer, set `PlaybackDescription` fields, and publish the fixed value to the engine. It must publish an empty playback description when the project has no valid media or the media service has marked the asset unavailable. Queue-full results return false without changing UI-owned state.
@@ -534,7 +538,7 @@ Extend `EditorViewModel` with owned playback fields: `hasAudioClip`, `clipLength
 
 - [ ] **Step 5: Wire application import through JUCE's message thread.**
 
-Make `Application` own `JuceWavAssetReaderFactory` and `AudioMediaService` in the destruction order `MainComponent`, media service, audio bridge, state, controller, engine, factory as required by actual references. The import callback opens a JUCE `FileChooser`, calls `inspect()`, registers the returned asset, creates a full-length clip at timeline sample zero, arms the media service with a ring capacity of at least four device blocks, binds the buffer in `ApplicationState`, starts the worker, and refreshes the view. If any step fails, retain the prior project and show the typed error in the status value.
+Make `Application` own `JuceWavAssetReaderFactory` and `AudioMediaService` in the destruction order `MainComponent`, media service, audio bridge, state, controller, engine, factory as required by actual references. The import callback opens a JUCE `FileChooser`, calls `inspect()`, registers the returned asset, creates a full-length clip at timeline sample zero, arms the media service with a ring capacity of at least four device blocks, binds the buffer in `ApplicationState`, starts the worker, and refreshes the view. Preserve the selected path as `absolute` when no project directory is known; use `projectRelative` only when a known project directory conversion is explicit, and never rewrite an absolute path silently. If any step fails, retain the prior project and show the typed error in the status value.
 
 - [ ] **Step 6: Wire transport controls and timer status.**
 
