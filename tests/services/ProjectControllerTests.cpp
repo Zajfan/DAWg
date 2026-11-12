@@ -93,10 +93,35 @@ void testFailedCommandsPreserveState()
             "project snapshot owns its values across edits");
 }
 
+void testMediaEditsPublishGenerations()
+{
+    ProjectController controller {Project::create("Playback", 1)};
+    const auto asset = controller.addAudioAsset(
+        {0, "tone.wav", AudioAssetPathKind::projectRelative, 48000, 1, 8});
+    require(asset == std::optional<MediaAssetId> {1}, "asset registration returns its allocated ID");
+    require(controller.latestRenderSnapshot().generation == 1 &&
+                controller.latestRenderSnapshot().trackCount == 0,
+            "asset registration advances generation without changing track count");
+    require(controller.dispatch(AddAudioClip {{0, *asset, 0, 0, 8}}), "clip command succeeds");
+    require(controller.latestRenderSnapshot().generation == 2,
+            "clip command advances generation without changing track count");
+
+    const auto saved = controller.snapshot();
+    require(! controller.addAudioAsset({0, "", AudioAssetPathKind::projectRelative, 48000, 1, 8}),
+            "invalid asset registration is rejected");
+    require(! controller.dispatch(AddAudioClip {{0, *asset, 0, 7, 2}}),
+            "invalid clip command is rejected");
+    const auto after = controller.snapshot();
+    require(after.assets == saved.assets && after.clips == saved.clips,
+            "rejected media edits leave project storage unchanged");
+    require(controller.latestRenderSnapshot().generation == 2,
+            "rejected media edits consume no generations");
+}
+
 void testLoadedProjectAndIndependentControllers()
 {
-    auto loaded = Project::fromSnapshot({1, 7, "Loaded", {{9, "Lead", true, false},
-                                                        {3, "Bass", false, true}}});
+    auto loaded = Project::fromSnapshot({2, 7, "Loaded", {{9, "Lead", true, false},
+                                                        {3, "Bass", false, true}}, {}, {}});
     require(loaded.has_value(), "loaded project reconstructs");
     ProjectController controller {std::move(*loaded)};
     require(controller.latestRenderSnapshot().generation == 0 &&
@@ -181,6 +206,7 @@ int main()
     testPublicationBoundary();
     testProjectEditsPublishAtBlockBoundary();
     testFailedCommandsPreserveState();
+    testMediaEditsPublishGenerations();
     testLoadedProjectAndIndependentControllers();
     testPublisherCoalescingAndReuse();
     testPublisherConcurrentCoherence();

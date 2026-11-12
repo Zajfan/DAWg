@@ -97,7 +97,7 @@ void testRoundTrip(const fs::path& root)
                            "\"id\"", "\"muted\"", "\"solo\""})
         require(document.find(key) != std::string::npos, "document has the public schema fields");
 
-    const ProjectSnapshot empty {1, std::numeric_limits<ProjectId>::max(), "Empty", {}};
+    const ProjectSnapshot empty {1, std::numeric_limits<ProjectId>::max(), "Empty", {}, {}, {}};
     require(saveProject(empty, path).has_value(), "existing file can be replaced with empty project");
     const auto reloaded = loadProject(path);
     require(reloaded.has_value() && reloaded->tracks.empty() && reloaded->id == empty.id,
@@ -179,16 +179,16 @@ void testMalformedDocuments(const fs::path& root)
 void testRejectedSaves(const fs::path& root)
 {
     const auto path = root / "preserved.dawg";
-    const ProjectSnapshot valid {1, 42, "Original", {{1, "Track", false, true}}};
+    const ProjectSnapshot valid {1, 42, "Original", {{1, "Track", false, true}}, {}, {}};
     require(saveProject(valid, path).has_value(), "create original destination");
     const auto before = readDocument(path);
     const auto entries = entryCount(root);
     const std::array<ProjectSnapshot, 6> invalid {{
-        {1, 0, "P", {}}, {1, 1, "", {}},
-        {1, 1, "P", {{0, "T", false, false}}},
-        {1, 1, "P", {{1, "", false, false}}},
-        {1, 1, "P", {{7, "T", false, false}, {7, "U", true, false}}},
-        {1, 1, std::string(1, static_cast<char>(0xff)), {}}
+        {1, 0, "P", {}, {}, {}}, {1, 1, "", {}, {}, {}},
+        {1, 1, "P", {{0, "T", false, false}}, {}, {}},
+        {1, 1, "P", {{1, "", false, false}}, {}, {}},
+        {1, 1, "P", {{7, "T", false, false}, {7, "U", true, false}}, {}, {}},
+        {1, 1, std::string(1, static_cast<char>(0xff)), {}, {}, {}}
     }};
     for (const auto& snapshot : invalid)
     {
@@ -204,7 +204,7 @@ void testRejectedSaves(const fs::path& root)
 
 void testPathFailures(const fs::path& root)
 {
-    const ProjectSnapshot snapshot {1, 42, "Original", {}};
+    const ProjectSnapshot snapshot {1, 42, "Original", {}, {}, {}};
     for (const auto& path : {fs::path {}, root / ".", root / "..",
                              root / std::string("nul\0suffix", 10)})
     {
@@ -228,7 +228,7 @@ void testPathFailures(const fs::path& root)
 
 void testRenameFailure(const fs::path& root)
 {
-    const ProjectSnapshot snapshot {1, 7, "Replacement", {}};
+    const ProjectSnapshot snapshot {1, 7, "Replacement", {}, {}, {}};
     const auto destination = root / "directory.dawg";
     fs::create_directory(destination);
     const auto marker = destination / "keep.dawg";
@@ -245,10 +245,10 @@ void testRenameFailure(const fs::path& root)
 void testReplacement(const fs::path& root)
 {
     const auto path = root / "replace.dawg";
-    const ProjectSnapshot original {1, 1, "Long original name", {{99, "Original", true, true}}};
+    const ProjectSnapshot original {1, 1, "Long original name", {{99, "Original", true, true}}, {}, {}};
     require(saveProject(original, path).has_value(), "seed replaceable file");
     const auto entries = entryCount(root);
-    const ProjectSnapshot replacement {1, 2, "New", {}};
+    const ProjectSnapshot replacement {1, 2, "New", {}, {}, {}};
     require(saveProject(replacement, path).has_value(), "replace existing destination");
     const auto loaded = loadProject(path);
     require(loaded.has_value() && loaded->id == 2 && loaded->name == "New" && loaded->tracks.empty(),

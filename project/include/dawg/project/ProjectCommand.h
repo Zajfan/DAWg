@@ -22,6 +22,11 @@ struct RenameTrack
     std::string name;
 };
 
-using ProjectCommand = std::variant<AddAudioTrack, RemoveTrack, RenameTrack>;
+struct AddAudioClip
+{
+    AudioClip clip;
+};
+
+using ProjectCommand = std::variant<AddAudioTrack, RemoveTrack, RenameTrack, AddAudioClip>;
 
 } // namespace dawg::project

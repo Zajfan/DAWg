@@ -3,6 +3,8 @@
 #include <dawg/engine/RenderSnapshot.h>
 #include <dawg/project/Project.h>
 
+#include <optional>
+
 namespace dawg::commands {
 
 // Message-thread-only command coordinator. The application separately publishes
@@ -15,6 +17,7 @@ public:
 
     // Rejected commands and exhausted generation/track counts leave state intact.
     [[nodiscard]] bool dispatch(project::ProjectCommand command);
+    [[nodiscard]] std::optional<project::MediaAssetId> addAudioAsset(project::AudioAsset asset);
     [[nodiscard]] project::ProjectSnapshot snapshot() const;
     [[nodiscard]] engine::RenderSnapshot latestRenderSnapshot() const noexcept;
 

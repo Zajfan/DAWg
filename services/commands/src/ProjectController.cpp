@@ -33,6 +33,17 @@ bool ProjectController::dispatch(project::ProjectCommand command)
     return true;
 }
 
+std::optional<project::MediaAssetId> ProjectController::addAudioAsset(project::AudioAsset asset)
+{
+    if (m_renderSnapshot.generation == std::numeric_limits<std::uint64_t>::max())
+        return std::nullopt;
+    const auto id = m_project.addAudioAsset(std::move(asset));
+    if (id == 0)
+        return std::nullopt;
+    ++m_renderSnapshot.generation;
+    return id;
+}
+
 project::ProjectSnapshot ProjectController::snapshot() const
 {
     return m_project.snapshot();

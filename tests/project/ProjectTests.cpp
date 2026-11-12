@@ -12,6 +12,8 @@ using namespace dawg::project;
 
 static_assert(std::is_same_v<ProjectId, std::uint64_t>);
 static_assert(std::is_same_v<TrackId, std::uint64_t>);
+static_assert(std::is_same_v<MediaAssetId, std::uint64_t>);
+static_assert(std::is_same_v<ClipId, std::uint64_t>);
 
 void require(const bool condition, const char* message)
 {
@@ -48,6 +50,25 @@ std::string serialize(const ProjectSnapshot& snapshot)
         bytes.push_back(track.muted ? '\1' : '\0');
         bytes.push_back(track.solo ? '\1' : '\0');
     }
+    appendInteger(snapshot.assets.size());
+    for (const auto& asset : snapshot.assets)
+    {
+        appendInteger(asset.id);
+        appendString(asset.path);
+        appendInteger(static_cast<std::uint8_t>(asset.pathKind));
+        appendInteger(asset.sampleRate);
+        appendInteger(asset.channelCount);
+        appendInteger(asset.frameCount);
+    }
+    appendInteger(snapshot.clips.size());
+    for (const auto& clip : snapshot.clips)
+    {
+        appendInteger(clip.id);
+        appendInteger(clip.assetId);
+        appendInteger(clip.startSample);
+        appendInteger(clip.sourceOffset);
+        appendInteger(clip.lengthSamples);
+    }
     return bytes;
 }
 
@@ -55,7 +76,7 @@ void testIdentityAndEdits()
 {
     auto project = Project::create("Untitled", 1);
     const auto empty = project.snapshot();
-    require(empty.formatVersion == 1 && empty.id == 1 && empty.name == "Untitled",
+    require(empty.formatVersion == 2 && empty.id == 1 && empty.name == "Untitled",
             "new snapshot preserves version, supplied project ID and name");
     require(empty.tracks.empty(), "new project has no tracks");
 
@@ -68,7 +89,7 @@ void testIdentityAndEdits()
     require(! project.removeTrack(second), "removed track cannot be removed twice");
 
     const auto snapshot = project.snapshot();
-    require(snapshot.formatVersion == 1 && snapshot.id == 1 && snapshot.name == "Untitled",
+    require(snapshot.formatVersion == 2 && snapshot.id == 1 && snapshot.name == "Untitled",
             "edits preserve project identity, name and format version");
     require(snapshot.tracks == std::vector<Track> {{first, "Vocal", false, false}},
             "snapshot contains remaining renamed track with stable ID and default flags");
@@ -158,7 +179,7 @@ void testSnapshotIsolation()
     copy.tracks.front() = {900, "Changed", true, true};
     copy.tracks.push_back({901, "Added", true, true});
     const auto original = project.snapshot();
-    require(original.formatVersion == 1 && original.id == 17 && original.name == "Snapshot",
+    require(original.formatVersion == 2 && original.id == 17 && original.name == "Snapshot",
             "editing a snapshot does not change project metadata");
     require(original.tracks == std::vector<Track> {{first, "Original", false, false}},
             "editing a snapshot does not change project tracks or flags");
@@ -170,9 +191,9 @@ void testSnapshotIsolation()
 
 void testSnapshotReconstruction()
 {
-    ProjectSnapshot loaded {1, 42, "Loaded arrangement", {
+    ProjectSnapshot loaded {2, 42, "Loaded arrangement", {
         {17, "Same name", true, false}, {4000, "Lead", false, true},
-        {3, "Same name", true, true}, {900, "Drums", false, false}}};
+        {3, "Same name", true, true}, {900, "Drums", false, false}}, {}, {}};
     const auto before = serialize(loaded);
     auto project = Project::fromSnapshot(loaded);
     require(project.has_value(), "valid sparse snapshot can reconstruct an editable project");
@@ -195,7 +216,7 @@ void testSnapshotReconstruction()
                 {4002, "Command", false, false}},
             "subsequent allocations append in order with default flags and monotonic IDs");
 
-    auto empty = Project::fromSnapshot(ProjectSnapshot {1, 9, "Empty", {}});
+    auto empty = Project::fromSnapshot(ProjectSnapshot {2, 9, "Empty", {}, {}, {}});
     require(empty.has_value(), "empty snapshot can reconstruct a project");
     require(empty->addAudioTrack("First") == 1, "empty loaded project allocates from ID one");
 }
@@ -204,7 +225,7 @@ void testSnapshotIdExhaustion()
 {
     constexpr auto maximum = std::numeric_limits<TrackId>::max();
     auto nearLimit = Project::fromSnapshot(ProjectSnapshot {
-        1, 1, "Near limit", {{maximum - 1, "Existing", false, false}}});
+        2, 1, "Near limit", {{maximum - 1, "Existing", false, false}}, {}, {}});
     require(nearLimit.has_value(), "snapshot with penultimate track ID is accepted");
     require(nearLimit->addAudioTrack("Last") == maximum,
             "largest representable ID can be allocated exactly once after loading");
@@ -218,7 +239,7 @@ void testSnapshotIdExhaustion()
     require(nearLimit->addAudioTrack("Reuse") == 0, "removal cannot reset exhausted IDs");
 
     auto exhausted = Project::fromSnapshot(ProjectSnapshot {
-        1, 2, "Exhausted", {{maximum, "Maximum", true, true}, {4, "Lower", false, false}}});
+        2, 2, "Exhausted", {{maximum, "Maximum", true, true}, {4, "Lower", false, false}}, {}, {}});
     require(exhausted.has_value(), "snapshot containing maximum ID remains loadable");
     const auto before = serialize(exhausted->snapshot());
     require(exhausted->addAudioTrack("Overflow") == 0,
@@ -230,15 +251,15 @@ void testSnapshotIdExhaustion()
 void testInvalidSnapshots()
 {
     const std::array<ProjectSnapshot, 8> invalid {{
-        {0, 1, "Version zero", {}},
-        {2, 1, "Unsupported version", {}},
-        {std::numeric_limits<std::uint32_t>::max(), 1, "Unsupported version", {}},
-        {1, 0, "Invalid project ID", {}},
-        {1, 1, "", {}},
-        {1, 1, "Invalid track ID", {{0, "Track", false, false}}},
-        {1, 1, "Empty track name", {{5, "", false, false}}},
-        {1, 1, "Duplicate track IDs", {
-            {7, "First", false, false}, {9, "Middle", true, false}, {7, "Last", false, true}}}
+        {0, 1, "Version zero", {}, {}, {}},
+        {1, 1, "Unsupported version", {}, {}, {}},
+        {std::numeric_limits<std::uint32_t>::max(), 1, "Unsupported version", {}, {}, {}},
+        {2, 0, "Invalid project ID", {}, {}, {}},
+        {2, 1, "", {}, {}, {}},
+        {2, 1, "Invalid track ID", {{0, "Track", false, false}}, {}, {}},
+        {2, 1, "Empty track name", {{5, "", false, false}}, {}, {}},
+        {2, 1, "Duplicate track IDs", {
+            {7, "First", false, false}, {9, "Middle", true, false}, {7, "Last", false, true}}, {}, {}}
     }};
     for (const auto& snapshot : invalid)
     {
@@ -246,6 +267,88 @@ void testInvalidSnapshots()
         require(! Project::fromSnapshot(snapshot).has_value(), "invalid snapshot is rejected");
         require(serialize(snapshot) == before, "rejected reconstruction leaves input unchanged");
     }
+}
+
+void testAudioAssetsAndClips()
+{
+    const ProjectSnapshot valueSnapshot {
+        2,
+        1,
+        "Playback",
+        {},
+        {{1, "fixtures/tone.wav", AudioAssetPathKind::projectRelative, 48000, 1, 8}},
+        {{1, 1, 0, 0, 8}}
+    };
+    require(valueSnapshot.assets.front().path == "fixtures/tone.wav", "asset path is owned");
+    require(valueSnapshot.clips.front().lengthSamples == 8, "clip length is expressed in samples");
+
+    auto project = Project::create("Playback", 1);
+    const auto assetId = project.addAudioAsset({0, "tone.wav", AudioAssetPathKind::projectRelative,
+                                                48000, 1, 8});
+    require(assetId == 1, "first asset receives ID one");
+    require(project.addAudioClip({0, assetId, 0, 0, 8}) == 1, "first clip receives ID one");
+    require(project.addAudioClip({0, 999, 0, 0, 8}) == 0, "unknown asset is rejected");
+    require(project.addAudioClip({0, assetId, 0, 9, 1}) == 0,
+            "source offset beyond asset frames is rejected");
+    require(project.addAudioClip({0, assetId, 0, 0, 0}) == 0, "empty clip range is rejected");
+    require(project.addAudioClip({0, assetId, 0, 7, 2}) == 0,
+            "clip range cannot exceed asset frames");
+
+    const auto before = serialize(project.snapshot());
+    for (const auto& asset : std::array<AudioAsset, 5> {{
+             {0, "", AudioAssetPathKind::projectRelative, 48000, 1, 8},
+             {0, "bad-kind.wav", static_cast<AudioAssetPathKind>(2), 48000, 1, 8},
+             {0, "no-rate.wav", AudioAssetPathKind::absolute, 0, 1, 8},
+             {0, "no-channels.wav", AudioAssetPathKind::absolute, 48000, 0, 8},
+             {0, "no-frames.wav", AudioAssetPathKind::absolute, 48000, 1, 0},
+         }})
+    {
+        require(project.addAudioAsset(asset) == 0, "invalid asset is rejected");
+        require(serialize(project.snapshot()) == before, "invalid asset leaves every value unchanged");
+    }
+    require(project.addAudioAsset({assetId, "duplicate.wav", AudioAssetPathKind::absolute, 1, 1, 1}) == 0,
+            "duplicate explicit asset ID is rejected");
+    require(project.addAudioAsset({0, "next.wav", AudioAssetPathKind::absolute, 44100, 2, 1}) == 2,
+            "rejected assets do not consume IDs");
+    require(project.addAudioClip({0, assetId, 0, 0, 1}) == 2,
+            "rejected clips do not consume IDs");
+    require(project.addAudioClip({1, assetId, 0, 0, 1}) == 0,
+            "duplicate explicit clip ID is rejected");
+
+    auto copy = project.snapshot();
+    copy.assets.front().path = "changed.wav";
+    copy.assets.push_back({99, "extra.wav", AudioAssetPathKind::absolute, 1, 1, 1});
+    copy.clips.front().lengthSamples = 1;
+    copy.clips.push_back({99, assetId, 0, 0, 1});
+    const auto original = project.snapshot();
+    require(original.assets.front().path == "tone.wav" && original.assets.size() == 2,
+            "snapshot asset paths and vectors do not alias project storage");
+    require(original.clips.front().lengthSamples == 8 && original.clips.size() == 2,
+            "snapshot clips do not alias project storage");
+
+    auto loaded = Project::fromSnapshot({2, 9, "Sparse", {},
+                                         {{8, "eight.wav", AudioAssetPathKind::absolute, 1, 1, 9}},
+                                         {{11, 8, 0, 1, 8}}});
+    require(loaded.has_value(), "valid media snapshot reconstructs");
+    require(loaded->addAudioAsset({0, "later.wav", AudioAssetPathKind::absolute, 1, 1, 1}) == 9,
+            "loaded asset allocation resumes above its independent maximum");
+    require(loaded->addAudioClip({0, 8, 0, 0, 1}) == 12,
+            "loaded clip allocation resumes above its independent maximum");
+
+    const std::array<ProjectSnapshot, 8> invalid {{
+        {2, 1, "Duplicate asset", {}, {{1, "a.wav", AudioAssetPathKind::absolute, 1, 1, 1},
+                                         {1, "b.wav", AudioAssetPathKind::absolute, 1, 1, 1}}, {}},
+        {2, 1, "Zero asset", {}, {{0, "a.wav", AudioAssetPathKind::absolute, 1, 1, 1}}, {}},
+        {2, 1, "Zero sample rate", {}, {{1, "a.wav", AudioAssetPathKind::absolute, 0, 1, 1}}, {}},
+        {2, 1, "Invalid kind", {}, {{1, "a.wav", static_cast<AudioAssetPathKind>(2), 1, 1, 1}}, {}},
+        {2, 1, "Unknown asset", {}, {}, {{1, 7, 0, 0, 1}}},
+        {2, 1, "Zero clip", {}, {{1, "a.wav", AudioAssetPathKind::absolute, 1, 1, 1}}, {{0, 1, 0, 0, 1}}},
+        {2, 1, "Duplicate clip", {}, {{1, "a.wav", AudioAssetPathKind::absolute, 1, 1, 1}},
+         {{1, 1, 0, 0, 1}, {1, 1, 1, 0, 1}}},
+        {2, 1, "Invalid range", {}, {{1, "a.wav", AudioAssetPathKind::absolute, 1, 1, 1}}, {{1, 1, 0, 1, 1}}},
+    }};
+    for (const auto& snapshot : invalid)
+        require(! Project::fromSnapshot(snapshot).has_value(), "invalid media snapshot is rejected");
 }
 }
 
@@ -259,5 +362,6 @@ int main()
     testSnapshotReconstruction();
     testSnapshotIdExhaustion();
     testInvalidSnapshots();
-    std::puts("PASS: 8 project behavior tests");
+    testAudioAssetsAndClips();
+    std::puts("PASS: 9 project behavior tests");
 }

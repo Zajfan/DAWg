@@ -13,6 +13,8 @@ bool Project::apply(const ProjectCommand& command)
             return addAudioTrack(operation.name) != 0;
         else if constexpr (std::is_same_v<Operation, RemoveTrack>)
             return removeTrack(operation.id);
+        else if constexpr (std::is_same_v<Operation, AddAudioClip>)
+            return addAudioClip(operation.clip) != 0;
         else
             return renameTrack(operation.id, operation.name);
     }, command);

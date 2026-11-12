@@ -119,7 +119,7 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
         return failure(Code::invalidFormat, "Expected an unsigned projectId and a tracks array");
 
     project::ProjectSnapshot snapshot {
-        1, id.get<project::ProjectId>(), document.at("name").get<std::string>(), {}};
+        1, id.get<project::ProjectId>(), document.at("name").get<std::string>(), {}, {}, {}};
     snapshot.tracks.reserve(tracks.size());
     for (const auto& track : tracks)
     {
