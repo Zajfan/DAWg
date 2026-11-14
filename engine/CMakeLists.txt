@@ -14,6 +14,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/BrickwallLimiterNode.cpp
     src/dsp/DynamicsCompressorNode.cpp
     src/dsp/ParametricEQNode.cpp
+    src/dsp/TnhcSynthNode.cpp
 )
 target_include_directories(dawg_engine_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(dawg_engine_core PUBLIC Threads::Threads)

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace dawg::project {
 
@@ -9,6 +10,10 @@ using ProjectId = std::uint64_t;
 using TrackId = std::uint64_t;
 using MediaAssetId = std::uint64_t;
 using ClipId = std::uint64_t;
+using NoteId = std::uint64_t;
+using MidiClipId = std::uint64_t;
+
+enum class TrackKind : std::uint8_t { audio, instrument };
 
 enum class AudioAssetPathKind : std::uint8_t { projectRelative, absolute };
 
@@ -39,6 +44,28 @@ struct AudioClip
     friend bool operator==(const AudioClip&, const AudioClip&) = default;
 };
 
+struct MidiNote
+{
+    NoteId id {};
+    std::uint8_t pitch {60};
+    std::uint8_t velocity {100};
+    std::uint64_t startSample {0};
+    std::uint64_t lengthSamples {24000};
+
+    friend bool operator==(const MidiNote&, const MidiNote&) = default;
+};
+
+struct MidiClip
+{
+    MidiClipId id {};
+    TrackId trackId {};
+    std::uint64_t startSample {0};
+    std::uint64_t lengthSamples {96000};
+    std::vector<MidiNote> notes;
+
+    friend bool operator==(const MidiClip&, const MidiClip&) = default;
+};
+
 struct Track
 {
     TrackId id {};
@@ -49,6 +76,7 @@ struct Track
     float pan {0.0f};
     bool phaseInvert {};
     bool recordArmed {};
+    TrackKind kind {TrackKind::audio};
 
     friend bool operator==(const Track&, const Track&) = default;
 };

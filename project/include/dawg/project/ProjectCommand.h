@@ -13,6 +13,11 @@ struct AddAudioTrack
     std::string name;
 };
 
+struct AddInstrumentTrack
+{
+    std::string name;
+};
+
 struct RemoveTrack
 {
     TrackId id {};
@@ -114,8 +119,46 @@ struct SetClipGainFade
     std::uint32_t fadeOutSamples {};
 };
 
+struct AddMidiClip
+{
+    MidiClip clip;
+};
+
+struct RemoveMidiClip
+{
+    MidiClipId id {};
+};
+
+struct AddMidiNote
+{
+    MidiClipId clipId {};
+    MidiNote note {};
+};
+
+struct RemoveMidiNote
+{
+    MidiClipId clipId {};
+    NoteId noteId {};
+};
+
+struct MoveMidiNote
+{
+    MidiClipId clipId {};
+    NoteId noteId {};
+    std::uint64_t newStartSample {};
+    std::uint8_t newPitch {};
+};
+
+struct ResizeMidiNote
+{
+    MidiClipId clipId {};
+    NoteId noteId {};
+    std::uint64_t newLengthSamples {};
+};
+
 using ProjectCommand = std::variant<
     AddAudioTrack,
+    AddInstrumentTrack,
     RemoveTrack,
     RenameTrack,
     ReorderTracks,
@@ -130,6 +173,12 @@ using ProjectCommand = std::variant<
     SplitClip,
     DuplicateClip,
     SetClipGainFade,
+    AddMidiClip,
+    RemoveMidiClip,
+    AddMidiNote,
+    RemoveMidiNote,
+    MoveMidiNote,
+    ResizeMidiNote,
     SetProjectTempo,
     SetProjectLoop>;
 

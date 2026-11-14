@@ -11,6 +11,8 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/MixerPanel.h
     ../../ui/shell/TimelineView.cpp
     ../../ui/shell/TimelineView.h
+    ../../ui/shell/PianoRollView.cpp
+    ../../ui/shell/PianoRollView.h
 )
 target_include_directories(DAWg PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ../../ui/shell)
 target_link_libraries(DAWg PRIVATE dawg_platform_juce dawg_services_commands dawg_services_media)

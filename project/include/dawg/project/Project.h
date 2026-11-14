@@ -23,8 +23,15 @@ public:
     // New-project IDs start at 1; successful adds increase IDs without reuse.
     // Returns 0 for an empty name or exhausted IDs, without changing state.
     TrackId addAudioTrack(std::string name);
+    TrackId addInstrumentTrack(std::string name);
     MediaAssetId addAudioAsset(AudioAsset asset);
     ClipId addAudioClip(AudioClip clip);
+    MidiClipId addMidiClip(MidiClip clip);
+    [[nodiscard]] bool removeMidiClip(MidiClipId id);
+    NoteId addMidiNote(MidiClipId clipId, MidiNote note);
+    [[nodiscard]] bool removeMidiNote(MidiClipId clipId, NoteId noteId);
+    [[nodiscard]] bool moveMidiNote(MidiClipId clipId, NoteId noteId, std::uint64_t newStartSample, std::uint8_t newPitch);
+    [[nodiscard]] bool resizeMidiNote(MidiClipId clipId, NoteId noteId, std::uint64_t newLengthSamples);
     // Empty names and unknown IDs fail without changing state.
     [[nodiscard]] bool removeTrack(TrackId id);
     [[nodiscard]] bool renameTrack(TrackId id, std::string name);
@@ -45,12 +52,13 @@ public:
 
 private:
     Project(ProjectSnapshot state, TrackId nextTrackId, MediaAssetId nextAssetId,
-            ClipId nextClipId);
+            ClipId nextClipId, NoteId nextNoteId = 1);
 
     ProjectSnapshot m_state;
     TrackId m_nextTrackId {1};
     MediaAssetId m_nextAssetId {1};
     ClipId m_nextClipId {1};
+    NoteId m_nextNoteId {1};
 };
 
 } // namespace dawg::project

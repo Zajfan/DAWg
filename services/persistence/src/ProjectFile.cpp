@@ -174,6 +174,15 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
                 return failure(Code::invalidFormat, "Expected boolean track phaseInvert");
             parsedTrack.phaseInvert = phaseInvert.get<bool>();
         }
+        if (track.contains("kind"))
+        {
+            const auto& kind = track.at("kind");
+            if (! kind.is_string())
+                return failure(Code::invalidFormat, "Expected string track kind");
+            parsedTrack.kind = (kind.get<std::string>() == "instrument")
+                ? project::TrackKind::instrument
+                : project::TrackKind::audio;
+        }
         snapshot.tracks.push_back(std::move(parsedTrack));
     }
 
@@ -303,6 +312,39 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
                 .endSample = endSample.get<std::uint64_t>()
             };
         }
+
+        if (document.contains("midiClips"))
+        {
+            const auto& mClips = document.at("midiClips");
+            if (! mClips.is_array())
+                return failure(Code::invalidFormat, "Expected array for midiClips");
+            for (const auto& mc : mClips)
+            {
+                project::MidiClip parsedMidiClip;
+                parsedMidiClip.id = mc.at("id").get<project::MidiClipId>();
+                if (mc.contains("trackId"))
+                    parsedMidiClip.trackId = mc.at("trackId").get<project::TrackId>();
+                parsedMidiClip.startSample = mc.at("startSample").get<std::uint64_t>();
+                parsedMidiClip.lengthSamples = mc.at("lengthSamples").get<std::uint64_t>();
+                if (mc.contains("notes"))
+                {
+                    const auto& notes = mc.at("notes");
+                    if (! notes.is_array())
+                        return failure(Code::invalidFormat, "Expected array for notes");
+                    for (const auto& n : notes)
+                    {
+                        parsedMidiClip.notes.push_back({
+                            .id = n.at("id").get<project::NoteId>(),
+                            .pitch = static_cast<std::uint8_t>(n.at("pitch").get<unsigned>()),
+                            .velocity = static_cast<std::uint8_t>(n.at("velocity").get<unsigned>()),
+                            .startSample = n.at("startSample").get<std::uint64_t>(),
+                            .lengthSamples = n.at("lengthSamples").get<std::uint64_t>()
+                        });
+                    }
+                }
+                snapshot.midiClips.push_back(std::move(parsedMidiClip));
+            }
+        }
     }
 
     // Keep model invariants (including duplicate IDs and clip ranges) owned by the project layer.
@@ -335,6 +377,7 @@ std::expected<void, ProjectFileError> saveProject(
                 trackJson["gainLinear"] = track.gainLinear;
                 trackJson["pan"] = track.pan;
                 trackJson["phaseInvert"] = track.phaseInvert;
+                trackJson["kind"] = (track.kind == project::TrackKind::instrument) ? "instrument" : "audio";
             }
             tracks.push_back(std::move(trackJson));
         }
@@ -377,6 +420,33 @@ std::expected<void, ProjectFileError> saveProject(
                 {"startSample", snapshot.loop.startSample},
                 {"endSample", snapshot.loop.endSample}
             };
+            if (! snapshot.midiClips.empty())
+            {
+                Json mClips = Json::array();
+                for (const auto& mc : snapshot.midiClips)
+                {
+                    Json mcJson {
+                        {"id", mc.id},
+                        {"trackId", mc.trackId},
+                        {"startSample", mc.startSample},
+                        {"lengthSamples", mc.lengthSamples}
+                    };
+                    Json notesJson = Json::array();
+                    for (const auto& n : mc.notes)
+                    {
+                        notesJson.push_back({
+                            {"id", n.id},
+                            {"pitch", n.pitch},
+                            {"velocity", n.velocity},
+                            {"startSample", n.startSample},
+                            {"lengthSamples", n.lengthSamples}
+                        });
+                    }
+                    mcJson["notes"] = std::move(notesJson);
+                    mClips.push_back(std::move(mcJson));
+                }
+                document["midiClips"] = std::move(mClips);
+            }
         }
         // Serialize completely before creating a temporary file (e.g. invalid UTF-8).
         return writeTransaction(document.dump(2) + '\n', path);

@@ -15,8 +15,18 @@ struct ProjectSnapshot
     std::vector<Track> tracks;
     std::vector<AudioAsset> assets;
     std::vector<AudioClip> clips;
+    std::vector<MidiClip> midiClips;
     TempoSetting tempo {};
     LoopSetting loop {};
+
+    ProjectSnapshot() = default;
+    ProjectSnapshot(std::uint32_t version, ProjectId projId, std::string projName,
+                    std::vector<Track> trk = {}, std::vector<AudioAsset> ast = {},
+                    std::vector<AudioClip> clp = {}, std::vector<MidiClip> mClips = {},
+                    TempoSetting tmp = {}, LoopSetting lp = {})
+        : formatVersion(version), id(projId), name(std::move(projName)),
+          tracks(std::move(trk)), assets(std::move(ast)), clips(std::move(clp)),
+          midiClips(std::move(mClips)), tempo(tmp), loop(lp) {}
 
     friend bool operator==(const ProjectSnapshot&, const ProjectSnapshot&) = default;
 };

@@ -36,15 +36,15 @@ Id nextIdAfter(const Id id)
 } // namespace
 
 Project::Project(ProjectSnapshot state, const TrackId nextTrackId, const MediaAssetId nextAssetId,
-                 const ClipId nextClipId)
+                 const ClipId nextClipId, const NoteId nextNoteId)
     : m_state {std::move(state)}, m_nextTrackId {nextTrackId}, m_nextAssetId {nextAssetId},
-      m_nextClipId {nextClipId}
+      m_nextClipId {nextClipId}, m_nextNoteId {nextNoteId}
 {
 }
 
 Project Project::create(std::string name, const ProjectId id)
 {
-    return Project {{2, id, std::move(name), {}, {}, {}}, 1, 1, 1};
+    return Project {{2, id, std::move(name), {}, {}, {}, {}, TempoSetting {}, LoopSetting {}}, 1, 1, 1, 1};
 }
 
 std::optional<Project> Project::fromSnapshot(ProjectSnapshot snapshot)
@@ -100,8 +100,26 @@ std::optional<Project> Project::fromSnapshot(ProjectSnapshot snapshot)
         largestClipId = std::max(largestClipId, clip.id);
     }
 
+    NoteId largestNoteId {};
+    for (const auto& mClip : snapshot.midiClips)
+    {
+        if (mClip.id == 0 || ! clipIds.insert(mClip.id).second)
+            return std::nullopt;
+        if (mClip.trackId != 0 && ! ids.contains(mClip.trackId))
+            return std::nullopt;
+        largestClipId = std::max(largestClipId, mClip.id);
+
+        std::unordered_set<NoteId> noteIds;
+        for (const auto& note : mClip.notes)
+        {
+            if (note.id == 0 || note.pitch > 127 || ! noteIds.insert(note.id).second)
+                return std::nullopt;
+            largestNoteId = std::max(largestNoteId, note.id);
+        }
+    }
+
     return Project {std::move(snapshot), nextIdAfter(largestId), nextIdAfter(largestAssetId),
-                    nextIdAfter(largestClipId)};
+                    nextIdAfter(largestClipId), nextIdAfter(largestNoteId)};
 }
 
 ProjectSnapshot Project::snapshot() const
@@ -117,6 +135,27 @@ TrackId Project::addAudioTrack(std::string name)
     const auto id = m_nextTrackId;
     m_state.tracks.push_back({id, std::move(name), false, false});
     // Unsigned wrap to the reserved invalid ID permanently rejects further adds.
+    ++m_nextTrackId;
+    return id;
+}
+
+TrackId Project::addInstrumentTrack(std::string name)
+{
+    if (name.empty() || m_nextTrackId == 0)
+        return 0;
+
+    const auto id = m_nextTrackId;
+    m_state.tracks.push_back({
+        .id = id,
+        .name = std::move(name),
+        .muted = false,
+        .solo = false,
+        .gainLinear = 1.0f,
+        .pan = 0.0f,
+        .phaseInvert = false,
+        .recordArmed = false,
+        .kind = TrackKind::instrument
+    });
     ++m_nextTrackId;
     return id;
 }
@@ -424,6 +463,122 @@ bool Project::setProjectLoop(const bool enabled, const std::uint64_t startSample
         .startSample = startSample,
         .endSample = endSample
     };
+    return true;
+}
+
+MidiClipId Project::addMidiClip(MidiClip clip)
+{
+    if (clip.trackId != 0)
+    {
+        const auto track = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                        [&clip](const Track& t) { return t.id == clip.trackId; });
+        if (track == m_state.tracks.end())
+            return 0;
+    }
+
+    if (clip.id == 0)
+    {
+        if (m_nextClipId == 0)
+            return 0;
+        clip.id = m_nextClipId;
+    }
+    else if (std::any_of(m_state.clips.begin(), m_state.clips.end(), [&clip](const AudioClip& c) { return c.id == clip.id; })
+             || std::any_of(m_state.midiClips.begin(), m_state.midiClips.end(), [&clip](const MidiClip& c) { return c.id == clip.id; }))
+    {
+        return 0;
+    }
+
+    m_state.midiClips.push_back(std::move(clip));
+    const auto id = m_state.midiClips.back().id;
+    if (id >= m_nextClipId)
+        m_nextClipId = nextIdAfter(id);
+    return id;
+}
+
+bool Project::removeMidiClip(const MidiClipId id)
+{
+    if (id == 0)
+        return false;
+    const auto it = std::find_if(m_state.midiClips.begin(), m_state.midiClips.end(),
+                                 [id](const MidiClip& c) { return c.id == id; });
+    if (it == m_state.midiClips.end())
+        return false;
+    m_state.midiClips.erase(it);
+    return true;
+}
+
+NoteId Project::addMidiNote(const MidiClipId clipId, MidiNote note)
+{
+    const auto it = std::find_if(m_state.midiClips.begin(), m_state.midiClips.end(),
+                                 [clipId](const MidiClip& c) { return c.id == clipId; });
+    if (it == m_state.midiClips.end() || note.pitch > 127)
+        return 0;
+
+    if (note.id == 0)
+    {
+        if (m_nextNoteId == 0)
+            return 0;
+        note.id = m_nextNoteId;
+    }
+    else if (std::any_of(it->notes.begin(), it->notes.end(), [&note](const MidiNote& n) { return n.id == note.id; }))
+    {
+        return 0;
+    }
+
+    it->notes.push_back(std::move(note));
+    const auto id = it->notes.back().id;
+    if (id >= m_nextNoteId)
+        m_nextNoteId = nextIdAfter(id);
+    return id;
+}
+
+bool Project::removeMidiNote(const MidiClipId clipId, const NoteId noteId)
+{
+    const auto it = std::find_if(m_state.midiClips.begin(), m_state.midiClips.end(),
+                                 [clipId](const MidiClip& c) { return c.id == clipId; });
+    if (it == m_state.midiClips.end())
+        return false;
+
+    const auto noteIt = std::find_if(it->notes.begin(), it->notes.end(),
+                                     [noteId](const MidiNote& n) { return n.id == noteId; });
+    if (noteIt == it->notes.end())
+        return false;
+    it->notes.erase(noteIt);
+    return true;
+}
+
+bool Project::moveMidiNote(const MidiClipId clipId, const NoteId noteId, const std::uint64_t newStartSample, const std::uint8_t newPitch)
+{
+    if (newPitch > 127)
+        return false;
+    const auto it = std::find_if(m_state.midiClips.begin(), m_state.midiClips.end(),
+                                 [clipId](const MidiClip& c) { return c.id == clipId; });
+    if (it == m_state.midiClips.end())
+        return false;
+
+    const auto noteIt = std::find_if(it->notes.begin(), it->notes.end(),
+                                     [noteId](const MidiNote& n) { return n.id == noteId; });
+    if (noteIt == it->notes.end())
+        return false;
+    noteIt->startSample = newStartSample;
+    noteIt->pitch = newPitch;
+    return true;
+}
+
+bool Project::resizeMidiNote(const MidiClipId clipId, const NoteId noteId, const std::uint64_t newLengthSamples)
+{
+    if (newLengthSamples == 0)
+        return false;
+    const auto it = std::find_if(m_state.midiClips.begin(), m_state.midiClips.end(),
+                                 [clipId](const MidiClip& c) { return c.id == clipId; });
+    if (it == m_state.midiClips.end())
+        return false;
+
+    const auto noteIt = std::find_if(it->notes.begin(), it->notes.end(),
+                                     [noteId](const MidiNote& n) { return n.id == noteId; });
+    if (noteIt == it->notes.end())
+        return false;
+    noteIt->lengthSamples = newLengthSamples;
     return true;
 }
 

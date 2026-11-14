@@ -16,6 +16,7 @@
 #include <dawg/engine/dsp/BrickwallLimiterNode.h>
 #include <dawg/engine/dsp/DynamicsCompressorNode.h>
 #include <dawg/engine/dsp/ParametricEQNode.h>
+#include <dawg/engine/dsp/TnhcSynthNode.h>
 
 #include <array>
 #include <atomic>
@@ -1167,6 +1168,76 @@ void testAudioEngineMasterLimiterActivation()
     require(meter.peakLeft <= ceiling && meter.peakRight <= ceiling,
             "Master meters reflect limiter-clamped true peaks");
 }
+
+void testTnhcSynthNodePolyphonyAndMidi()
+{
+    using namespace dawg::engine;
+
+    TnhcSynthNode synth;
+    require(synth.prepare(48000.0, 512, 2), "prepare synth 48kHz stereo");
+    require(synth.latencySamples() == 0, "synth declares zero latency");
+    require(synth.activeVoiceCount() == 0, "initial active voice count is zero");
+
+    // Polyphony up to 16 voices
+    for (std::uint8_t note = 60; note < 76; ++note)
+        synth.noteOn(note, 0.8f);
+    require(synth.activeVoiceCount() == 16, "all 16 polyphonic voices active");
+
+    // Voice stealing on 17th note
+    synth.noteOn(76, 0.9f);
+    require(synth.activeVoiceCount() == 16, "voice stealing keeps voice count at max 16");
+
+    // All notes off
+    synth.allNotesOff();
+    synth.reset();
+    require(synth.activeVoiceCount() == 0, "reset clears all voices");
+
+    // Sample-accurate MIDI processing via ProcessContext
+    std::array<float, 64> leftBuf {};
+    std::array<float, 64> rightBuf {};
+    leftBuf.fill(0.0f);
+    rightBuf.fill(0.0f);
+    std::array<float*, 2> channels {leftBuf.data(), rightBuf.data()};
+
+    std::array<MidiEvent, 1> midiEvents {{
+        MidiEvent {
+            .frameOffset = 16,
+            .data = {std::byte {0x90}, std::byte {69}, std::byte {100}}, // A4 Note On
+            .size = 3
+        }
+    }};
+
+    ProcessContext ctx {
+        .audio = AudioBufferView {
+            .channels = channels.data(),
+            .channelCount = 2,
+            .frameCount = 64
+        },
+        .midi = MidiBufferView {
+            .events = midiEvents.data(),
+            .eventCount = 1
+        },
+        .sampleRate = 48000.0
+    };
+
+    {
+        ScopedAllocationGuard guard;
+        synth.process(ctx);
+    }
+
+    // Verify frames 0..15 are silence and frames 16..63 have audio output
+    for (std::size_t f = 0; f < 16; ++f)
+    {
+        require(std::abs(leftBuf[f]) < 1e-6f, "audio before note-on frame offset is silent");
+    }
+
+    float peakAfter = 0.0f;
+    for (std::size_t f = 16; f < 64; ++f)
+    {
+        peakAfter = std::max(peakAfter, std::abs(leftBuf[f]));
+    }
+    require(peakAfter > 0.01f, "audio after note-on frame offset contains synthesized waveform");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -1270,4 +1341,5 @@ int main()
     testDspGraphCycleRejectionAutomaticPdcAndWorkStealing();
     testStudioDspSuiteAndPdcActivation();
     testAudioEngineMasterLimiterActivation();
+    testTnhcSynthNodePolyphonyAndMidi();
 }

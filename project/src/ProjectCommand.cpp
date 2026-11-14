@@ -11,10 +11,26 @@ bool Project::apply(const ProjectCommand& command)
         using Operation = std::decay_t<decltype(operation)>;
         if constexpr (std::is_same_v<Operation, AddAudioTrack>)
             return addAudioTrack(operation.name) != 0;
+        else if constexpr (std::is_same_v<Operation, AddInstrumentTrack>)
+            return addInstrumentTrack(operation.name) != 0;
         else if constexpr (std::is_same_v<Operation, RemoveTrack>)
             return removeTrack(operation.id);
+        else if constexpr (std::is_same_v<Operation, RenameTrack>)
+            return renameTrack(operation.id, operation.name);
         else if constexpr (std::is_same_v<Operation, AddAudioClip>)
             return addAudioClip(operation.clip) != 0;
+        else if constexpr (std::is_same_v<Operation, AddMidiClip>)
+            return addMidiClip(operation.clip) != 0;
+        else if constexpr (std::is_same_v<Operation, RemoveMidiClip>)
+            return removeMidiClip(operation.id);
+        else if constexpr (std::is_same_v<Operation, AddMidiNote>)
+            return addMidiNote(operation.clipId, operation.note) != 0;
+        else if constexpr (std::is_same_v<Operation, RemoveMidiNote>)
+            return removeMidiNote(operation.clipId, operation.noteId);
+        else if constexpr (std::is_same_v<Operation, MoveMidiNote>)
+            return moveMidiNote(operation.clipId, operation.noteId, operation.newStartSample, operation.newPitch);
+        else if constexpr (std::is_same_v<Operation, ResizeMidiNote>)
+            return resizeMidiNote(operation.clipId, operation.noteId, operation.newLengthSamples);
         else if constexpr (std::is_same_v<Operation, SetTrackMute>)
             return setTrackMute(operation.id, operation.muted);
         else if constexpr (std::is_same_v<Operation, SetTrackSolo>)
@@ -42,7 +58,7 @@ bool Project::apply(const ProjectCommand& command)
         else if constexpr (std::is_same_v<Operation, SetProjectLoop>)
             return setProjectLoop(operation.enabled, operation.startSample, operation.endSample);
         else
-            return renameTrack(operation.id, operation.name);
+            return false;
     }, command);
 }
 

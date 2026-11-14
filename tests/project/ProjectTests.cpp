@@ -49,6 +49,7 @@ std::string serialize(const ProjectSnapshot& snapshot)
         appendString(track.name);
         bytes.push_back(track.muted ? '\1' : '\0');
         bytes.push_back(track.solo ? '\1' : '\0');
+        bytes.push_back(static_cast<char>(track.kind));
     }
     appendInteger(snapshot.assets.size());
     for (const auto& asset : snapshot.assets)
@@ -68,6 +69,23 @@ std::string serialize(const ProjectSnapshot& snapshot)
         appendInteger(clip.startSample);
         appendInteger(clip.sourceOffset);
         appendInteger(clip.lengthSamples);
+    }
+    appendInteger(snapshot.midiClips.size());
+    for (const auto& mClip : snapshot.midiClips)
+    {
+        appendInteger(mClip.id);
+        appendInteger(mClip.trackId);
+        appendInteger(mClip.startSample);
+        appendInteger(mClip.lengthSamples);
+        appendInteger(mClip.notes.size());
+        for (const auto& note : mClip.notes)
+        {
+            appendInteger(note.id);
+            bytes.push_back(static_cast<char>(note.pitch));
+            bytes.push_back(static_cast<char>(note.velocity));
+            appendInteger(note.startSample);
+            appendInteger(note.lengthSamples);
+        }
     }
     return bytes;
 }
@@ -483,6 +501,67 @@ void testExtendedTimelineCommands()
     require(project.snapshot().clips.size() == 2, "clip removed");
     require(! project.apply(RemoveClip {99}), "reject remove unknown clip");
 }
+
+void testMidiTracksClipsAndNotes()
+{
+    auto project = Project::create("Midi Project", 1);
+    const auto trackId = project.addInstrumentTrack("Synth Lead");
+    require(trackId != 0, "addInstrumentTrack succeeded");
+    require(project.snapshot().tracks[0].kind == TrackKind::instrument, "track kind is instrument");
+
+    // Add MIDI clip
+    const auto clipId = project.addMidiClip(MidiClip {
+        .id = 0,
+        .trackId = trackId,
+        .startSample = 0,
+        .lengthSamples = 96000,
+        .notes = {}
+    });
+    require(clipId != 0, "addMidiClip succeeded with assigned ID");
+    require(project.snapshot().midiClips.size() == 1, "one midi clip in snapshot");
+
+    // Add MIDI note
+    const auto note1 = project.addMidiNote(clipId, MidiNote {
+        .id = 0,
+        .pitch = 60, // C4
+        .velocity = 100,
+        .startSample = 0,
+        .lengthSamples = 24000
+    });
+    require(note1 != 0, "addMidiNote succeeded");
+    const auto note2 = project.addMidiNote(clipId, MidiNote {
+        .id = 0,
+        .pitch = 64, // E4
+        .velocity = 90,
+        .startSample = 24000,
+        .lengthSamples = 24000
+    });
+    require(note2 != 0 && note2 != note1, "second note assigned distinct ID");
+    require(project.snapshot().midiClips[0].notes.size() == 2, "two notes in clip");
+
+    // Move note
+    require(project.apply(MoveMidiNote {clipId, note1, 12000, 62}), "move note pitch and startSample");
+    require(project.snapshot().midiClips[0].notes[0].pitch == 62, "pitch updated to D4");
+    require(project.snapshot().midiClips[0].notes[0].startSample == 12000, "startSample updated");
+
+    // Resize note
+    require(project.apply(ResizeMidiNote {clipId, note1, 36000}), "resize note length");
+    require(project.snapshot().midiClips[0].notes[0].lengthSamples == 36000, "length updated");
+
+    // Reconstruct from snapshot
+    const auto snap = project.snapshot();
+    const auto restored = Project::fromSnapshot(snap);
+    require(restored.has_value(), "fromSnapshot succeeded with MIDI data");
+    require(restored->snapshot() == snap, "restored project exactly equals original snapshot");
+
+    // Remove note
+    require(project.apply(RemoveMidiNote {clipId, note2}), "remove note");
+    require(project.snapshot().midiClips[0].notes.size() == 1, "one note remaining");
+
+    // Remove clip
+    require(project.apply(RemoveMidiClip {clipId}), "remove midi clip");
+    require(project.snapshot().midiClips.empty(), "all midi clips removed");
+}
 }
 
 int main()
@@ -499,5 +578,6 @@ int main()
     testTrackChannelStripCommands();
     testProjectTempoAndLoopCommands();
     testExtendedTimelineCommands();
-    std::puts("PASS: 12 project behavior tests");
+    testMidiTracksClipsAndNotes();
+    std::puts("PASS: 13 project behavior tests");
 }
