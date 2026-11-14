@@ -12,6 +12,13 @@
 
 namespace dawg::media {
 
+enum class ExportBitDepth : std::uint8_t
+{
+    int16,
+    int24,
+    float32
+};
+
 class AudioAssetWriter
 {
 public:
@@ -30,7 +37,8 @@ public:
     [[nodiscard]] virtual std::expected<std::unique_ptr<AudioAssetWriter>, MediaError>
     create(std::string_view path,
            std::uint32_t sampleRate,
-           std::uint16_t channelCount) = 0;
+           std::uint16_t channelCount,
+           ExportBitDepth bitDepth = ExportBitDepth::float32) = 0;
 };
 
 // In-memory writer factory for deterministic headless recording tests.
@@ -43,7 +51,8 @@ public:
     [[nodiscard]] std::expected<std::unique_ptr<AudioAssetWriter>, MediaError>
     create(std::string_view path,
            std::uint32_t sampleRate,
-           std::uint16_t channelCount) override;
+           std::uint16_t channelCount,
+           ExportBitDepth bitDepth = ExportBitDepth::float32) override;
 };
 
 } // namespace dawg::media

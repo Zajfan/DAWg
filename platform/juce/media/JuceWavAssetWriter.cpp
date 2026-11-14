@@ -56,7 +56,8 @@ bool JuceWavAssetWriter::finalize() noexcept
 std::expected<std::unique_ptr<dawg::media::AudioAssetWriter>, dawg::media::MediaError>
 JuceWavAssetWriterFactory::create(const std::string_view path,
                                   const std::uint32_t sampleRate,
-                                  const std::uint16_t channelCount)
+                                  const std::uint16_t channelCount,
+                                  const dawg::media::ExportBitDepth bitDepth)
 {
     if (path.empty() || path.find('\0') != std::string_view::npos
         || path.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
@@ -96,11 +97,24 @@ JuceWavAssetWriterFactory::create(const std::string_view path,
     }
 
     ::juce::WavAudioFormat wavFormat;
+    int bitsPerSample = 32;
+    auto sampleFormat = ::juce::AudioFormatWriterOptions::SampleFormat::floatingPoint;
+    if (bitDepth == dawg::media::ExportBitDepth::int16)
+    {
+        bitsPerSample = 16;
+        sampleFormat = ::juce::AudioFormatWriterOptions::SampleFormat::integral;
+    }
+    else if (bitDepth == dawg::media::ExportBitDepth::int24)
+    {
+        bitsPerSample = 24;
+        sampleFormat = ::juce::AudioFormatWriterOptions::SampleFormat::integral;
+    }
+
     const auto options = ::juce::AudioFormatWriterOptions {}
         .withSampleRate(static_cast<double>(sampleRate))
         .withNumChannels(static_cast<int>(channelCount))
-        .withBitsPerSample(32)
-        .withSampleFormat(::juce::AudioFormatWriterOptions::SampleFormat::floatingPoint);
+        .withBitsPerSample(bitsPerSample)
+        .withSampleFormat(sampleFormat);
 
     auto writer = wavFormat.createWriterFor(stream, options);
     if (!writer) {

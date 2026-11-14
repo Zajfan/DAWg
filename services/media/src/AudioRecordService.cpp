@@ -53,7 +53,8 @@ private:
 std::expected<std::unique_ptr<AudioAssetWriter>, MediaError>
 MemoryAudioAssetWriterFactory::create(const std::string_view path,
                                       const std::uint32_t sampleRate,
-                                      const std::uint16_t channelCount)
+                                      const std::uint16_t channelCount,
+                                      const ExportBitDepth)
 {
     if (path.empty() || sampleRate == 0 || channelCount == 0)
     {

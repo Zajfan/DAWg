@@ -5,6 +5,7 @@ add_library(dawg_services_media STATIC
     src/AudioRecordService.cpp
     src/AudioResampler.cpp
     src/DiskStreamPool.cpp
+    src/OfflineRenderService.cpp
     src/WaveformCache.cpp
 )
 target_include_directories(dawg_services_media PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

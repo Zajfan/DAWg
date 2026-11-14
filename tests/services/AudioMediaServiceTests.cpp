@@ -4,10 +4,12 @@
 #include <dawg/media/AudioRecordService.h>
 #include <dawg/media/AudioResampler.h>
 #include <dawg/media/DiskStreamPool.h>
+#include <dawg/media/OfflineRenderService.h>
 #include <dawg/media/WaveformCache.h>
 
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -344,6 +346,157 @@ void testWaveformCache()
     require(cache.getMinMaxPeaks(asset.id, 5, 0, 128, 2).empty(), "invalid channel returns empty");
     require(cache.getMinMaxPeaks(asset.id, 0, 0, 128, 0).empty(), "0 target pixels returns empty");
 }
+
+void testOfflineRenderServiceMasterBounceStemsAndDither()
+{
+    // Test TPDF Dither
+    {
+        std::vector<float> buffer(1024, 0.05f);
+        std::uint32_t rng = 12345;
+        OfflineRenderService::applyTpdfDither(buffer.data(), buffer.size(), rng);
+
+        // Verify all samples are quantized to 16-bit float multiples (k / 32767.0f)
+        for (float val : buffer)
+        {
+            const float scaled = val * 32767.0f;
+            const float rounded = std::round(scaled);
+            require(std::abs(scaled - rounded) < 1e-4f, "sample is quantized to 16-bit int grid");
+        }
+    }
+
+    // Test Master Bounce with instrument track and MIDI clip
+    {
+        MemoryAudioAssetWriterFactory writerFactory;
+        OfflineRenderService renderer(writerFactory);
+
+        ProjectSnapshot project;
+        project.id = 1;
+        project.name = "Offline Synth Render";
+        project.tracks.push_back({
+            .id = 1,
+            .name = "Synth",
+            .muted = false,
+            .solo = false,
+            .gainLinear = 1.0f,
+            .pan = 0.0f,
+            .phaseInvert = false,
+            .recordArmed = false,
+            .kind = TrackKind::instrument
+        });
+
+        project.midiClips.push_back({
+            .id = 10,
+            .trackId = 1,
+            .startSample = 0,
+            .lengthSamples = 2048,
+            .notes = {
+                {
+                    .id = 100,
+                    .pitch = 69, // A4
+                    .velocity = 100,
+                    .startSample = 0,
+                    .lengthSamples = 1024
+                }
+            }
+        });
+
+        RenderOptions options {
+            .destinationPath = "output.wav",
+            .startSample = 0,
+            .endSample = 2048,
+            .sampleRate = 48000,
+            .bitDepth = ExportBitDepth::int16,
+            .applyTpdfDither = true,
+            .exportStems = false
+        };
+
+        bool progressReceived = false;
+        auto result = renderer.render(project, options, nullptr, [&](const RenderProgress& p) {
+            if (p.fraction > 0.0f)
+                progressReceived = true;
+        });
+
+        require(result.has_value(), "offline render succeeded");
+        require(writerFactory.finalized, "writer was finalized");
+        require(writerFactory.channels.size() == 2, "writer received stereo channels");
+        require(writerFactory.channels[0].size() == 2048, "rendered exactly 2048 frames");
+        require(progressReceived, "progress callbacks fired");
+
+        // Verify synthesized audio is non-silent
+        float maxVal = 0.0f;
+        for (float s : writerFactory.channels[0])
+            maxVal = std::max(maxVal, std::abs(s));
+        require(maxVal > 0.01f, "synthesized output contains audible audio");
+    }
+
+    // Test Stem Export
+    {
+        MemoryAudioAssetWriterFactory writerFactory;
+        OfflineRenderService renderer(writerFactory);
+
+        ProjectSnapshot project;
+        project.id = 2;
+        project.name = "Stems Project";
+        project.tracks.push_back({
+            .id = 1,
+            .name = "Track A",
+            .muted = false,
+            .solo = false,
+            .gainLinear = 1.0f,
+            .pan = -0.5f,
+            .phaseInvert = false,
+            .recordArmed = false,
+            .kind = TrackKind::instrument
+        });
+        project.tracks.push_back({
+            .id = 2,
+            .name = "Track B",
+            .muted = false,
+            .solo = false,
+            .gainLinear = 0.8f,
+            .pan = 0.5f,
+            .phaseInvert = false,
+            .recordArmed = false,
+            .kind = TrackKind::instrument
+        });
+
+        RenderOptions stemOptions {
+            .destinationPath = "/tmp/mix.wav",
+            .startSample = 0,
+            .endSample = 1024,
+            .sampleRate = 48000,
+            .bitDepth = ExportBitDepth::float32,
+            .applyTpdfDither = false,
+            .exportStems = true,
+            .stemTrackIds = {1} // Only track 1
+        };
+
+        auto stemResult = renderer.render(project, stemOptions);
+        require(stemResult.has_value(), "stem render succeeded");
+    }
+
+    // Test Cancellation
+    {
+        MemoryAudioAssetWriterFactory writerFactory;
+        OfflineRenderService renderer(writerFactory);
+
+        ProjectSnapshot project;
+        project.id = 3;
+        project.name = "Cancel Project";
+
+        RenderOptions options {
+            .destinationPath = "cancel.wav",
+            .startSample = 0,
+            .endSample = 96000,
+            .sampleRate = 48000
+        };
+
+        std::atomic<bool> cancelToken {true};
+        auto cancelResult = renderer.render(project, options, &cancelToken);
+        require(! cancelResult.has_value(), "render was cancelled");
+        require(cancelResult.error().code == MediaError::Code::unavailable, "error code is unavailable");
+    }
+}
 } // namespace
 
 int main()
@@ -353,5 +506,6 @@ int main()
     testOpenAndReadFailures();
     testAudioResamplerDiskStreamPoolAndRecordService();
     testWaveformCache();
-    std::puts("PASS: 5 media service, resampler, disk pool, record, and waveform cache tests");
+    testOfflineRenderServiceMasterBounceStemsAndDither();
+    std::puts("PASS: 6 media service, resampler, disk pool, record, waveform cache, and offline render tests");
 }

@@ -33,7 +33,8 @@ public:
     [[nodiscard]] std::expected<std::unique_ptr<dawg::media::AudioAssetWriter>, dawg::media::MediaError>
     create(std::string_view path,
            std::uint32_t sampleRate,
-           std::uint16_t channelCount) override;
+           std::uint16_t channelCount,
+           dawg::media::ExportBitDepth bitDepth = dawg::media::ExportBitDepth::float32) override;
 };
 
 } // namespace dawg::platform::juce

@@ -1,0 +1,66 @@
+#pragma once
+
+#include <dawg/media/AudioAssetReader.h>
+#include <dawg/media/AudioAssetWriter.h>
+#include <dawg/project/ProjectSnapshot.h>
+
+#include <atomic>
+#include <cstdint>
+#include <expected>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace dawg::media {
+
+struct RenderOptions
+{
+    std::string destinationPath;
+    std::uint64_t startSample {0};
+    std::uint64_t endSample {0}; // 0 = entire project arrangement
+    std::uint32_t sampleRate {48000};
+    ExportBitDepth bitDepth {ExportBitDepth::float32};
+    bool applyTpdfDither {true};
+    bool exportStems {false};
+    std::vector<project::TrackId> stemTrackIds {}; // empty = all tracks
+};
+
+struct RenderProgress
+{
+    std::uint64_t framesRendered {0};
+    std::uint64_t totalFrames {0};
+    float fraction {0.0f}; // 0.0 to 1.0
+};
+
+using ProgressCallback = std::function<void(const RenderProgress&)>;
+
+class OfflineRenderService final
+{
+public:
+    explicit OfflineRenderService(AudioAssetWriterFactory& writerFactory,
+                                  AudioAssetReaderFactory* readerFactory = nullptr) noexcept;
+
+    [[nodiscard]] std::expected<void, MediaError> render(
+        const project::ProjectSnapshot& project,
+        const RenderOptions& options,
+        std::atomic<bool>* cancelToken = nullptr,
+        ProgressCallback progressCallback = {});
+
+    // High quality TPDF (Triangular Probability Density Function) dither
+    static void applyTpdfDither(float* samples, std::size_t count, std::uint32_t& rngState) noexcept;
+
+private:
+    [[nodiscard]] std::expected<void, MediaError> renderPass(
+        const project::ProjectSnapshot& project,
+        const RenderOptions& options,
+        const std::string& outputPath,
+        const project::TrackId* isolatedTrackId,
+        std::atomic<bool>* cancelToken,
+        ProgressCallback progressCallback);
+
+    AudioAssetWriterFactory& m_writerFactory;
+    AudioAssetReaderFactory* m_readerFactory {nullptr};
+};
+
+} // namespace dawg::media
