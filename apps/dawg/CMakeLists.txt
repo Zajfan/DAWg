@@ -15,9 +15,13 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/PianoRollView.h
     ../../ui/shell/DspEditorDialog.cpp
     ../../ui/shell/DspEditorDialog.h
+    ../../ui/shell/AudioSettingsDialog.cpp
+    ../../ui/shell/AudioSettingsDialog.h
+    ../../ui/shell/BounceDialog.cpp
+    ../../ui/shell/BounceDialog.h
 )
 target_include_directories(DAWg PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ../../ui/shell)
-target_link_libraries(DAWg PRIVATE dawg_platform_juce dawg_services_commands dawg_services_media)
+target_link_libraries(DAWg PRIVATE dawg_platform_juce dawg_services_commands dawg_services_media dawg_services_persistence)
 
 if(DAWG_BUILD_TESTS)
     target_sources(DAWg PRIVATE ../../tests/app/MainComponentOwnershipTests.cpp)

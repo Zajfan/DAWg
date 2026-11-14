@@ -10,7 +10,19 @@ MainComponent::MainComponent(EditorViewModel model,
                              AudioStatus audioStatus,
                              RestartAudio restartAudio,
                              media::WaveformCache* waveformCache)
-    : m_editor(std::move(model), std::move(commandHandler), std::move(transportCallbacks), waveformCache)
+    : MainComponent(std::move(model), std::move(commandHandler), std::move(transportCallbacks),
+                    MainEditorView::MenuCallbacks {}, audioStatus, std::move(restartAudio), waveformCache)
+{
+}
+
+MainComponent::MainComponent(EditorViewModel model,
+                             MainEditorView::CommandHandler commandHandler,
+                             MainEditorView::TransportCallbacks transportCallbacks,
+                             MainEditorView::MenuCallbacks menuCallbacks,
+                             AudioStatus audioStatus,
+                             RestartAudio restartAudio,
+                             media::WaveformCache* waveformCache)
+    : m_editor(std::move(model), std::move(commandHandler), std::move(transportCallbacks), std::move(menuCallbacks), waveformCache)
 {
     setSize(1024, 680);
 

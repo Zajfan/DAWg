@@ -7,12 +7,14 @@
 #include <memory>
 #include <string>
 
+namespace dawg::project { class Project; }
 namespace dawg::commands { class ProjectController; }
 namespace dawg::engine { class AudioEngine; }
 namespace dawg::media {
 class AudioMediaService;
 class AudioRecordService;
 class DiskStreamPool;
+class OfflineRenderService;
 class WaveformCache;
 }
 namespace dawg::platform::juce {
@@ -50,6 +52,15 @@ private:
     void stopRecordingSession();
     void undo();
     void redo();
+    void newProject();
+    void promptOpenProject();
+    void openProjectFile(const juce::File& file);
+    void saveProject(bool promptSaveAs = false);
+    void promptExportBounce(bool stemsOnly = false);
+    void openAudioPreferences();
+    void showKeyboardShortcuts();
+    void showAboutDialog();
+    [[nodiscard]] static project::Project createStudioStarterProject();
     void restartAudio();
     void syncMediaStatus();
     void refreshMainComponent();
@@ -68,10 +79,12 @@ private:
     std::unique_ptr<media::DiskStreamPool> m_diskStreamPool;
     std::unique_ptr<media::AudioRecordService> m_recordService;
     std::unique_ptr<media::WaveformCache> m_waveformCache;
+    std::unique_ptr<media::OfflineRenderService> m_renderService;
     std::unique_ptr<platform::juce::window::WindowManager> m_windowManager;
     juce::Component::SafePointer<ui::MainComponent> m_mainComponent;
     std::unique_ptr<juce::FileChooser> m_fileChooser;
     std::string m_audioError;
+    std::string m_currentProjectFilePath;
     project::TrackId m_recordingTrackId {0};
     std::uint64_t m_recordStartTimelineSample {0};
     std::size_t m_takeCounter {0};

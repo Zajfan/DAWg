@@ -1,6 +1,8 @@
 #include "Application.h"
 
 #include "ApplicationState.h"
+#include "AudioSettingsDialog.h"
+#include "BounceDialog.h"
 #include "audio/JuceAudioDeviceBridge.h"
 #include "media/JuceWavAssetReader.h"
 #include "media/JuceWavAssetWriter.h"
@@ -12,10 +14,14 @@
 #include <dawg/media/AudioMediaService.h>
 #include <dawg/media/AudioRecordService.h>
 #include <dawg/media/DiskStreamPool.h>
+#include <dawg/media/OfflineRenderService.h>
 #include <dawg/media/WaveformCache.h>
+#include <dawg/persistence/ProjectFile.h>
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <thread>
 #include <utility>
 
 namespace dawg::app {
@@ -32,14 +38,16 @@ void Application::initialise(const juce::String&)
     m_assetReaderFactory = std::make_unique<platform::juce::JuceWavAssetReaderFactory>();
     m_assetWriterFactory = std::make_unique<platform::juce::JuceWavAssetWriterFactory>();
     m_engine = std::make_unique<engine::AudioEngine>();
-    m_controller = std::make_unique<commands::ProjectController>(project::Project::create("Untitled", 1));
+    m_controller = std::make_unique<commands::ProjectController>(createStudioStarterProject());
     m_state = std::make_unique<ApplicationState>(*m_controller, *m_engine);
     m_audioBridge = std::make_unique<platform::juce::JuceAudioDeviceBridge>(*m_engine);
     m_mediaService = std::make_unique<media::AudioMediaService>(*m_assetReaderFactory);
     m_diskStreamPool = std::make_unique<media::DiskStreamPool>(*m_assetReaderFactory, 2);
     m_recordService = std::make_unique<media::AudioRecordService>(*m_assetWriterFactory);
     m_waveformCache = std::make_unique<media::WaveformCache>(*m_assetReaderFactory, 2);
+    m_renderService = std::make_unique<media::OfflineRenderService>(*m_assetWriterFactory, m_assetReaderFactory.get());
     m_engine->setRecordBuffer(&m_recordService->buffer());
+    m_engine->setMasterLimiterEnabled(true);
     m_windowManager = std::make_unique<platform::juce::window::WindowManager>();
     restartAudio();
 
@@ -114,10 +122,23 @@ void Application::initialise(const juce::String&)
         }
     };
 
+    ui::MainEditorView::MenuCallbacks menuCallbacks {
+        .newProject = [this] { newProject(); },
+        .openProject = [this] { promptOpenProject(); },
+        .saveProject = [this] { saveProject(false); },
+        .saveProjectAs = [this] { saveProject(true); },
+        .exportBounce = [this] { promptExportBounce(false); },
+        .exportStems = [this] { promptExportBounce(true); },
+        .audioPreferences = [this] { openAudioPreferences(); },
+        .showShortcuts = [this] { showKeyboardShortcuts(); },
+        .showAbout = [this] { showAboutDialog(); }
+    };
+
     auto content = std::make_unique<ui::MainComponent>(
         m_state->editorViewModel(),
         [this](project::ProjectCommand command) { dispatchProjectCommand(std::move(command)); },
         std::move(transportCallbacks),
+        std::move(menuCallbacks),
         audioStatus(),
         [this] { restartAudio(); },
         m_waveformCache.get());
@@ -162,6 +183,7 @@ void Application::shutdown()
     m_recordService.reset();
     m_diskStreamPool.reset();
     m_mediaService.reset();
+    m_renderService.reset();
     m_audioBridge.reset();
     m_state.reset();
     m_controller.reset();
@@ -487,6 +509,266 @@ void Application::timerCallback()
         m_mainComponent->setViewModel(m_state->editorViewModel());
         m_mainComponent->setAudioStatus(audioStatus());
     }
+}
+
+void Application::newProject()
+{
+    m_currentProjectFilePath.clear();
+    if (m_diskStreamPool)
+        m_diskStreamPool->stop();
+    if (m_state)
+        m_state->clearClipBuffers();
+
+    m_controller = std::make_unique<commands::ProjectController>(createStudioStarterProject());
+    m_state = std::make_unique<ApplicationState>(*m_controller, *m_engine);
+    static_cast<void>(m_state->flushRenderSnapshot());
+    refreshMainComponent();
+}
+
+void Application::promptOpenProject()
+{
+    m_fileChooser = std::make_unique<juce::FileChooser>(
+        "Open DAWg Project", juce::File {}, "*.dawg");
+    m_fileChooser->launchAsync(
+        juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        [this](const juce::FileChooser& chooser) {
+            const auto selected = chooser.getResult();
+            if (selected.existsAsFile())
+                openProjectFile(selected);
+        });
+}
+
+void Application::openProjectFile(const juce::File& file)
+{
+    const std::filesystem::path stdPath(file.getFullPathName().toStdString());
+    auto loaded = persistence::loadProject(stdPath);
+    if (! loaded.has_value())
+    {
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::AlertWindow::WarningIcon,
+            "Error Opening Project",
+            "Failed to load project: " + juce::String(loaded.error().message));
+        return;
+    }
+
+    auto projOpt = project::Project::fromSnapshot(std::move(loaded.value()));
+    if (! projOpt.has_value())
+    {
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::AlertWindow::WarningIcon,
+            "Error Opening Project",
+            "Project file structure is invalid or unsupported.");
+        return;
+    }
+
+    m_currentProjectFilePath = file.getFullPathName().toStdString();
+    if (m_diskStreamPool)
+        m_diskStreamPool->stop();
+    if (m_state)
+        m_state->clearClipBuffers();
+
+    m_controller = std::make_unique<commands::ProjectController>(std::move(*projOpt));
+    m_state = std::make_unique<ApplicationState>(*m_controller, *m_engine);
+
+    const auto snap = m_controller->snapshot();
+    const auto blockSize = m_audioBridge ? std::max(1, m_audioBridge->blockSize()) : 512;
+    const auto ringCapacityFrames = std::max<std::size_t>(4096u, static_cast<std::size_t>(blockSize) * 4u);
+    const auto deviceRate = (m_audioBridge && m_audioBridge->sampleRate() > 0.0)
+        ? static_cast<std::uint32_t>(std::llround(m_audioBridge->sampleRate()))
+        : 48000;
+
+    for (const auto& clip : snap.clips)
+    {
+        const auto assetIt = std::find_if(snap.assets.begin(), snap.assets.end(),
+            [&](const project::AudioAsset& a) { return a.id == clip.assetId; });
+        if (assetIt != snap.assets.end() && m_diskStreamPool)
+        {
+            auto voiceId = m_diskStreamPool->addVoice(*assetIt, clip, ringCapacityFrames, deviceRate);
+            if (voiceId.has_value())
+            {
+                auto* voiceBuffer = m_diskStreamPool->buffer(*voiceId);
+                m_state->setClipBuffer(clip.id, voiceBuffer);
+            }
+            if (m_waveformCache)
+                m_waveformCache->requestThumbnail(*assetIt);
+        }
+    }
+    if (m_diskStreamPool)
+        m_diskStreamPool->start();
+
+    static_cast<void>(m_state->flushRenderSnapshot());
+    refreshMainComponent();
+}
+
+void Application::saveProject(bool promptSaveAs)
+{
+    if (! m_controller)
+        return;
+
+    if (m_currentProjectFilePath.empty() || promptSaveAs)
+    {
+        m_fileChooser = std::make_unique<juce::FileChooser>(
+            "Save DAWg Project", juce::File {}, "*.dawg");
+        m_fileChooser->launchAsync(
+            juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting,
+            [this](const juce::FileChooser& chooser) {
+                const auto selected = chooser.getResult();
+                if (selected != juce::File {})
+                {
+                    auto path = selected.getFullPathName();
+                    if (! path.endsWithIgnoreCase(".dawg"))
+                        path += ".dawg";
+                    m_currentProjectFilePath = path.toStdString();
+                    saveProject(false);
+                }
+            });
+        return;
+    }
+
+    const auto snap = m_controller->snapshot();
+    const std::filesystem::path stdPath(m_currentProjectFilePath);
+    auto result = persistence::saveProject(snap, stdPath);
+    if (! result.has_value())
+    {
+        juce::AlertWindow::showMessageBoxAsync(
+            juce::AlertWindow::WarningIcon,
+            "Error Saving Project",
+            "Failed to save project: " + juce::String(result.error().message));
+    }
+}
+
+void Application::promptExportBounce(bool stemsOnly)
+{
+    if (! m_controller || ! m_renderService)
+        return;
+
+    const auto snap = m_controller->snapshot();
+    ui::BounceWindow::open(snap, [this, stemsOnly](
+        media::RenderOptions options,
+        std::function<void(float, const std::string&)> onProgress,
+        std::atomic<bool>* cancelToken,
+        std::function<void(bool, const std::string&)> onComplete)
+    {
+        if (stemsOnly)
+            options.exportStems = true;
+
+        std::thread([this, options, onProgress = std::move(onProgress), cancelToken, onComplete = std::move(onComplete)]() mutable {
+            const auto currentSnap = m_controller ? m_controller->snapshot() : project::ProjectSnapshot {};
+            auto result = m_renderService->render(
+                currentSnap, options, cancelToken,
+                [onProgress](const media::RenderProgress& p) {
+                    if (onProgress)
+                    {
+                        const auto pct = std::llround(p.fraction * 100.0f);
+                        onProgress(p.fraction, "Rendering: " + std::to_string(pct) + "% ("
+                            + std::to_string(p.framesRendered) + " / " + std::to_string(p.totalFrames) + " frames)");
+                    }
+                });
+
+            const bool ok = result.has_value();
+            std::string errMsg = ok ? "" : result.error().message;
+
+            juce::MessageManager::callAsync([onComplete = std::move(onComplete), ok, errMsg = std::move(errMsg)] {
+                if (onComplete)
+                    onComplete(ok, errMsg);
+            });
+        }).detach();
+    });
+}
+
+void Application::openAudioPreferences()
+{
+    if (m_audioBridge)
+        ui::AudioSettingsWindow::open(m_audioBridge->deviceManager());
+}
+
+void Application::showKeyboardShortcuts()
+{
+    juce::AlertWindow::showMessageBoxAsync(
+        juce::AlertWindow::InfoIcon,
+        "DAWg Keyboard Shortcuts",
+        "Space: Play / Stop Transport\n"
+        "Return: Return to Timeline Start\n"
+        "R: Toggle Record Arm\n"
+        "M: Toggle Mixer Console Dock\n"
+        "P: Toggle Piano Roll Dock\n"
+        "A: Toggle Automation Lanes\n"
+        "S: Split Clip at Playhead\n"
+        "Del: Delete Selected Item\n"
+        "Ctrl+Z: Undo\n"
+        "Ctrl+Y: Redo\n"
+        "Ctrl+T: Add Audio Track\n"
+        "Ctrl+Shift+T: Add Synth Track\n"
+        "Ctrl+N: New Project\n"
+        "Ctrl+O: Open Project\n"
+        "Ctrl+S: Save Project\n"
+        "Ctrl+B: Export Master Bounce");
+}
+
+void Application::showAboutDialog()
+{
+    juce::AlertWindow::showMessageBoxAsync(
+        juce::AlertWindow::InfoIcon,
+        "About DAWg",
+        "DAWg \xe2\x80\x94 Digital Audio Workstation\n"
+        "Version 0.7.0 (Milestone 0.7.0)\n\n"
+        "Developed by The No-hands Company\n"
+        "Engineered to the Zajfan standard: Lock-Free Audio Engine,\n"
+        "Automatic PDC, High-End Studio DSP Suite & CLAP Sandboxing.");
+}
+
+project::Project Application::createStudioStarterProject()
+{
+    auto proj = project::Project::create("Studio Starter", 1);
+    const auto audioTrk = proj.addAudioTrack("Audio 1");
+    const auto synthTrk = proj.addInstrumentTrack("Synth Lead");
+    const auto drumBusTrk = proj.addSubmixGroupTrack("Drum Bus");
+    const auto reverbTrk = proj.addAuxReturnTrack("Plate Reverb");
+
+    (void)drumBusTrk;
+
+    if (audioTrk != 0 && reverbTrk != 0)
+    {
+        static_cast<void>(proj.addTrackSend(audioTrk, project::TrackSend {
+            .targetTrackId = reverbTrk,
+            .levelLinear = 0.5f,
+            .preFader = false
+        }));
+    }
+
+    if (synthTrk != 0 && reverbTrk != 0)
+    {
+        static_cast<void>(proj.addTrackSend(synthTrk, project::TrackSend {
+            .targetTrackId = reverbTrk,
+            .levelLinear = 0.35f,
+            .preFader = false
+        }));
+    }
+
+    if (synthTrk != 0)
+    {
+        project::MidiClip starterClip {
+            .id = 0,
+            .trackId = synthTrk,
+            .startSample = 0,
+            .lengthSamples = 384000,
+            .notes = {
+                { .id = 1, .pitch = 60, .velocity = 100, .startSample = 0,      .lengthSamples = 22000 },
+                { .id = 2, .pitch = 64, .velocity = 95,  .startSample = 24000,  .lengthSamples = 22000 },
+                { .id = 3, .pitch = 67, .velocity = 105, .startSample = 48000,  .lengthSamples = 22000 },
+                { .id = 4, .pitch = 71, .velocity = 100, .startSample = 72000,  .lengthSamples = 22000 },
+                { .id = 5, .pitch = 72, .velocity = 110, .startSample = 96000,  .lengthSamples = 44000 },
+                { .id = 6, .pitch = 67, .velocity = 90,  .startSample = 144000, .lengthSamples = 44000 },
+                { .id = 7, .pitch = 65, .velocity = 95,  .startSample = 192000, .lengthSamples = 44000 },
+                { .id = 8, .pitch = 60, .velocity = 100, .startSample = 288000, .lengthSamples = 90000 }
+            }
+        };
+        static_cast<void>(proj.addMidiClip(std::move(starterClip)));
+    }
+
+    static_cast<void>(proj.setProjectLoop(true, 0, 384000));
+
+    return proj;
 }
 
 } // namespace dawg::app

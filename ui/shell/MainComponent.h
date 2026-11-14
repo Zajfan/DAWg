@@ -29,6 +29,14 @@ public:
                   RestartAudio,
                   media::WaveformCache* waveformCache = nullptr);
 
+    MainComponent(EditorViewModel,
+                  MainEditorView::CommandHandler,
+                  MainEditorView::TransportCallbacks,
+                  MainEditorView::MenuCallbacks,
+                  AudioStatus,
+                  RestartAudio,
+                  media::WaveformCache* waveformCache = nullptr);
+
     void setViewModel(EditorViewModel);
     void setProjectSnapshot(project::ProjectSnapshot);
     void setAudioStatus(const AudioStatus&);

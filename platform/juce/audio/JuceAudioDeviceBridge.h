@@ -30,6 +30,7 @@ public:
 
     void setMidiControlCallback(MidiControlCallback cb) { m_midiControlCallback = std::move(cb); }
     [[nodiscard]] dawg::engine::MidiControllerManager& controllerManager() noexcept { return m_controllerManager; }
+    [[nodiscard]] ::juce::AudioDeviceManager& deviceManager() noexcept { return m_deviceManager; }
 
     [[nodiscard]] bool isDeviceReady() const noexcept;
     [[nodiscard]] double sampleRate() const noexcept;
