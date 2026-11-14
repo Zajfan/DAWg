@@ -1,107 +1,140 @@
 # DAWg Architecture
 
-## Implemented foundation boundary
+## Implemented playback vertical-slice boundary
 
-The DAW application owns composition and lifecycle. The reusable engine and
-project services do not depend on JUCE, X11, or an audio device. The current
-application opens the default output device and clears each output block to
-deterministic silence; the foundation is intentionally not yet an audio
-recorder or editor.
+The DAW application owns composition and lifecycle. The reusable engine, project
+model, command coordinator, persistence service, and media streaming service do
+not depend on JUCE, X11, or an audio device. The current vertical slice imports
+an external WAV asset, persists its clip metadata in format v2 (transparently
+normalizing legacy v1 project documents to v2 on load), streams decoded PCM
+through a bounded worker-owned ring buffer, and renders deterministic single-clip
+audio from the JUCE device callback.
 
-The target graph is:
+The module graph is:
 
 ```text
 DAWg application
-├── apps/dawg + ui/shell
-├── platform/juce/audio       ──┐
-└── platform/juce/window       │ JUCE/platform boundary
-                               ▼
-                    dawg_services_commands
-                    ├── dawg_project_model
-                    └── dawg_engine_core
+├── apps/dawg + ui/shell (Application, ApplicationState, EditorViewModel)
+├── platform/juce/audio  (JuceAudioDeviceBridge, JuceAudioCallbackAdapter)
+├── platform/juce/media  (JuceWavAssetReaderFactory, JuceWavAssetReader)
+└── platform/juce/window (WindowManager, ManagedWindow, WindowRegistry)
+              │
+              ▼
+    ┌─────────┴───────────────────────────────────────┐
+    ▼                                                 ▼
+dawg_services_commands                      dawg_services_media
+├── dawg_project_model                      ├── dawg_project_model
+└── dawg_engine_core                        └── dawg_engine_core
 
 dawg_services_persistence ──── dawg_project_model
 ```
 
-`AudioEngine`, `Project`, `ProjectController`, and persistence headers expose
-standard-library/value types only. `Application` is the composition root: it
-owns the engine, controller, audio bridge, and window manager, while the UI
-receives owned snapshots and sends commands through callbacks. `MainComponent`
-is a view boundary, not storage for project or audio state.
+Data and control flow follow the strict dependency chain:
+
+`project -> persistence/commands -> application state -> engine/media -> JUCE adapter`
+
+`AudioEngine`, `PlaybackRingBuffer`, `Project`, `ProjectController`,
+`AudioMediaService`, and persistence headers expose standard-library/value types
+only. `Application` is the composition root: it owns the reader factory, engine,
+controller, application state, audio device bridge, media service, and window
+manager, while the UI receives owned `EditorViewModel` snapshots and emits
+commands/actions through callbacks. `MainComponent` and `MainEditorView` are pure
+view boundaries and never own project, engine, media service, or device state.
 
 The legacy VersaTone source tree is not a build dependency. DAWg's engine core
-is now the embedded implementation, with the JUCE bridge kept at the platform
-edge so the core can be reused by another future host without rewriting it.
+is the embedded implementation, with the JUCE audio and WAV decoder bridges kept
+at the platform edge so the core and services can be reused by another host
+without rewriting them.
 
-## Foundation contracts
+## Module contracts
 
 - `dawg_engine_core` is C++20 and can be built/tested with `DAWG_BUILD_APP=OFF`.
-- `dawg_project_model` is C++20 and owns stable project/track IDs, ordered
-  snapshots, and command validation.
-- `dawg_services_commands` applies project commands on the message thread and
-  produces a small immutable render snapshot.
-- `dawg_services_persistence` is C++23, uses version-one JSON at the filesystem
-  boundary, and saves through a sibling temporary file followed by replacement.
-- `dawg_platform_juce` adapts JUCE audio callbacks and device lifecycle to the
-  engine without exposing JUCE from the engine target.
+  It owns `AudioEngine`, `RenderSnapshotPublisher`, `TransportCommandQueue`,
+  `PlaybackRingBuffer`, and `PlaybackDescription`.
+- `dawg_project_model` is C++20 and owns stable project, track, media asset, and
+  clip IDs, ordered value snapshots, clip bounds validation, and version 2
+  snapshot reconstruction.
+- `dawg_services_commands` applies project commands and media asset registration
+  on the message thread and advances the render snapshot generation.
+- `dawg_services_persistence` is C++23, writes format version 2 JSON documents
+  (including `assets` and `clips`) through a sibling temporary file followed by
+  atomic replacement, and normalizes legacy format version 1 files to version 2
+  with empty media collections on load. Audio media stays external to `.dawg`
+  project files (`projectRelative` or `absolute` path references).
+- `dawg_services_media` is C++20 and JUCE-free. It defines the `AudioAssetReader`
+  and `AudioAssetReaderFactory` decoder seam and owns `AudioMediaService`, which
+  inspects WAV metadata on the message thread and runs a single background worker
+  to refill a preallocated `PlaybackRingBuffer`.
+- `dawg_platform_juce` adapts JUCE audio callbacks, device lifecycle, and
+  `juce::WavAudioFormat` decoding (`JuceWavAssetReaderFactory`) to the engine and
+  media service without exposing JUCE headers across the core or service layers.
 - `platform/juce/window` owns native window operations: create/resize/close,
   child/modal relationships, fullscreen/maximized/minimized state, opacity,
   monitor selection, and logical/physical DPI conversions.
 
-## Planned layers
+## Real-time audio and worker contracts
 
-- **Application shell:** windows, menus, commands, and editor panels.
-- **Audio engine:** device lifecycle, transport clock, routing, and real-time rendering.
-- **Project model:** tracks, clips, regions, routing, and automation.
-- **Media services:** import, waveform analysis, background disk reads/writes, and export.
-- **Persistence:** versioned project metadata and references to audio media.
-- **Editors:** arrangement, track controls, meters, and later MIDI piano roll.
-
-Keep the project model independent of JUCE widgets so it can be edited, serialized, and tested without a running UI.
-
-## Real-time audio rules
-
-The device callback must remain bounded and predictable:
+The device callback (`AudioEngine::process`) must remain bounded and predictable:
 
 - Do not allocate or free memory.
 - Do not perform file, network, or console I/O.
 - Do not wait on a mutex or condition variable.
-- Do not construct or destroy UI objects.
-- Pass commands and recorded samples through preallocated lock-free or wait-free queues where practical.
-- Move disk reads, recording writes, waveform generation, and project loading to worker threads.
-- Publish parameter changes using atomics or immutable snapshots with a clear lifetime.
+- Do not call decoder APIs or construct/destroy UI objects.
+- Pass transport commands through the fixed-capacity SPSC `TransportCommandQueue`
+  drained at the start of each block.
+- Adopt render changes at block boundaries via the three-slot wait-free
+  `RenderSnapshotPublisher`.
 
-The current callback only applies bounded transport commands, adopts the latest
-three-slot render snapshot, and clears output buffers. It does not yet
-implement recording or playback, but those future systems must preserve these
-same callback guarantees.
+### Snapshot pointer lifetime invariant
 
-The transport boundary is a fixed-capacity SPSC queue drained at the start of a
-block. Render snapshots are published by the message thread and become visible
-to the audio thread only at a process boundary. A full queue/publication slot
-returns `false` to the producer; neither path waits or allocates.
+`RenderSnapshot` is a fixed-size value containing `PlaybackDescription`, which
+holds a raw `PlaybackRingBuffer*`. This pointer is owned by `AudioMediaService`
+(or a test fixture) and must remain valid for every audio callback that can
+observe the snapshot. During shutdown or media re-preparation, the application
+stops the media worker and shuts down the JUCE audio device callback before
+destroying `AudioMediaService`, `ApplicationState`, `ProjectController`, or
+`AudioEngine`.
 
-## Initial audio path
+### Worker / audio-thread SPSC ring protocol
 
-1. Select an input and output device and configure sample rate and block size.
-2. Capture input into preallocated buffers on the device thread.
-3. Move buffered samples to a recording worker that writes audio files.
-4. Play clips through a background reader and preallocated playback buffers.
-5. Mix tracks and route the result to the selected output.
-6. Save project structure and media references outside the callback.
+- `PlaybackRingBuffer::prepare()` allocates planar float storage off the audio
+  thread before streaming starts.
+- The audio callback computes the overlap between `[samplePosition, samplePosition + frameCount)`
+  and `[clipStartSample, clipStartSample + clipLengthSamples)`, writes the needed
+  absolute source frame via `requestSourceFrame()` (atomic store), and calls
+  `read()` to copy only buffered frames matching that exact absolute source coordinate.
+- Mono clips copy channel 0 to all output channels; stereo clips map channel `n`
+  to output channel `n` where available. Missing or unbuffered frames remain silent
+  (`0.0f`) and increment `AudioEngine::underrunCount()` without stalling transport
+  progression.
+- The background worker in `AudioMediaService` polls `requestedSourceFrame()`,
+  resets the ring if the requested frame jumps outside the buffered window, reads
+  decoded float planes through `AudioAssetReader`, and pushes chunks tagged with
+  their absolute source frame.
 
 ## State ownership
 
-The message thread owns editor components. The audio thread owns callback-time processing state. Cross-thread changes should be explicit commands or snapshots; UI components must never act as the audio engine's storage.
+The message thread owns editor components, `ProjectController`, `ApplicationState`,
+and `AudioMediaService` lifecycle calls (`inspect`, `prepare`, `start`, `stop`).
+The media worker thread owns streaming reads from `AudioAssetReader` and writes
+into `PlaybackRingBuffer`. The audio thread owns callback-time transport and
+ring consumption. UI components never act as storage for project, media, or
+engine state.
 
 ## Verification
 
-The display-free `dawg.foundation_vertical_slice` test prepares the engine,
-dispatches an audio-track command, persists and reloads the snapshot, publishes
-the render snapshot, queues play, processes one block, and verifies deterministic
-silence. Window-manager tests are separately labelled because they require a
-real supported desktop host.
-
+- `dawg.foundation_vertical_slice` prepares the engine and ring buffer, registers
+  a track, WAV asset, and clip, saves and reloads the v2 project file, verifies
+  that persistence preserves the `PlaybackDescription`, renders a block at a
+  nonzero clip start offset, verifies exact PCM output and zero underruns, and
+  verifies that missing/unavailable media renders deterministic silence.
+- Headless tests (`dawg.engine_core`, `dawg.project`, `dawg.project_file`,
+  `dawg.project_controller`, `dawg.media_service`, `dawg.application_state`,
+  `dawg.juce_audio_callback_adapter`, `dawg.foundation_vertical_slice`) run with
+  `DAWG_BUILD_APP=OFF` under Debug (`ASan+UBSan`) and ThreadSanitizer (`TSan+UBSan`).
+- Platform and window-manager tests (`dawg.juce_wav_reader`,
+  `dawg.window_registry`, `dawg.window_manager_integration`) run with
+  `DAWG_BUILD_APP=ON` on a supported desktop display host.
 
 ## Configurable workbench boundary
 

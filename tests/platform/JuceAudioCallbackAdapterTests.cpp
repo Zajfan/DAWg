@@ -1,6 +1,7 @@
 #include "audio/JuceAudioCallbackAdapter.h"
 
 #include <dawg/engine/AudioEngine.h>
+#include <dawg/engine/PlaybackRingBuffer.h>
 
 #include <array>
 #include <cstdio>
@@ -39,6 +40,56 @@ void testPreparedEngineSilenceAndForwarding()
     require(engine.renderSnapshotGeneration() == 7, "callback adopts the render snapshot");
 }
 
+void testCallbackRendersPrefilledClipPcm()
+{
+    dawg::engine::AudioEngine engine;
+    require(engine.prepare({48000.0, 8, 2}), "engine prepares for clip callback");
+    dawg::engine::PlaybackRingBuffer ring;
+    require(ring.prepare(2, 16), "stereo ring prepares");
+
+    constexpr std::array<float, 4> leftSource {0.1f, 0.2f, 0.3f, 0.4f};
+    constexpr std::array<float, 4> rightSource {-0.1f, -0.2f, -0.3f, -0.4f};
+    const std::array<const float*, 2> sourcePlanes {leftSource.data(), rightSource.data()};
+    require(ring.write(0, sourcePlanes, leftSource.size()) == leftSource.size(),
+            "prefill stereo ring");
+
+    dawg::engine::RenderSnapshot snapshot {
+        .generation = 11,
+        .trackCount = 1,
+        .playback = {
+            .buffer = &ring,
+            .clipStartSample = 2,
+            .clipLengthSamples = leftSource.size(),
+            .sourceOffset = 0,
+            .channelCount = 2
+        }
+    };
+    require(engine.publishRenderSnapshot(snapshot), "publish clip render snapshot");
+    require(engine.enqueueCommand({dawg::engine::EngineCommandType::play, 0}),
+            "queue play command");
+
+    dawg::platform::juce::JuceAudioCallbackAdapter adapter {engine};
+    std::array<float, 8> outLeft {};
+    std::array<float, 8> outRight {};
+    outLeft.fill(9.0f);
+    outRight.fill(9.0f);
+    std::array<float*, 2> channels {outLeft.data(), outRight.data()};
+
+    adapter.process(channels.data(), channels.size(), outLeft.size());
+
+    require(outLeft[0] == 0.0f && outLeft[1] == 0.0f, "pre-clip left samples are silent");
+    require(outRight[0] == 0.0f && outRight[1] == 0.0f, "pre-clip right samples are silent");
+    for (std::size_t i = 0; i < leftSource.size(); ++i)
+    {
+        require(outLeft[2 + i] == leftSource[i], "adapter forwards left clip PCM");
+        require(outRight[2 + i] == rightSource[i], "adapter forwards right clip PCM");
+    }
+    require(outLeft[6] == 0.0f && outLeft[7] == 0.0f, "post-clip left samples are silent");
+    require(outRight[6] == 0.0f && outRight[7] == 0.0f, "post-clip right samples are silent");
+    require(engine.transportState().samplePosition == 8, "callback advances by full block");
+    require(engine.underrunCount() == 0, "callback renders without underruns");
+}
+
 void testSparseChannelsAndBorrowedBounds()
 {
     dawg::engine::AudioEngine engine;
@@ -73,6 +124,7 @@ void testSparseChannelsAndBorrowedBounds()
 int main()
 {
     testPreparedEngineSilenceAndForwarding();
+    testCallbackRendersPrefilledClipPcm();
     testSparseChannelsAndBorrowedBounds();
-    std::puts("PASS: JUCE-free audio callback adapter (2 cases)");
+    std::puts("PASS: JUCE-free audio callback adapter (3 cases)");
 }

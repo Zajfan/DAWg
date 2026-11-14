@@ -358,6 +358,15 @@ void testZeroAllocationOnAudioCallbackPath()
 }
 }
 
+#if defined(__SANITIZE_THREAD__)
+#define DAWG_TSAN_ACTIVE 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define DAWG_TSAN_ACTIVE 1
+#endif
+#endif
+
+#if !defined(DAWG_TSAN_ACTIVE)
 void* operator new(std::size_t size)
 {
     if (g_trackAllocations.load(std::memory_order_acquire))
@@ -429,6 +438,7 @@ void operator delete[](void* ptr, std::size_t, std::align_val_t) noexcept
 {
     ::operator delete(ptr);
 }
+#endif
 
 int main()
 {
