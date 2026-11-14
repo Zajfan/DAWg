@@ -44,6 +44,11 @@ private:
     void playTransport();
     void stopTransport();
     void returnTransportToStart();
+    void toggleTransportRecord();
+    void startRecordingSession();
+    void stopRecordingSession();
+    void undo();
+    void redo();
     void restartAudio();
     void syncMediaStatus();
     void refreshMainComponent();
@@ -65,6 +70,9 @@ private:
     juce::Component::SafePointer<ui::MainComponent> m_mainComponent;
     std::unique_ptr<juce::FileChooser> m_fileChooser;
     std::string m_audioError;
+    project::TrackId m_recordingTrackId {0};
+    std::uint64_t m_recordStartTimelineSample {0};
+    std::size_t m_takeCounter {0};
 };
 
 } // namespace dawg::app

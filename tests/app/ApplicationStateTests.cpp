@@ -204,6 +204,38 @@ void testMultiTrackCompiledGraphAndMeteringInApplicationState()
     require(std::fabs(vm.masterMeter.peakLeft - 0.75f) < 1e-5f,
             "EditorViewModel exposes live lock-free master meter reading");
 }
+
+void testRecordArmAndUndoRedoInApplicationState()
+{
+    dawg::engine::AudioEngine engine;
+    require(engine.prepare({48000.0, 8, 2}), "engine prepares");
+    dawg::commands::ProjectController controller {dawg::project::Project::create("RecordSession", 1)};
+    dawg::app::ApplicationState state {controller, engine};
+
+    require(! state.canUndo(), "initially cannot undo");
+    require(! state.canRedo(), "initially cannot redo");
+    require(! state.hasArmedTrack(), "initially no track armed");
+    require(! state.firstArmedTrackId().has_value(), "no armed track id");
+
+    require(state.dispatch(dawg::project::AddAudioTrack {"Vocal"}), "add Vocal track");
+    require(state.canUndo(), "can undo after add track");
+
+    require(state.setTrackRecordArm(1, true), "arm track 1");
+    require(state.firstArmedTrackId() == 1, "first armed track is 1");
+
+    state.setTransportRecordArmed(true);
+    require(state.isTransportRecordArmed(), "transport record is armed");
+    require(state.editorViewModel().transportRecordArmed, "view model reflects transport record armed");
+
+    // Test Undo
+    require(state.undo(), "undo un-arms track 1");
+    require(! state.firstArmedTrackId().has_value(), "track 1 is no longer armed after undo");
+    require(state.canRedo(), "can redo after undo");
+
+    // Test Redo
+    require(state.redo(), "redo re-arms track 1");
+    require(state.firstArmedTrackId() == 1, "track 1 is armed again after redo");
+}
 } // namespace
 
 int main()
@@ -211,4 +243,5 @@ int main()
     testCommandsUpdateEditorAndPublishToEngine();
     testPlaybackCommandsAndSnapshotComposition();
     testMultiTrackCompiledGraphAndMeteringInApplicationState();
+    testRecordArmAndUndoRedoInApplicationState();
 }

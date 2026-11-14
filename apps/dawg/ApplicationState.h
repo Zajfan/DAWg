@@ -108,8 +108,56 @@ public:
             .mediaError = m_mediaError,
             .underrunCount = m_engine.underrunCount(),
             .masterMeter = m_engine.meterReading(),
-            .recording = m_engine.isRecording()
+            .recording = m_engine.isRecording(),
+            .canUndo = m_controller.canUndo(),
+            .canRedo = m_controller.canRedo(),
+            .transportRecordArmed = m_transportRecordArmed
         };
+    }
+
+    [[nodiscard]] bool undo()
+    {
+        if (! m_controller.undo())
+            return false;
+        m_renderPending = true;
+        static_cast<void>(flushRenderSnapshot());
+        return true;
+    }
+
+    [[nodiscard]] bool redo()
+    {
+        if (! m_controller.redo())
+            return false;
+        m_renderPending = true;
+        static_cast<void>(flushRenderSnapshot());
+        return true;
+    }
+
+    [[nodiscard]] bool canUndo() const noexcept { return m_controller.canUndo(); }
+    [[nodiscard]] bool canRedo() const noexcept { return m_controller.canRedo(); }
+
+    void setTransportRecordArmed(const bool armed) noexcept { m_transportRecordArmed = armed; }
+    [[nodiscard]] bool isTransportRecordArmed() const noexcept { return m_transportRecordArmed; }
+
+    [[nodiscard]] bool setTrackRecordArm(const project::TrackId trackId, const bool armed)
+    {
+        return dispatch(project::SetTrackRecordArm {trackId, armed});
+    }
+
+    [[nodiscard]] bool hasArmedTrack() const noexcept
+    {
+        return firstArmedTrackId().has_value();
+    }
+
+    [[nodiscard]] std::optional<project::TrackId> firstArmedTrackId() const noexcept
+    {
+        const auto snapshot = m_controller.snapshot();
+        for (const auto& track : snapshot.tracks)
+        {
+            if (track.recordArmed)
+                return track.id;
+        }
+        return std::nullopt;
     }
 
     [[nodiscard]] bool dispatch(project::ProjectCommand command)
@@ -193,6 +241,7 @@ private:
     bool m_mediaAvailable {true};
     std::string m_mediaError;
     bool m_renderPending {true};
+    bool m_transportRecordArmed {false};
 };
 
 } // namespace dawg::app

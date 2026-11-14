@@ -22,6 +22,9 @@ struct EditorViewModel
     std::uint64_t underrunCount {};
     engine::MeterReading masterMeter {};
     bool recording {};
+    bool canUndo {};
+    bool canRedo {};
+    bool transportRecordArmed {};
 
     [[nodiscard]] std::size_t trackCount() const noexcept { return project.tracks.size(); }
 };

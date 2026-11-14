@@ -46,7 +46,10 @@ void Application::initialise(const juce::String&)
         .importWav = [this] { promptImportWav(); },
         .play = [this] { playTransport(); },
         .stop = [this] { stopTransport(); },
-        .returnToStart = [this] { returnTransportToStart(); }
+        .returnToStart = [this] { returnTransportToStart(); },
+        .record = [this] { toggleTransportRecord(); },
+        .undo = [this] { undo(); },
+        .redo = [this] { redo(); }
     };
 
     auto content = std::make_unique<ui::MainComponent>(
@@ -225,19 +228,148 @@ void Application::importWavFile(const juce::File& file)
 
 void Application::playTransport()
 {
-    if (m_state && m_state->play())
+    if (! m_state || ! m_engine)
+        return;
+
+    if (m_state->isTransportRecordArmed() && ! m_engine->isRecording())
+    {
+        startRecordingSession();
+    }
+
+    if (m_state->play())
         refreshMainComponent();
 }
 
 void Application::stopTransport()
 {
-    if (m_state && m_state->stop())
+    if (! m_state || ! m_engine)
+        return;
+
+    if (m_engine->isRecording())
+    {
+        stopRecordingSession();
+    }
+    m_state->setTransportRecordArmed(false);
+
+    if (m_state->stop())
         refreshMainComponent();
 }
 
 void Application::returnTransportToStart()
 {
     if (m_state && m_state->returnToStart())
+        refreshMainComponent();
+}
+
+void Application::toggleTransportRecord()
+{
+    if (! m_state || ! m_engine)
+        return;
+
+    const bool currentlyRecording = m_engine->isRecording();
+    if (currentlyRecording)
+    {
+        stopRecordingSession();
+        m_state->setTransportRecordArmed(false);
+    }
+    else
+    {
+        const bool willArm = ! m_state->isTransportRecordArmed();
+        m_state->setTransportRecordArmed(willArm);
+        if (willArm && m_engine->transportState().playing)
+        {
+            startRecordingSession();
+        }
+    }
+    refreshMainComponent();
+}
+
+void Application::startRecordingSession()
+{
+    if (! m_recordService || ! m_state || ! m_engine)
+        return;
+
+    const auto armedTrack = m_state->firstArmedTrackId();
+    if (! armedTrack.has_value())
+        return;
+
+    const auto takesDir = juce::File::getCurrentWorkingDirectory().getChildFile("takes");
+    if (! takesDir.isDirectory())
+        takesDir.createDirectory();
+
+    const auto takeFile = takesDir.getChildFile("take_" + juce::String(++m_takeCounter) + ".wav");
+    const auto fullPath = takeFile.getFullPathName().toStdString();
+
+    const auto deviceRate = (m_audioBridge && m_audioBridge->sampleRate() > 0.0)
+        ? static_cast<std::uint32_t>(std::llround(m_audioBridge->sampleRate()))
+        : 48000;
+
+    const auto prep = m_recordService->prepare(fullPath, deviceRate, 2, 65536, project::AudioAssetPathKind::absolute);
+    if (! prep.has_value())
+    {
+        m_state->setMediaStatus(false, prep.error().message);
+        return;
+    }
+
+    m_recordingTrackId = *armedTrack;
+    m_recordStartTimelineSample = static_cast<std::uint64_t>(
+        std::max<std::int64_t>(0, m_engine->transportState().samplePosition));
+
+    m_recordService->start();
+    m_engine->setRecording(true);
+}
+
+void Application::stopRecordingSession()
+{
+    if (! m_recordService || ! m_engine || ! m_state)
+        return;
+
+    m_engine->setRecording(false);
+    auto takeResult = m_recordService->stopAndFinalize(m_recordingTrackId, m_recordStartTimelineSample);
+    if (! takeResult.has_value())
+        return;
+
+    auto recordedTake = std::move(takeResult.value());
+    if (recordedTake.asset.frameCount == 0)
+        return;
+
+    const auto assetId = m_state->addAudioAsset(recordedTake.asset);
+    if (! assetId.has_value())
+        return;
+
+    recordedTake.clip.assetId = *assetId;
+    const auto clipId = m_state->addAudioClip(recordedTake.clip);
+    if (! clipId.has_value())
+        return;
+
+    if (m_diskStreamPool)
+    {
+        recordedTake.clip.id = *clipId;
+        const auto deviceRate = (m_audioBridge && m_audioBridge->sampleRate() > 0.0)
+            ? static_cast<std::uint32_t>(std::llround(m_audioBridge->sampleRate()))
+            : recordedTake.asset.sampleRate;
+        const auto voiceId = m_diskStreamPool->addVoice(
+            recordedTake.asset, recordedTake.clip, 65536, deviceRate);
+        if (voiceId.has_value())
+        {
+            auto* voiceBuffer = m_diskStreamPool->buffer(*voiceId);
+            m_state->setClipBuffer(*clipId, voiceBuffer);
+            m_diskStreamPool->start();
+        }
+    }
+
+    static_cast<void>(m_state->flushRenderSnapshot());
+}
+
+void Application::undo()
+{
+    if (m_state && m_state->undo())
+        refreshMainComponent();
+}
+
+void Application::redo()
+{
+    if (m_state && m_state->redo())
         refreshMainComponent();
 }
 

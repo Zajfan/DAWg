@@ -7,6 +7,7 @@
 #include <dawg/media/AudioRecordService.h>
 #include <dawg/persistence/ProjectFile.h>
 #include <dawg/project/Project.h>
+#include "ApplicationState.h"
 
 #include <array>
 #include <chrono>
@@ -276,11 +277,92 @@ void testFivePillarEndToEndIntegration()
             "MemoryAudioAssetWriterFactory received all 8 stereo input frames");
 }
 
+void testLiveRecordingWorkflowAndAutoTakePlacement()
+{
+    using namespace dawg::commands;
+    using namespace dawg::engine;
+    using namespace dawg::media;
+    using namespace dawg::project;
+
+    AudioEngine engine;
+    require(engine.prepare({48000.0, 16, 2}), "prepare engine for live recording");
+
+    ProjectController controller {Project::create("RecordingSession", 1)};
+    dawg::app::ApplicationState state {controller, engine};
+
+    require(state.dispatch(AddAudioTrack {"Vocal"}), "add track Vocal");
+    require(state.setTrackRecordArm(1, true), "arm Vocal track for recording");
+    require(state.hasArmedTrack() && state.firstArmedTrackId() == 1, "Vocal track is armed");
+
+    MemoryAudioAssetWriterFactory writerFactory;
+    dawg::media::AudioRecordService recordService {writerFactory};
+    require(recordService.prepare("takes/vocal_take1.wav", 48000, 2, 64).has_value(),
+            "prepare take file");
+    engine.setRecordBuffer(&recordService.buffer());
+
+    // User engages transport record arm, then presses play
+    state.setTransportRecordArmed(true);
+    require(state.isTransportRecordArmed(), "transport is record armed");
+
+    engine.setRecording(true);
+    recordService.start();
+    require(state.play(), "transport begins playback/recording");
+
+    constexpr std::array<float, 16> vocalInL {
+        0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f,
+        -0.1f, -0.2f, -0.3f, -0.4f, -0.5f, -0.6f, -0.7f, -0.8f
+    };
+    constexpr std::array<float, 16> vocalInR {
+        -0.1f, -0.2f, -0.3f, -0.4f, -0.5f, -0.6f, -0.7f, -0.8f,
+        0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f
+    };
+    const std::array<const float*, 2> inPlanes {vocalInL.data(), vocalInR.data()};
+
+    std::array<float, 16> outL {};
+    std::array<float, 16> outR {};
+    std::array<float*, 2> outPlanes {outL.data(), outR.data()};
+
+    engine.process(
+        AudioInputBufferView {inPlanes.data(), inPlanes.size(), vocalInL.size()},
+        AudioBufferView {outPlanes.data(), outPlanes.size(), outL.size()},
+        {},
+        {});
+
+    // Stop recording and transport
+    engine.setRecording(false);
+    require(state.stop(), "transport stopped");
+    state.setTransportRecordArmed(false);
+
+    const auto take = recordService.stopAndFinalize(*state.firstArmedTrackId(), 0);
+    require(take.has_value(), "take finalized successfully");
+    require(take->clip.lengthSamples == 16, "take length is 16 samples");
+
+    // Auto placement: add take asset and clip to the project
+    const auto assetId = state.addAudioAsset(take->asset);
+    require(assetId.has_value(), "recorded asset added to project");
+    auto clip = take->clip;
+    clip.assetId = *assetId;
+    const auto clipId = state.addAudioClip(clip);
+    require(clipId.has_value(), "recorded clip placed on track");
+
+    const auto vm = state.editorViewModel();
+    require(vm.project.clips.size() == 1, "project now has 1 clip");
+    require(vm.project.clips[0].trackId == 1, "clip is placed on armed track 1");
+    require(vm.project.clips[0].lengthSamples == 16, "clip length matches recorded frames");
+
+    // Undo takes the clip off the timeline cleanly
+    require(state.undo(), "undo remove placed take clip");
+    require(state.editorViewModel().project.clips.empty(), "clip removed on undo");
+    require(state.redo(), "redo restores placed take clip");
+    require(state.editorViewModel().project.clips.size() == 1, "clip restored on redo");
+}
+
 } // namespace
 
 int main()
 {
     testProjectAndAudioVerticalSlice();
     testFivePillarEndToEndIntegration();
-    std::puts("PASS: foundation and 5-pillar end-to-end vertical slice");
+    testLiveRecordingWorkflowAndAutoTakePlacement();
+    std::puts("PASS: foundation, 5-pillar, and live recording vertical slice");
 }

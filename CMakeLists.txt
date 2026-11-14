@@ -95,6 +95,7 @@ if(DAWG_BUILD_TESTS)
     add_executable(dawg_foundation_vertical_slice_tests
         tests/integration/FoundationVerticalSliceTests.cpp
     )
+    target_include_directories(dawg_foundation_vertical_slice_tests PRIVATE apps/dawg ui/shell)
     target_link_libraries(dawg_foundation_vertical_slice_tests PRIVATE
         dawg_services_commands
         dawg_services_media

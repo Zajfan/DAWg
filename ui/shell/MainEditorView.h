@@ -21,6 +21,9 @@ public:
         ActionHandler play;
         ActionHandler stop;
         ActionHandler returnToStart;
+        ActionHandler record;
+        ActionHandler undo;
+        ActionHandler redo;
     };
 
     MainEditorView(EditorViewModel model,
