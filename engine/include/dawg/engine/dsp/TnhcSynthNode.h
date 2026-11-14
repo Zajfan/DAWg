@@ -49,9 +49,21 @@ public:
     void process(ProcessContext& context) noexcept override;
 
     // Direct note triggering for tests or external MIDI routing
-    void noteOn(std::uint8_t note, float velocity) noexcept;
-    void noteOff(std::uint8_t note) noexcept;
+    void noteOn(std::uint8_t note, float velocity) noexcept { noteOn(0, note, velocity); }
+    void noteOn(std::uint8_t channel, std::uint8_t note, float velocity) noexcept;
+    void noteOff(std::uint8_t note) noexcept { noteOff(0, note); }
+    void noteOff(std::uint8_t channel, std::uint8_t note) noexcept;
     void allNotesOff() noexcept;
+
+    // MPE (MIDI Polyphonic Expression) controls
+    void setMpeEnabled(bool enabled) noexcept { m_mpeEnabled = enabled; }
+    [[nodiscard]] bool isMpeEnabled() const noexcept { return m_mpeEnabled; }
+    void setPitchBendRange(float semitones) noexcept { m_pitchBendRange = std::clamp(semitones, 0.0f, 96.0f); }
+    [[nodiscard]] float pitchBendRange() const noexcept { return m_pitchBendRange; }
+
+    void setChannelPitchBend(std::uint8_t channel, float semitones) noexcept;
+    void setChannelPressure(std::uint8_t channel, float pressure) noexcept;
+    void setChannelTimbre(std::uint8_t channel, float timbre) noexcept;
 
     [[nodiscard]] std::size_t activeVoiceCount() const noexcept;
 
@@ -127,9 +139,14 @@ private:
     struct Voice
     {
         bool active {false};
+        std::uint8_t channel {0};
         std::uint8_t note {60};
         float velocity {0.8f};
         std::uint64_t age {0};
+
+        float pitchBendSemitones {0.0f};
+        float pressure {0.0f};
+        float timbre {0.5f};
 
         double osc1Phase {0.0};
         double osc2Phase {0.0};
@@ -145,9 +162,13 @@ private:
         void reset() noexcept
         {
             active = false;
+            channel = 0;
             note = 60;
             velocity = 0.8f;
             age = 0;
+            pitchBendSemitones = 0.0f;
+            pressure = 0.0f;
+            timbre = 0.5f;
             osc1Phase = 0.0;
             osc2Phase = 0.0;
             ampEnv.reset();
@@ -185,6 +206,12 @@ private:
     float m_lfoRate {2.0f};
     float m_lfoPitchDepth {0.0f};
     float m_lfoFilterDepth {0.0f};
+
+    bool m_mpeEnabled {true};
+    float m_pitchBendRange {48.0f}; // Standard 48 semitones for MPE
+    std::array<float, 16> m_channelPitchBend {};
+    std::array<float, 16> m_channelPressure {};
+    std::array<float, 16> m_channelTimbre {};
 };
 
 } // namespace dawg::engine

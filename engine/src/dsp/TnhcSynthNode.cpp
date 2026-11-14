@@ -163,6 +163,9 @@ void TnhcSynthNode::reset() noexcept
         voice.reset();
     m_lfoPhase = 0.0;
     m_voiceAgeCounter = 0;
+    m_channelPitchBend.fill(0.0f);
+    m_channelPressure.fill(0.0f);
+    m_channelTimbre.fill(0.5f);
 }
 
 void TnhcSynthNode::allNotesOff() noexcept
@@ -196,16 +199,21 @@ TnhcSynthNode::Voice* TnhcSynthNode::allocateVoice() noexcept
     return oldest;
 }
 
-void TnhcSynthNode::noteOn(const std::uint8_t note, const float velocity) noexcept
+void TnhcSynthNode::noteOn(const std::uint8_t channel, const std::uint8_t note, const float velocity) noexcept
 {
     Voice* voice = allocateVoice();
     if (voice == nullptr)
         return;
 
+    const std::uint8_t ch = channel & 0x0F;
     voice->active = true;
+    voice->channel = ch;
     voice->note = note;
     voice->velocity = std::clamp(velocity, 0.0f, 1.0f);
     voice->age = ++m_voiceAgeCounter;
+    voice->pitchBendSemitones = m_mpeEnabled ? m_channelPitchBend[ch] : m_channelPitchBend[0];
+    voice->pressure = m_mpeEnabled ? m_channelPressure[ch] : m_channelPressure[0];
+    voice->timbre = m_mpeEnabled ? m_channelTimbre[ch] : m_channelTimbre[0];
     voice->osc1Phase = 0.0;
     voice->osc2Phase = 0.0;
 
@@ -215,15 +223,54 @@ void TnhcSynthNode::noteOn(const std::uint8_t note, const float velocity) noexce
     voice->svfStage2.reset();
 }
 
-void TnhcSynthNode::noteOff(const std::uint8_t note) noexcept
+void TnhcSynthNode::noteOff(const std::uint8_t channel, const std::uint8_t note) noexcept
 {
+    const std::uint8_t ch = channel & 0x0F;
     for (auto& voice : m_voices)
     {
-        if (voice.active && voice.note == note)
+        if (voice.active && voice.note == note && (!m_mpeEnabled || voice.channel == ch || ch == 0))
         {
             voice.ampEnv.release();
             voice.filterEnv.release();
         }
+    }
+}
+
+void TnhcSynthNode::setChannelPitchBend(const std::uint8_t channel, const float semitones) noexcept
+{
+    const std::uint8_t ch = channel & 0x0F;
+    m_channelPitchBend[ch] = semitones;
+
+    for (auto& voice : m_voices)
+    {
+        if (voice.active && (!m_mpeEnabled || voice.channel == ch || ch == 0))
+            voice.pitchBendSemitones = semitones;
+    }
+}
+
+void TnhcSynthNode::setChannelPressure(const std::uint8_t channel, const float pressure) noexcept
+{
+    const std::uint8_t ch = channel & 0x0F;
+    const float p = std::clamp(pressure, 0.0f, 1.0f);
+    m_channelPressure[ch] = p;
+
+    for (auto& voice : m_voices)
+    {
+        if (voice.active && (!m_mpeEnabled || voice.channel == ch || ch == 0))
+            voice.pressure = p;
+    }
+}
+
+void TnhcSynthNode::setChannelTimbre(const std::uint8_t channel, const float timbre) noexcept
+{
+    const std::uint8_t ch = channel & 0x0F;
+    const float t = std::clamp(timbre, 0.0f, 1.0f);
+    m_channelTimbre[ch] = t;
+
+    for (auto& voice : m_voices)
+    {
+        if (voice.active && (!m_mpeEnabled || voice.channel == ch || ch == 0))
+            voice.timbre = t;
     }
 }
 
@@ -288,10 +335,10 @@ float TnhcSynthNode::renderVoiceSample(Voice& voice, const float lfoVal) noexcep
 
     const float filterEnvVal = voice.filterEnv.advance(m_filterParams, m_sampleRate);
 
-    // Frequency with LFO pitch modulation
-    const float pitchMod = lfoVal * m_lfoPitchDepth;
-    const float f1 = midiNoteToHz(voice.note, pitchMod);
-    const float f2 = midiNoteToHz(voice.note, m_osc2DetuneCents + pitchMod);
+    // Frequency with LFO pitch modulation and MPE per-note pitch bend
+    const float totalPitchModSemitones = lfoVal * m_lfoPitchDepth + voice.pitchBendSemitones;
+    const float f1 = midiNoteToHz(voice.note, totalPitchModSemitones * 100.0f);
+    const float f2 = midiNoteToHz(voice.note, m_osc2DetuneCents + (totalPitchModSemitones * 100.0f));
 
     const double inc1 = std::clamp(static_cast<double>(f1) / m_sampleRate, 0.0, 0.49);
     const double inc2 = std::clamp(static_cast<double>(f2) / m_sampleRate, 0.0, 0.49);
@@ -304,15 +351,18 @@ float TnhcSynthNode::renderVoiceSample(Voice& voice, const float lfoVal) noexcep
 
     const float mixedOsc = (1.0f - m_oscMix) * osc1 + m_oscMix * osc2;
 
-    // Filter frequency modulation: envelope + LFO
-    const float cutoffModOctaves = filterEnvVal * m_filterEnvAmount * 4.0f + lfoVal * m_lfoFilterDepth;
-    const float targetCutoff = m_filterCutoff * std::pow(2.0f, cutoffModOctaves);
+    // Filter frequency modulation: envelope + LFO + MPE timbre (CC74) + MPE pressure
+    const float timbreOctaves = (voice.timbre - 0.5f) * 3.0f;
+    const float pressureCutoffOctaves = voice.pressure * 1.5f;
+    const float cutoffModOctaves = filterEnvVal * m_filterEnvAmount * 4.0f + lfoVal * m_lfoFilterDepth + timbreOctaves + pressureCutoffOctaves;
+    const float targetCutoff = std::clamp(m_filterCutoff * std::pow(2.0f, cutoffModOctaves), 20.0f, 20000.0f);
 
     // 4-pole cascaded SVF (24 dB/oct)
     const float s1 = voice.svfStage1.process(mixedOsc, targetCutoff, m_filterResonance, m_sampleRate, m_filterMode);
     const float filtered = voice.svfStage2.process(s1, targetCutoff, m_filterResonance, m_sampleRate, m_filterMode);
 
-    return filtered * amp * voice.velocity;
+    const float pressureAmpMod = 1.0f + voice.pressure * 0.5f;
+    return filtered * amp * voice.velocity * pressureAmpMod;
 }
 
 void TnhcSynthNode::process(ProcessContext& context) noexcept
@@ -327,24 +377,60 @@ void TnhcSynthNode::process(ProcessContext& context) noexcept
 
     for (std::size_t f = 0; f < frameCount; ++f)
     {
-        // Sample-accurate MIDI event dispatching
+        // Sample-accurate MIDI & MPE event dispatching
         while (context.midi.events != nullptr && nextMidiIdx < context.midi.eventCount
                && context.midi.events[nextMidiIdx].frameOffset <= f)
         {
             const auto& event = context.midi.events[nextMidiIdx];
-            if (event.size >= 3)
+            if (event.size >= 2)
             {
-                const auto status = static_cast<std::uint8_t>(event.data[0]) & 0xF0;
-                const auto note = static_cast<std::uint8_t>(event.data[1]) & 0x7F;
-                const auto vel = static_cast<std::uint8_t>(event.data[2]) & 0x7F;
+                const auto rawStatus = static_cast<std::uint8_t>(event.data[0]);
+                const auto statusType = rawStatus & 0xF0;
+                const auto channel = rawStatus & 0x0F;
+                const auto byte1 = static_cast<std::uint8_t>(event.data[1]) & 0x7F;
+                const auto byte2 = (event.size >= 3) ? (static_cast<std::uint8_t>(event.data[2]) & 0x7F) : std::uint8_t {0};
 
-                if (status == 0x90 && vel > 0)
+                if (statusType == 0x90 && byte2 > 0)
                 {
-                    noteOn(note, static_cast<float>(vel) / 127.0f);
+                    noteOn(channel, byte1, static_cast<float>(byte2) / 127.0f);
                 }
-                else if (status == 0x80 || (status == 0x90 && vel == 0))
+                else if (statusType == 0x80 || (statusType == 0x90 && byte2 == 0))
                 {
-                    noteOff(note);
+                    noteOff(channel, byte1);
+                }
+                else if (statusType == 0xE0 && event.size >= 3) // Pitch Bend (14-bit)
+                {
+                    const int rawBend = (static_cast<int>(byte2) << 7) | static_cast<int>(byte1);
+                    const float normalizedBend = (static_cast<float>(rawBend) - 8192.0f) / 8192.0f;
+                    setChannelPitchBend(channel, normalizedBend * m_pitchBendRange);
+                }
+                else if (statusType == 0xD0) // Channel Pressure / Aftertouch
+                {
+                    setChannelPressure(channel, static_cast<float>(byte1) / 127.0f);
+                }
+                else if (statusType == 0xA0 && event.size >= 3) // Polyphonic Key Pressure
+                {
+                    const float press = static_cast<float>(byte2) / 127.0f;
+                    for (auto& voice : m_voices)
+                    {
+                        if (voice.active && voice.note == byte1 && (!m_mpeEnabled || voice.channel == channel))
+                            voice.pressure = press;
+                    }
+                }
+                else if (statusType == 0xB0 && event.size >= 3) // Control Change
+                {
+                    if (byte1 == 74) // CC 74: Timbre / Brightness
+                    {
+                        setChannelTimbre(channel, static_cast<float>(byte2) / 127.0f);
+                    }
+                    else if (byte1 == 123) // All Notes Off
+                    {
+                        allNotesOff();
+                    }
+                    else if (byte1 == 120) // All Sound Off
+                    {
+                        reset();
+                    }
                 }
             }
             ++nextMidiIdx;

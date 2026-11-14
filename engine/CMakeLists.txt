@@ -6,6 +6,7 @@ add_library(dawg_engine_core STATIC
     src/DspGraph.cpp
     src/GraphHandoff.cpp
     src/Metronome.cpp
+    src/MidiControllerManager.cpp
     src/PlaybackRingBuffer.cpp
     src/RecordRingBuffer.cpp
     src/RenderSnapshotPublisher.cpp

@@ -19,6 +19,7 @@
 #include <dawg/engine/dsp/ParametricEQNode.h>
 #include <dawg/engine/dsp/TnhcSynthNode.h>
 #include <dawg/engine/clap/ClapPluginNode.h>
+#include <dawg/engine/MidiControllerManager.h>
 #include <dawg/engine/WsolaTimeStretcher.h>
 
 #include <array>
@@ -1425,6 +1426,225 @@ void testWsolaTimeStretchingAndPitchPreservation()
     require(fastOut.size() == 1, "compress returns 1 channel");
     require(fastOut[0].size() == inFrames / 2, "0.5x stretch produces 0.5x frame count (2400 frames)");
 }
+
+void testMpePolyphonicExpressionAndSynthModulation()
+{
+    using namespace dawg::engine;
+
+    TnhcSynthNode synth;
+    require(synth.prepare(48000.0, 512, 2), "synth prepares at 48 kHz stereo");
+    require(synth.isMpeEnabled(), "MPE is enabled by default");
+    require(synth.pitchBendRange() == 48.0f, "standard MPE pitch bend range is 48 semitones");
+
+    // Polyphonic multi-channel voice triggering
+    synth.noteOn(2, 60, 0.8f); // Channel 2, Middle C
+    synth.noteOn(3, 64, 0.8f); // Channel 3, E4
+    require(synth.activeVoiceCount() == 2, "two voices active on separate MPE channels");
+
+    // Per-channel pitch bend
+    synth.setChannelPitchBend(2, 12.0f); // 1 octave up on channel 2 only
+    synth.setChannelPressure(2, 0.8f);   // Aftertouch on channel 2
+    synth.setChannelTimbre(2, 0.9f);     // CC74 brightness on channel 2
+
+    // Audio process with sample-accurate MIDI event buffer
+    std::array<float, 256> outL {};
+    std::array<float, 256> outR {};
+    std::array<float*, 2> channels {outL.data(), outR.data()};
+
+    std::array<MidiEvent, 5> events {};
+    // Event 1: Note On ch 2, note 60, vel 100 at frame 0
+    events[0].frameOffset = 0;
+    events[0].size = 3;
+    events[0].data[0] = static_cast<std::byte>(0x91); // Ch 2 Note On
+    events[0].data[1] = static_cast<std::byte>(60);
+    events[0].data[2] = static_cast<std::byte>(100);
+
+    // Event 2: Pitch bend ch 2 (+24 semitones) at frame 64
+    events[1].frameOffset = 64;
+    events[1].size = 3;
+    events[1].data[0] = static_cast<std::byte>(0xE1); // Ch 2 Pitch Bend
+    events[1].data[1] = static_cast<std::byte>(0x00);
+    events[1].data[2] = static_cast<std::byte>(0x60); // > 8192
+
+    // Event 3: CC 74 ch 2 (timbre) at frame 128
+    events[2].frameOffset = 128;
+    events[2].size = 3;
+    events[2].data[0] = static_cast<std::byte>(0xB1);
+    events[2].data[1] = static_cast<std::byte>(74);
+    events[2].data[2] = static_cast<std::byte>(120);
+
+    // Event 4: Channel pressure ch 2 at frame 160
+    events[3].frameOffset = 160;
+    events[3].size = 2;
+    events[3].data[0] = static_cast<std::byte>(0xD1);
+    events[3].data[1] = static_cast<std::byte>(100);
+
+    // Event 5: Note Off ch 2 at frame 200
+    events[4].frameOffset = 200;
+    events[4].size = 3;
+    events[4].data[0] = static_cast<std::byte>(0x81);
+    events[4].data[1] = static_cast<std::byte>(60);
+    events[4].data[2] = static_cast<std::byte>(0);
+
+    MidiBufferView midiView {events.data(), events.size()};
+    ProcessContext ctx {
+        .audio = AudioBufferView {channels.data(), 2, 256},
+        .midi = midiView
+    };
+
+    synth.process(ctx);
+
+    float maxAbs = 0.0f;
+    for (std::size_t i = 0; i < 256; ++i)
+    {
+        require(! std::isnan(outL[i]) && ! std::isinf(outL[i]), "no NaN/Inf in left synth audio");
+        require(! std::isnan(outR[i]) && ! std::isinf(outR[i]), "no NaN/Inf in right synth audio");
+        maxAbs = std::max(maxAbs, std::abs(outL[i]));
+    }
+    require(maxAbs > 0.01f, "synth produces audio with MPE expressive modulation");
+
+    synth.allNotesOff();
+    synth.reset();
+    require(synth.activeVoiceCount() == 0, "all voices cleared after reset");
+}
+
+void testMidiControllerManagerMcuAndLearn()
+{
+    using namespace dawg::engine;
+
+    MidiControllerManager mgr;
+    require(mgr.isMcuEnabled(), "MCU is enabled by default");
+
+    // 1. MCU Faders (14-bit pitch bend)
+    {
+        MidiEvent ev {};
+        ev.size = 3;
+        ev.data[0] = static_cast<std::byte>(0xE0); // Track 0 fader
+        ev.data[1] = static_cast<std::byte>(0x00);
+        ev.data[2] = static_cast<std::byte>(0x40); // 8192 / 16383 ~= 0.5f
+
+        const auto res = mgr.processEvent(ev);
+        require(res.mcuEvent.type == McuType::fader, "MCU parses fader message");
+        require(res.mcuEvent.trackIndex == 0, "fader on track 0");
+        require(std::abs(res.mcuEvent.value - (8192.0f / 16383.0f)) < 0.001f, "fader value parsed accurately");
+    }
+
+    // 2. MCU Master Fader (channel 8)
+    {
+        MidiEvent ev {};
+        ev.size = 3;
+        ev.data[0] = static_cast<std::byte>(0xE8); // Master fader
+        ev.data[1] = static_cast<std::byte>(0x7F);
+        ev.data[2] = static_cast<std::byte>(0x7F); // 16383 / 16383 = 1.0f
+
+        const auto res = mgr.processEvent(ev);
+        require(res.mcuEvent.type == McuType::fader, "MCU parses master fader");
+        require(res.mcuEvent.trackIndex == 8, "master fader is trackIndex 8");
+        require(std::abs(res.mcuEvent.value - 1.0f) < 0.001f, "master fader is full unity/max");
+    }
+
+    // 3. MCU Transport Buttons (Play Note 94, Stop Note 93, Record Note 95, Loop Note 86)
+    {
+        MidiEvent ev {};
+        ev.size = 3;
+        ev.data[0] = static_cast<std::byte>(0x90);
+        ev.data[1] = static_cast<std::byte>(94);
+        ev.data[2] = static_cast<std::byte>(127); // Note on
+
+        auto res = mgr.processEvent(ev);
+        require(res.mcuEvent.type == McuType::transport, "MCU parses transport");
+        require(res.mcuEvent.transport == McuTransport::play, "MCU play command");
+        require(res.mcuEvent.buttonState, "play button pressed");
+
+        // Loop button
+        ev.data[1] = static_cast<std::byte>(86);
+        res = mgr.processEvent(ev);
+        require(res.mcuEvent.transport == McuTransport::cycleLoop, "MCU loop command");
+    }
+
+    // 4. MCU V-Pots (Relative rotary encoder CC 16..23)
+    {
+        MidiEvent ev {};
+        ev.size = 3;
+        ev.data[0] = static_cast<std::byte>(0xB0);
+        ev.data[1] = static_cast<std::byte>(16); // Track 0 V-Pot
+        ev.data[2] = static_cast<std::byte>(0x03); // +3 steps
+
+        auto res = mgr.processEvent(ev);
+        require(res.mcuEvent.type == McuType::vpot, "MCU parses V-Pot rotary");
+        require(res.mcuEvent.trackIndex == 0, "V-Pot on track 0");
+        require(res.mcuEvent.value == 3.0f, "positive rotary steps");
+
+        // Negative rotation: bit 6 set (0x42 = -2)
+        ev.data[2] = static_cast<std::byte>(0x42);
+        res = mgr.processEvent(ev);
+        require(res.mcuEvent.value == -2.0f, "negative rotary steps");
+    }
+
+    // 5. MCU Jog Wheel (CC 60)
+    {
+        MidiEvent ev {};
+        ev.size = 3;
+        ev.data[0] = static_cast<std::byte>(0xB0);
+        ev.data[1] = static_cast<std::byte>(60);
+        ev.data[2] = static_cast<std::byte>(0x01); // +1 tick
+
+        auto res = mgr.processEvent(ev);
+        require(res.mcuEvent.type == McuType::jogWheel, "MCU parses jog wheel");
+        require(res.mcuEvent.value == 1.0f, "jog forward step");
+
+        ev.data[2] = static_cast<std::byte>(0x41); // -1 tick
+        res = mgr.processEvent(ev);
+        require(res.mcuEvent.value == -1.0f, "jog backward step");
+    }
+
+    // 6. MCU Feedback Generation
+    {
+        const auto faderFb = MidiControllerManager::makeFaderFeedback(0, 0.5f);
+        require(faderFb.size == 3, "fader feedback is 3 bytes");
+        require(static_cast<std::uint8_t>(faderFb.data[0]) == 0xE0, "fader feedback is pitch bend");
+
+        const auto ledFb = MidiControllerManager::makeButtonLed(94, true);
+        require(static_cast<std::uint8_t>(ledFb.data[0]) == 0x90, "led feedback is note on");
+        require(static_cast<std::uint8_t>(ledFb.data[2]) == 0x7F, "led on has velocity 127");
+
+        const auto vpotRing = MidiControllerManager::makeVpotRing(0, 1.0f);
+        require(static_cast<std::uint8_t>(vpotRing.data[0]) == 0xB0, "vpot ring feedback is CC");
+        require(static_cast<std::uint8_t>(vpotRing.data[1]) == 0x30, "track 0 vpot ring CC is 0x30");
+        require(static_cast<std::uint8_t>(vpotRing.data[2]) == 11, "max ring LED value is 11");
+    }
+
+    // 7. MIDI Learn
+    {
+        mgr.startLearn(501, 100.0f, 10000.0f); // Filter cutoff learn
+        require(mgr.isLearning(), "learning mode is active");
+        require(mgr.learningTargetId() == 501, "target ID is 501");
+
+        // Send CC 74 on channel 1
+        MidiEvent ev {};
+        ev.size = 3;
+        ev.data[0] = static_cast<std::byte>(0xB0); // Channel 1 CC
+        ev.data[1] = static_cast<std::byte>(74);   // CC 74
+        ev.data[2] = static_cast<std::byte>(64);   // Midpoint
+
+        auto res = mgr.processEvent(ev);
+        require(res.learnedNewBinding, "MIDI Learn automatically binds incoming CC");
+        require(! mgr.isLearning(), "MIDI Learn exits after binding is captured");
+        require(mgr.bindingCount() == 1, "exactly 1 binding stored in controller manager");
+        const std::uint32_t boundId = res.learnedBindingId;
+
+        // Send CC 74 with maximum value 127
+        ev.data[2] = static_cast<std::byte>(127);
+        res = mgr.processEvent(ev);
+        require(res.learnResult.triggered, "bound CC triggers parameter evaluation");
+        require(res.learnResult.targetId == 501, "evaluated target ID matches");
+        require(std::abs(res.learnResult.value - 10000.0f) < 1.0f, "value scaled to max parameter range");
+
+        // Remove binding
+        require(mgr.removeBinding(boundId), "binding successfully removed");
+        require(mgr.bindingCount() == 0, "binding count is now 0");
+    }
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -1532,4 +1752,6 @@ int main()
     testClapPluginNodeHostingPdcAndCrashImmunity();
     testAutomationCurveEvaluatorAndBezierTension();
     testWsolaTimeStretchingAndPitchPreservation();
+    testMpePolyphonicExpressionAndSynthModulation();
+    testMidiControllerManagerMcuAndLearn();
 }
