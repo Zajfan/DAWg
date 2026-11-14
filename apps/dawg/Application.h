@@ -9,8 +9,10 @@
 
 namespace dawg::commands { class ProjectController; }
 namespace dawg::engine { class AudioEngine; }
+namespace dawg::media { class AudioMediaService; }
 namespace dawg::platform::juce {
 class JuceAudioDeviceBridge;
+class JuceWavAssetReaderFactory;
 namespace window { class WindowManager; }
 }
 
@@ -32,18 +34,28 @@ public:
 
 private:
     void dispatchProjectCommand(project::ProjectCommand);
+    void promptImportWav();
+    void importWavFile(const juce::File& file);
+    void playTransport();
+    void stopTransport();
+    void returnTransportToStart();
     void restartAudio();
+    void syncMediaStatus();
+    void refreshMainComponent();
     void timerCallback() override;
     [[nodiscard]] ui::AudioStatus audioStatus() const;
 
-    // Reverse destruction order keeps the UI, bridge and adapter inside the
-    // lifetimes of the controller/engine they use, even on partial startup.
+    // Reverse destruction order keeps the UI, media worker, bridge, and adapter
+    // inside the lifetimes of the controller, engine, and reader factory they use.
+    std::unique_ptr<platform::juce::JuceWavAssetReaderFactory> m_assetReaderFactory;
     std::unique_ptr<engine::AudioEngine> m_engine;
     std::unique_ptr<commands::ProjectController> m_controller;
     std::unique_ptr<ApplicationState> m_state;
     std::unique_ptr<platform::juce::JuceAudioDeviceBridge> m_audioBridge;
+    std::unique_ptr<media::AudioMediaService> m_mediaService;
     std::unique_ptr<platform::juce::window::WindowManager> m_windowManager;
     juce::Component::SafePointer<ui::MainComponent> m_mainComponent;
+    std::unique_ptr<juce::FileChooser> m_fileChooser;
     std::string m_audioError;
 };
 

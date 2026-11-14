@@ -3,6 +3,8 @@
 #include <dawg/commands/ProjectController.h>
 #include <dawg/engine/AudioEngine.h>
 
+#include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 
@@ -44,9 +46,87 @@ void testCommandsUpdateEditorAndPublishToEngine()
     require(application.editorViewModel().trackCount() == 0, "editor reflects removal");
     require(after.project.tracks.front().name == "Audio 1", "held editor value owns its track data");
 }
+
+void testPlaybackCommandsAndSnapshotComposition()
+{
+    dawg::engine::AudioEngine engine;
+    require(engine.prepare({48000.0, 32, 2}), "engine prepares");
+    dawg::commands::ProjectController controller {dawg::project::Project::create("Untitled", 1)};
+    dawg::app::ApplicationState state {controller, engine};
+
+    dawg::engine::PlaybackRingBuffer ring;
+    require(ring.prepare(1, 32), "ring prepares");
+    constexpr std::array<float, 4> source {0.25f, 0.5f, 0.75f, 1.0f};
+    const std::array<const float*, 1> sourcePlanes {source.data()};
+    require(ring.write(0, sourcePlanes, source.size()) == source.size(), "ring prefill succeeds");
+
+    require(state.dispatch(dawg::project::AddAudioTrack {"Audio 1"}), "add track succeeds");
+    const auto assetId = state.addAudioAsset({
+        .id = 0,
+        .path = "fixture.wav",
+        .pathKind = dawg::project::AudioAssetPathKind::projectRelative,
+        .sampleRate = 48000,
+        .channelCount = 1,
+        .frameCount = 4
+    });
+    require(assetId.has_value() && *assetId == 1, "addAudioAsset assigns asset id");
+
+    const auto clipId = state.addAudioClip({
+        .id = 0,
+        .assetId = *assetId,
+        .startSample = 2,
+        .sourceOffset = 0,
+        .lengthSamples = 4
+    });
+    require(clipId.has_value() && *clipId == 1, "addAudioClip assigns clip id");
+
+    state.setPlaybackBuffer(&ring);
+    require(state.flushRenderSnapshot(), "playback snapshot publishes");
+    require(state.play(), "play callback queues");
+    require(state.stop(), "stop callback queues");
+    require(state.returnToStart(), "return-to-start callback queues seek zero");
+    require(state.play(), "second play callback queues");
+
+    std::array<float, 8> left {};
+    std::array<float, 8> right {};
+    std::array<float*, 2> output {left.data(), right.data()};
+    engine.process({output.data(), output.size(), left.size()}, {}, {});
+
+    require(engine.transportState().playing, "FIFO commands leave transport playing");
+    require(engine.transportState().samplePosition == 8, "transport advances across full block");
+    require(left[0] == 0.0f && left[1] == 0.0f, "samples before clip are silent");
+    require(left[2] == 0.25f && left[3] == 0.5f && left[4] == 0.75f && left[5] == 1.0f,
+            "published clip renders from ring buffer");
+    require(left[6] == 0.0f && left[7] == 0.0f, "samples after clip are silent");
+
+    const auto readyView = state.editorViewModel();
+    require(readyView.hasAudioClip, "view model reports audio clip");
+    require(readyView.clipLengthSamples == 4, "view model reports clip length");
+    require(readyView.playbackPosition == 8, "view model reports playback position");
+    require(readyView.playing, "view model reports playing state");
+    require(readyView.mediaAvailable, "view model reports available media");
+    require(readyView.mediaError.empty(), "view model has empty media error when ready");
+    require(readyView.underrunCount == 0, "view model reports zero underruns when ring is fed");
+
+    state.setMediaStatus(false, "Missing WAV file");
+    require(state.flushRenderSnapshot(), "unavailable media flushes empty playback description");
+    require(state.returnToStart(), "seek zero queues");
+    std::fill(left.begin(), left.end(), 1.0f);
+    std::fill(right.begin(), right.end(), 1.0f);
+    engine.process({output.data(), output.size(), left.size()}, {}, {});
+    for (const float sample : left)
+        require(sample == 0.0f, "unavailable media renders deterministic silence");
+
+    const auto unavailableView = state.editorViewModel();
+    require(!unavailableView.mediaAvailable, "view model reports unavailable media");
+    require(unavailableView.mediaError == "Missing WAV file", "view model owns media error string");
+    require(readyView.mediaAvailable && readyView.mediaError.empty(),
+            "previously captured EditorViewModel remains independent value copy");
+}
 } // namespace
 
 int main()
 {
     testCommandsUpdateEditorAndPublishToEngine();
+    testPlaybackCommandsAndSnapshotComposition();
 }

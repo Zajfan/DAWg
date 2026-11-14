@@ -20,9 +20,13 @@ class MainComponent final : public juce::Component
 public:
     using RestartAudio = std::function<void()>;
 
-    MainComponent(project::ProjectSnapshot, MainEditorView::CommandHandler,
-                  AudioStatus, RestartAudio);
+    MainComponent(EditorViewModel,
+                  MainEditorView::CommandHandler,
+                  MainEditorView::TransportCallbacks,
+                  AudioStatus,
+                  RestartAudio);
 
+    void setViewModel(EditorViewModel);
     void setProjectSnapshot(project::ProjectSnapshot);
     void setAudioStatus(const AudioStatus&);
     void paint(juce::Graphics&) override;

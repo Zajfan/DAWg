@@ -7,8 +7,12 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/EditorViewModel.h
 )
 target_include_directories(DAWg PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ../../ui/shell)
-target_link_libraries(DAWg PRIVATE dawg_platform_juce dawg_services_commands)
+target_link_libraries(DAWg PRIVATE dawg_platform_juce dawg_services_commands dawg_services_media)
 
 if(DAWG_BUILD_TESTS)
     target_sources(DAWg PRIVATE ../../tests/app/MainComponentOwnershipTests.cpp)
+    set_source_files_properties(../../tests/app/MainComponentOwnershipTests.cpp
+        PROPERTIES COMPILE_OPTIONS
+            "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>"
+    )
 endif()

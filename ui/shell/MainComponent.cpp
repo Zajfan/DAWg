@@ -4,10 +4,12 @@
 
 namespace dawg::ui {
 
-MainComponent::MainComponent(project::ProjectSnapshot snapshot,
+MainComponent::MainComponent(EditorViewModel model,
                              MainEditorView::CommandHandler commandHandler,
-                             AudioStatus audioStatus, RestartAudio restartAudio)
-    : m_editor(std::move(snapshot), std::move(commandHandler))
+                             MainEditorView::TransportCallbacks transportCallbacks,
+                             AudioStatus audioStatus,
+                             RestartAudio restartAudio)
+    : m_editor(std::move(model), std::move(commandHandler), std::move(transportCallbacks))
 {
     setSize(900, 560);
     m_titleLabel.setText("DAWg", juce::dontSendNotification);
@@ -19,6 +21,11 @@ MainComponent::MainComponent(project::ProjectSnapshot snapshot,
     addAndMakeVisible(m_restartButton);
     addAndMakeVisible(m_editor);
     setAudioStatus(audioStatus);
+}
+
+void MainComponent::setViewModel(EditorViewModel model)
+{
+    m_editor.setViewModel(std::move(model));
 }
 
 void MainComponent::setProjectSnapshot(project::ProjectSnapshot snapshot)
