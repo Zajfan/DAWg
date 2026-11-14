@@ -1,7 +1,10 @@
 add_subdirectory(persistence)
 add_subdirectory(media)
 
-add_library(dawg_services_commands STATIC commands/src/ProjectController.cpp)
+add_library(dawg_services_commands STATIC
+    commands/src/GraphCompiler.cpp
+    commands/src/ProjectController.cpp
+)
 target_include_directories(dawg_services_commands PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/commands/include)
 target_link_libraries(dawg_services_commands PUBLIC dawg_project_model dawg_engine_core)
 target_compile_features(dawg_services_commands PUBLIC cxx_std_20)

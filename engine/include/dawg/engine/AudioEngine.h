@@ -1,8 +1,10 @@
 #pragma once
 
 #include <dawg/engine/AudioBufferView.h>
+#include <dawg/engine/CompiledGraph.h>
 #include <dawg/engine/EngineCommand.h>
 #include <dawg/engine/EngineConfig.h>
+#include <dawg/engine/GraphHandoff.h>
 #include <dawg/engine/MidiEvent.h>
 #include <dawg/engine/RenderSnapshotPublisher.h>
 #include <dawg/engine/TransportSnapshot.h>
@@ -39,6 +41,11 @@ public:
     // the caller should retry later; accepted edits coalesce until process().
     [[nodiscard]] bool publishRenderSnapshot(RenderSnapshot snapshot) noexcept;
 
+    // Single message-thread producer for compiled N-track execution plans.
+    // Reclaims retired graphs on the calling thread and never blocks or fails.
+    void publishCompiledGraph(std::unique_ptr<const CompiledGraph> graph) noexcept;
+    std::size_t reclaimRetiredGraphs() noexcept;
+
     // Audio-thread observation, or read only while processing is stopped and
     // synchronized with the reader. This is not concurrent UI telemetry.
     [[nodiscard]] std::uint64_t renderSnapshotGeneration() const noexcept;
@@ -60,7 +67,10 @@ public:
 private:
     std::unique_ptr<TransportCommandQueue> m_commandQueue;
     RenderSnapshotPublisher m_snapshotPublisher;
+    GraphHandoff m_graphHandoff;
     std::vector<float> m_discardChannel;
+    std::vector<float> m_scratchLeft;
+    std::vector<float> m_scratchRight;
     RenderSnapshot m_renderSnapshot {};
     TransportState m_transportState {};
     bool m_prepared {};

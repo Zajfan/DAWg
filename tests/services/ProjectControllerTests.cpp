@@ -1,6 +1,8 @@
 #include <dawg/engine/AudioEngine.h>
 
+#include <dawg/commands/GraphCompiler.h>
 #include <dawg/commands/ProjectController.h>
+#include <dawg/engine/PlaybackRingBuffer.h>
 #include <dawg/engine/RenderSnapshotPublisher.h>
 
 #include <array>
@@ -199,6 +201,56 @@ void testEngineBurstAndLifecycle()
     engine.process({}, {}, {});
     require(engine.renderSnapshotGeneration() == 13, "publication continues after lifecycle calls");
 }
+
+void testGraphCompilerBuildsMultiTrackContiguousExecutionPlan()
+{
+    ProjectController controller {Project::create("MultiTrack", 1)};
+    require(controller.dispatch(AddAudioTrack {"Drums"}), "add track 1");
+    require(controller.dispatch(AddAudioTrack {"Bass"}), "add track 2");
+
+    const auto drumsAsset = controller.addAudioAsset(
+        {0, "drums.wav", AudioAssetPathKind::projectRelative, 48000, 2, 64});
+    const auto bassAsset = controller.addAudioAsset(
+        {0, "bass.wav", AudioAssetPathKind::projectRelative, 48000, 1, 32});
+    require(drumsAsset.has_value() && bassAsset.has_value(), "assets register");
+
+    AudioClip clip1 {0, *drumsAsset, 0, 0, 32};
+    clip1.trackId = 1;
+    AudioClip clip2 {0, *drumsAsset, 32, 0, 32};
+    clip2.trackId = 1;
+    AudioClip clip3 {0, *bassAsset, 16, 0, 16};
+    clip3.trackId = 2;
+
+    require(controller.dispatch(AddAudioClip {clip1}), "add clip 1 on track 1");
+    require(controller.dispatch(AddAudioClip {clip2}), "add clip 2 on track 1");
+    require(controller.dispatch(AddAudioClip {clip3}), "add clip 3 on track 2");
+
+    dawg::engine::PlaybackRingBuffer ring1;
+    dawg::engine::PlaybackRingBuffer ring2;
+    require(ring1.prepare(2, 64) && ring2.prepare(1, 32), "prepare rings");
+
+    const std::array<dawg::commands::ClipBufferBinding, 3> bindings {{
+        {.clipId = 1, .buffer = &ring1},
+        {.clipId = 2, .buffer = &ring1},
+        {.clipId = 3, .buffer = &ring2}
+    }};
+
+    auto compiled = dawg::commands::GraphCompiler::compile(
+        controller.snapshot(),
+        controller.latestRenderSnapshot().generation,
+        bindings);
+    require(compiled != nullptr, "GraphCompiler produces CompiledGraph");
+    require(compiled->generation == controller.latestRenderSnapshot().generation,
+            "compiled graph carries controller generation");
+    require(compiled->tracks.size() == 2, "compiled graph has two tracks");
+    require(compiled->clips.size() == 3, "compiled graph has three contiguous clips");
+    require(compiled->tracks[0].clipOffset == 0 && compiled->tracks[0].clipCount == 2,
+            "track 1 owns contiguous clip slice [0, 2)");
+    require(compiled->tracks[1].clipOffset == 2 && compiled->tracks[1].clipCount == 1,
+            "track 2 owns contiguous clip slice [2, 3)");
+    require(compiled->clips[0].buffer == &ring1 && compiled->clips[2].buffer == &ring2,
+            "compiled clips bind to their PlaybackRingBuffer pointers");
+}
 }
 
 int main()
@@ -211,5 +263,6 @@ int main()
     testPublisherCoalescingAndReuse();
     testPublisherConcurrentCoherence();
     testEngineBurstAndLifecycle();
-    std::puts("PASS: 7 render publication and controller behavior tests");
+    testGraphCompilerBuildsMultiTrackContiguousExecutionPlan();
+    std::puts("PASS: 8 render publication, graph compiler, and controller behavior tests");
 }

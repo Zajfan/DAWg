@@ -1,5 +1,6 @@
 add_library(dawg_engine_core STATIC
     src/AudioEngine.cpp
+    src/GraphHandoff.cpp
     src/PlaybackRingBuffer.cpp
     src/RenderSnapshotPublisher.cpp
     src/TransportCommandQueue.cpp

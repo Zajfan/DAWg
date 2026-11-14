@@ -1,4 +1,6 @@
 #include <dawg/engine/AudioEngine.h>
+#include <dawg/engine/CompiledGraph.h>
+#include <dawg/engine/GraphHandoff.h>
 #include <dawg/engine/PlaybackDescription.h>
 #include <dawg/engine/PlaybackRingBuffer.h>
 
@@ -7,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <memory>
 #include <new>
 #include <span>
 
@@ -20,7 +23,12 @@ void require(const bool condition, const char* message)
     }
 }
 
+using dawg::engine::AudioEngine;
+using dawg::engine::CompiledClip;
+using dawg::engine::CompiledGraph;
+using dawg::engine::CompiledTrack;
 using dawg::engine::EngineCommandType;
+using dawg::engine::GraphHandoff;
 using dawg::engine::PlaybackDescription;
 using dawg::engine::PlaybackRingBuffer;
 using dawg::engine::RenderSnapshot;
@@ -356,6 +364,104 @@ void testZeroAllocationOnAudioCallbackPath()
     require(g_allocationCount.load(std::memory_order_acquire) == 0,
             "audio callback path performs zero heap allocations or deallocations");
 }
+
+void testGraphHandoffAndZeroAllocationCompiledGraphAdoption()
+{
+    GraphHandoff handoff;
+    require(handoff.active() == nullptr, "handoff starts with no active graph");
+
+    auto graph1 = std::make_unique<CompiledGraph>();
+    graph1->generation = 1;
+    graph1->tracks.push_back(CompiledTrack {.trackId = 1});
+
+    auto graph2 = std::make_unique<CompiledGraph>();
+    graph2->generation = 2;
+    graph2->tracks.push_back(CompiledTrack {.trackId = 1});
+    graph2->tracks.push_back(CompiledTrack {.trackId = 2});
+
+    // Coalescing overwrite on control thread before audio adopts
+    handoff.publish(std::move(graph1));
+    handoff.publish(std::move(graph2));
+
+    const CompiledGraph* adopted {};
+    {
+        ScopedAllocationGuard guard;
+        adopted = handoff.adopt();
+    }
+    require(adopted != nullptr && adopted->generation == 2 && adopted->tracks.size() == 2,
+            "audio thread adopts latest compiled graph without allocating");
+    require(g_allocationCount.load(std::memory_order_acquire) == 0,
+            "first graph adoption performs zero allocations/deallocations on audio thread");
+
+    auto graph3 = std::make_unique<CompiledGraph>();
+    graph3->generation = 3;
+    handoff.publish(std::move(graph3));
+
+    {
+        ScopedAllocationGuard guard;
+        adopted = handoff.adopt();
+    }
+    require(adopted != nullptr && adopted->generation == 3,
+            "audio thread adopts replacement graph and retires previous graph");
+    require(g_allocationCount.load(std::memory_order_acquire) == 0,
+            "retiring previous graph on audio thread performs zero deallocations");
+    require(handoff.reclaimRetired() == 1,
+            "control thread reclaims and destroys the retired graph");
+
+    // Verify AudioEngine adopts CompiledGraph and renders its clips with zero RT allocations
+    AudioEngine engine;
+    require(engine.prepare({48000.0, 8, 2}), "engine prepares for compiled graph playback");
+
+    PlaybackRingBuffer ring;
+    require(ring.prepare(1, 16), "ring prepares for compiled graph");
+    constexpr std::array<float, 4> pattern {0.2f, 0.4f, 0.6f, 0.8f};
+    const std::array<const float*, 1> planes {pattern.data()};
+    require(ring.write(0, planes, pattern.size()) == pattern.size(), "prefill ring");
+
+    auto engineGraph = std::make_unique<CompiledGraph>();
+    engineGraph->generation = 42;
+    engineGraph->clips.push_back(CompiledClip {
+        .clipId = 1,
+        .assetId = 1,
+        .buffer = &ring,
+        .startSample = 1,
+        .lengthSamples = pattern.size(),
+        .sourceOffset = 0,
+        .channelCount = 1,
+        .gainLinear = 1.0f,
+        .fadeInSamples = 0,
+        .fadeOutSamples = 0
+    });
+    engineGraph->tracks.push_back(CompiledTrack {
+        .trackId = 1,
+        .muted = false,
+        .solo = false,
+        .phaseInvert = false,
+        .gainLinear = 1.0f,
+        .pan = 0.0f,
+        .clipOffset = 0,
+        .clipCount = 1
+    });
+
+    engine.publishCompiledGraph(std::move(engineGraph));
+    require(engine.enqueueCommand({EngineCommandType::play, 0}), "enqueue play");
+
+    std::array<float, 8> left {};
+    std::array<float, 8> right {};
+    std::array<float*, 2> out {left.data(), right.data()};
+
+    {
+        ScopedAllocationGuard guard;
+        engine.process({out.data(), out.size(), left.size()}, {}, {});
+    }
+    require(g_allocationCount.load(std::memory_order_acquire) == 0,
+            "AudioEngine::process with CompiledGraph performs zero RT allocations");
+    require(engine.renderSnapshotGeneration() == 42,
+            "AudioEngine reports compiled graph generation");
+    require(left[0] == 0.0f && left[1] == 0.2f && left[2] == 0.4f
+                && left[3] == 0.6f && left[4] == 0.8f && left[5] == 0.0f,
+            "CompiledGraph clip renders at exact timeline offset");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -452,4 +558,5 @@ int main()
     testSingleClipPlayback();
     testStereoClipAndUnderrunTelemetry();
     testZeroAllocationOnAudioCallbackPath();
+    testGraphHandoffAndZeroAllocationCompiledGraphAdoption();
 }

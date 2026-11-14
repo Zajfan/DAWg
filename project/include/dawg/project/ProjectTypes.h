@@ -31,6 +31,10 @@ struct AudioClip
     std::uint64_t startSample {};
     std::uint64_t sourceOffset {};
     std::uint64_t lengthSamples {};
+    TrackId trackId {};
+    float gainLinear {1.0f};
+    std::uint32_t fadeInSamples {};
+    std::uint32_t fadeOutSamples {};
 
     friend bool operator==(const AudioClip&, const AudioClip&) = default;
 };
@@ -41,6 +45,9 @@ struct Track
     std::string name;
     bool muted {};
     bool solo {};
+    float gainLinear {1.0f};
+    float pan {0.0f};
+    bool phaseInvert {};
 
     friend bool operator==(const Track&, const Track&) = default;
 };
