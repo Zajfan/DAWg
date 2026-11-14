@@ -21,7 +21,24 @@ MainEditorView::MainEditorView(EditorViewModel model,
         .undo = m_transportCallbacks.undo,
         .redo = m_transportCallbacks.redo
     })
-    , m_timelineView(m_commandHandler, waveformCache, m_transportCallbacks.seek)
+    , m_timelineView({
+        .commandHandler = m_commandHandler,
+        .seek = m_transportCallbacks.seek,
+        .togglePlay = [this] {
+            if (m_model.playing)
+            {
+                if (m_transportCallbacks.stop)
+                    m_transportCallbacks.stop();
+            }
+            else
+            {
+                if (m_transportCallbacks.play)
+                    m_transportCallbacks.play();
+            }
+        },
+        .undo = m_transportCallbacks.undo,
+        .redo = m_transportCallbacks.redo
+    }, waveformCache)
     , m_mixerPanel(m_commandHandler, m_transportCallbacks.setMasterLimiter)
 {
     addAndMakeVisible(m_transportBar);
