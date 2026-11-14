@@ -81,6 +81,17 @@ if(DAWG_BUILD_TESTS)
     )
     add_test(NAME dawg.project_file COMMAND dawg_project_file_tests)
 
+    add_executable(dawg_media_service_tests tests/services/AudioMediaServiceTests.cpp)
+    target_link_libraries(dawg_media_service_tests PRIVATE dawg_services_media)
+    target_compile_features(dawg_media_service_tests PRIVATE cxx_std_20)
+    target_compile_options(dawg_media_service_tests PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4;/WX>
+        $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
+    )
+    add_test(NAME dawg.media_service COMMAND dawg_media_service_tests)
+    set_tests_properties(dawg.media_service PROPERTIES LABELS "services;headless")
+
     add_executable(dawg_foundation_vertical_slice_tests
         tests/integration/FoundationVerticalSliceTests.cpp
     )
@@ -246,4 +257,24 @@ if(DAWG_BUILD_TESTS)
         LABELS "window-manager"
         SKIP_RETURN_CODE 77
     )
+
+    add_executable(dawg_juce_wav_reader_tests
+        tests/platform/JuceWavAssetReaderTests.cpp
+    )
+    target_link_libraries(dawg_juce_wav_reader_tests PRIVATE dawg_platform_juce)
+    target_compile_features(dawg_juce_wav_reader_tests PRIVATE cxx_std_20)
+    set_source_files_properties(
+        tests/platform/JuceWavAssetReaderTests.cpp
+        PROPERTIES COMPILE_OPTIONS
+            "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>"
+    )
+    target_compile_options(dawg_juce_wav_reader_tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/W4;/WX>
+        $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
+    )
+    target_link_options(dawg_juce_wav_reader_tests PRIVATE
+        $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
+    )
+    add_test(NAME dawg.juce_wav_reader COMMAND dawg_juce_wav_reader_tests)
+    set_tests_properties(dawg.juce_wav_reader PROPERTIES LABELS "platform")
 endif()

@@ -1,4 +1,5 @@
 add_subdirectory(persistence)
+add_subdirectory(media)
 
 add_library(dawg_services_commands STATIC commands/src/ProjectController.cpp)
 target_include_directories(dawg_services_commands PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/commands/include)
