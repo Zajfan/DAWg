@@ -8,18 +8,18 @@ extern "C" {
 #endif
 
 // CLAP 1.2 core definitions
-struct clap_version
+typedef struct clap_version
 {
     std::uint32_t major;
     std::uint32_t minor;
     std::uint32_t revision;
-};
+} clap_version_t;
 
-static constexpr clap_version CLAP_VERSION_INIT = {1, 2, 0};
+static constexpr clap_version_t CLAP_VERSION_INIT = {1, 2, 0};
 
 struct clap_plugin_descriptor
 {
-    clap_version clap_version;
+    clap_version_t clap_version;
     const char* id;
     const char* name;
     const char* vendor;
@@ -134,7 +134,7 @@ struct clap_process
 
 struct clap_host
 {
-    clap_version clap_version;
+    clap_version_t clap_version;
     void* host_data;
     const char* name;
     const char* vendor;
@@ -212,7 +212,7 @@ struct clap_plugin_factory
 
 struct clap_plugin_entry
 {
-    clap_version clap_version;
+    clap_version_t clap_version;
     bool (*init)(const char* plugin_path);
     void (*deinit)(void);
     const void* (*get_factory)(const char* factory_id);

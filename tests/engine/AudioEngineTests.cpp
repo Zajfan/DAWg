@@ -19,6 +19,7 @@
 #include <dawg/engine/dsp/ParametricEQNode.h>
 #include <dawg/engine/dsp/TnhcSynthNode.h>
 #include <dawg/engine/clap/ClapPluginNode.h>
+#include <dawg/engine/WsolaTimeStretcher.h>
 
 #include <array>
 #include <atomic>
@@ -1394,6 +1395,36 @@ void testAutomationCurveEvaluatorAndBezierTension()
         require(std::abs(blockValues[i] - expected) < 1e-4f, "block evaluation matches sample-accurate ramp");
     }
 }
+
+void testWsolaTimeStretchingAndPitchPreservation()
+{
+    using namespace dawg::engine;
+
+    // Generate 440 Hz test sine wave at 48 kHz (duration = 4800 samples = 100 ms)
+    constexpr std::size_t inFrames = 4800;
+    std::vector<float> sineWave(inFrames);
+    for (std::size_t i = 0; i < inFrames; ++i)
+    {
+        sineWave[i] = static_cast<float>(std::sin(2.0 * std::numbers::pi * 440.0 * static_cast<double>(i) / 48000.0));
+    }
+    std::array<std::span<const float>, 1> inputChannels {sineWave};
+
+    // 1. Identity ratio (1.0)
+    const auto identOut = WsolaTimeStretcher::stretch(inputChannels, 1.0f);
+    require(identOut.size() == 1, "identity stretch returns 1 channel");
+    require(identOut[0].size() == inFrames, "identity stretch returns exact same frame count");
+    require(std::abs(identOut[0][100] - sineWave[100]) < 1e-5f, "identity stretch preserves waveform bit-exactly");
+
+    // 2. Slowdown stretch (1.5x length)
+    const auto slowOut = WsolaTimeStretcher::stretch(inputChannels, 1.5f);
+    require(slowOut.size() == 1, "stretch returns 1 channel");
+    require(slowOut[0].size() == inFrames * 3 / 2, "1.5x stretch produces 1.5x frame count (7200 frames)");
+
+    // 3. Speedup stretch (0.5x length)
+    const auto fastOut = WsolaTimeStretcher::stretch(inputChannels, 0.5f);
+    require(fastOut.size() == 1, "compress returns 1 channel");
+    require(fastOut[0].size() == inFrames / 2, "0.5x stretch produces 0.5x frame count (2400 frames)");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -1500,4 +1531,5 @@ int main()
     testTnhcSynthNodePolyphonyAndMidi();
     testClapPluginNodeHostingPdcAndCrashImmunity();
     testAutomationCurveEvaluatorAndBezierTension();
+    testWsolaTimeStretchingAndPitchPreservation();
 }

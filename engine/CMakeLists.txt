@@ -12,6 +12,7 @@ add_library(dawg_engine_core STATIC
     src/TempoMap.cpp
     src/TransportCommandQueue.cpp
     src/WorkStealingScheduler.cpp
+    src/WsolaTimeStretcher.cpp
     src/clap/ClapPluginNode.cpp
     src/dsp/BrickwallLimiterNode.cpp
     src/dsp/DynamicsCompressorNode.cpp

@@ -5,6 +5,7 @@
 #include <dawg/media/AudioResampler.h>
 #include <dawg/media/DiskStreamPool.h>
 #include <dawg/media/OfflineRenderService.h>
+#include <dawg/media/TransientDetector.h>
 #include <dawg/media/WaveformCache.h>
 
 #include <array>
@@ -497,6 +498,37 @@ void testOfflineRenderServiceMasterBounceStemsAndDither()
         require(cancelResult.error().code == MediaError::Code::unavailable, "error code is unavailable");
     }
 }
+
+void testTransientDetectionOnPercussiveBursts()
+{
+    // Generate 1 second of silence with 2 sharp impulses at sample 4800 and 24000
+    constexpr std::size_t numSamples = 48000;
+    std::vector<float> audio(numSamples, 0.0f);
+
+    // Burst 1 at sample 4800 (100 ms)
+    for (std::size_t i = 0; i < 256; ++i)
+        audio[4800 + i] = (i % 2 == 0 ? 0.9f : -0.9f) * (1.0f - static_cast<float>(i) / 256.0f);
+
+    // Burst 2 at sample 24000 (500 ms)
+    for (std::size_t i = 0; i < 256; ++i)
+        audio[24000 + i] = (i % 2 == 0 ? 0.85f : -0.85f) * (1.0f - static_cast<float>(i) / 256.0f);
+
+    const auto transients = TransientDetector::detect(audio, 48000.0, 1.2f);
+    require(transients.size() >= 2, "detected both percussive bursts");
+
+    // Check proximity to bursts
+    bool foundBurst1 = false;
+    bool foundBurst2 = false;
+    for (const auto& marker : transients)
+    {
+        if (marker.sampleOffset >= 4600 && marker.sampleOffset <= 5000)
+            foundBurst1 = true;
+        if (marker.sampleOffset >= 23800 && marker.sampleOffset <= 24200)
+            foundBurst2 = true;
+    }
+    require(foundBurst1, "detected burst 1 near sample 4800");
+    require(foundBurst2, "detected burst 2 near sample 24000");
+}
 } // namespace
 
 int main()
@@ -507,5 +539,6 @@ int main()
     testAudioResamplerDiskStreamPoolAndRecordService();
     testWaveformCache();
     testOfflineRenderServiceMasterBounceStemsAndDither();
-    std::puts("PASS: 6 media service, resampler, disk pool, record, waveform cache, and offline render tests");
+    testTransientDetectionOnPercussiveBursts();
+    std::puts("PASS: 7 media service, resampler, disk pool, record, waveform cache, offline render, and transient detection tests");
 }
