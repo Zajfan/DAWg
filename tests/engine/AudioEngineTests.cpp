@@ -17,12 +17,14 @@
 #include <dawg/engine/dsp/DynamicsCompressorNode.h>
 #include <dawg/engine/dsp/ParametricEQNode.h>
 #include <dawg/engine/dsp/TnhcSynthNode.h>
+#include <dawg/engine/clap/ClapPluginNode.h>
 
 #include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <new>
@@ -1238,6 +1240,105 @@ void testTnhcSynthNodePolyphonyAndMidi()
     }
     require(peakAfter > 0.01f, "audio after note-on frame offset contains synthesized waveform");
 }
+
+static clap_plugin_latency g_mockLatency {
+    .get = [](const clap_plugin*) noexcept -> std::uint32_t { return 128; }
+};
+
+static bool g_mockClapShouldCrash = false;
+static std::size_t g_mockClapReceivedEvents = 0;
+
+static clap_plugin g_mockClapPlugin {
+    .desc = nullptr,
+    .plugin_data = nullptr,
+    .init = [](const clap_plugin*) noexcept -> bool { return true; },
+    .destroy = [](const clap_plugin*) noexcept {},
+    .activate = [](const clap_plugin*, double, std::uint32_t, std::uint32_t) noexcept -> bool { return true; },
+    .deactivate = [](const clap_plugin*) noexcept {},
+    .start_processing = [](const clap_plugin*) noexcept -> bool { return true; },
+    .stop_processing = [](const clap_plugin*) noexcept {},
+    .reset = [](const clap_plugin*) noexcept {},
+    .process = [](const clap_plugin*, const clap_process* proc) noexcept -> clap_process_status {
+        if (g_mockClapShouldCrash)
+            return CLAP_PROCESS_ERROR;
+
+        if (proc->in_events != nullptr && proc->in_events->size != nullptr)
+            g_mockClapReceivedEvents = proc->in_events->size(proc->in_events);
+
+        for (std::uint32_t ch = 0; ch < proc->audio_outputs->channel_count; ++ch)
+        {
+            for (std::uint32_t f = 0; f < proc->frames_count; ++f)
+                proc->audio_outputs->data32[ch][f] *= 2.0f;
+        }
+        return CLAP_PROCESS_CONTINUE;
+    },
+    .get_extension = [](const clap_plugin*, const char* id) noexcept -> const void* {
+        if (std::strcmp(id, CLAP_EXT_LATENCY) == 0)
+            return &g_mockLatency;
+        return nullptr;
+    },
+    .on_main_thread = [](const clap_plugin*) noexcept {}
+};
+
+void testClapPluginNodeHostingPdcAndCrashImmunity()
+{
+    using namespace dawg::engine;
+
+    g_mockClapShouldCrash = false;
+    g_mockClapReceivedEvents = 0;
+
+    ClapPluginNode node(&g_mockClapPlugin, false);
+    require(node.prepare(48000.0, 512, 2), "prepare CLAP plugin node");
+    require(node.latencySamples() == 128, "CLAP plugin declares 128 samples latency via CLAP_EXT_LATENCY");
+    require(! node.isCrashed(), "initial crash state is false");
+
+    // Audio and MIDI processing
+    std::array<float, 32> leftBuf {};
+    std::array<float, 32> rightBuf {};
+    leftBuf.fill(0.25f);
+    rightBuf.fill(0.25f);
+    std::array<float*, 2> channels {leftBuf.data(), rightBuf.data()};
+
+    std::array<MidiEvent, 2> midiEvents {{
+        MidiEvent {.frameOffset = 4, .data = {std::byte {0x90}, std::byte {60}, std::byte {100}}, .size = 3},
+        MidiEvent {.frameOffset = 12, .data = {std::byte {0x80}, std::byte {60}, std::byte {0}}, .size = 3}
+    }};
+
+    ProcessContext ctx {
+        .audio = AudioBufferView {
+            .channels = channels.data(),
+            .channelCount = 2,
+            .frameCount = 32
+        },
+        .midi = MidiBufferView {
+            .events = midiEvents.data(),
+            .eventCount = 2
+        },
+        .sampleRate = 48000.0
+    };
+
+    {
+        ScopedAllocationGuard guard;
+        node.process(ctx);
+    }
+
+    require(g_mockClapReceivedEvents == 2, "CLAP plugin received translated MIDI events");
+    require(std::abs(leftBuf[0] - 0.5f) < 1e-4f, "CLAP process doubled audio samples");
+    require(std::abs(rightBuf[0] - 0.5f) < 1e-4f, "CLAP process doubled right audio channel");
+    require(! node.isCrashed(), "plugin executed successfully without crash");
+
+    // Crash Immunity: test handling when plugin fails
+    g_mockClapShouldCrash = true;
+    node.process(ctx);
+    require(node.isCrashed(), "node detected CLAP_PROCESS_ERROR and marked itself crashed");
+
+    // Subsequent process calls when crashed output silence safely without invoking plugin
+    leftBuf.fill(0.7f);
+    node.process(ctx);
+    require(node.isCrashed(), "remains crashed until cleared");
+    node.clearCrashed();
+    require(node.prepare(48000.0, 512, 2), "re-prepare resets state");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -1342,4 +1443,5 @@ int main()
     testStudioDspSuiteAndPdcActivation();
     testAudioEngineMasterLimiterActivation();
     testTnhcSynthNodePolyphonyAndMidi();
+    testClapPluginNodeHostingPdcAndCrashImmunity();
 }
