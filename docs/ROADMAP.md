@@ -33,27 +33,17 @@ worker-backed media service, JUCE WAV reader adapter, realtime audio engine, and
 application shell. Multi-track mixing, audio recording, plugin hosting, and
 waveform thumbnail generation remain explicitly deferred to subsequent milestones.
 
-## 0.3.0 — Recording (Deferred)
+## 0.3.0 — Five-Pillar Production Engine Core
 
-- [ ] Select input device and channels
-- [ ] Record input to WAV through a preallocated buffer and worker thread
-- [ ] Place takes on the arrangement timeline
-- [ ] Handle device loss and disk-write errors clearly
+- [x] **Pillar 1 (Compiled Render Graph & Epoch Handoff):** `CompiledGraph` (`CompiledTrack`, `CompiledClip`), `GraphCompiler`, and lock-free garbage-carrying `GraphHandoff`
+- [x] **Pillar 2 (Multi-Track Scheduler, Channel Strip Mixer, & Metering):** Multi-track clip summing, `SmoothedParameter`, compensated equal-power pan law, phase invert, solo-in-place/mute resolution, per-clip fade-in/fade-out ramps, `SubBlockSplitter`, and lock-free `MeterTelemetry` (peak + RMS)
+- [x] **Pillar 3 (Musical Timebase, Sub-Block Loop Engine, & Metronome):** `TempoMap` (960 PPQ sample $\leftrightarrow$ tick/bar-beat-tick conversion across piecewise tempo and time-signature events), sample-accurate sub-block `LoopRegion` wrapping with `PlaybackRingBuffer` retention window, and synthesized `Metronome`
+- [x] **Pillar 4 (Scalable Disk I/O Pool, Resampling, & Recording Pipeline):** Multiplexed `DiskStreamPool` prioritized by lowest buffered frames, 4-point Catmull-Rom cubic Hermite `AudioResampler`, and lock-free `RecordRingBuffer` + `AudioRecordService` + `AudioAssetWriter` with latency-compensated timeline placement
+- [x] **Pillar 5 (DAG Processor Graph, Automatic PDC, & Multi-Core Work-Stealing):** `ProcessorNode` (`GainPanNode`, `BiquadFilterNode`, `DelayCompensatorNode`, air-gapped `ExternalPluginNode`), `DspGraph` topological compiler with cycle detection and automatic Plugin Delay Compensation (PDC), and lock-free `WorkStealingScheduler`
 
-## 0.4.0 — Multitrack arrangement (Deferred)
+## 0.4.0 — Multi-Track & Mixer UI Shell Integration (Next)
 
-- [ ] Create, rename, reorder, and remove audio tracks
-- [ ] Move, trim, split, and duplicate clips
-- [ ] Add timeline zoom and horizontal scrolling
-- [ ] Save and reopen projects from the application shell
-
-## 0.5.0 — Basic mixing (Deferred)
-
-- [ ] Multi-track summing, track gain, and pan
-- [ ] Mute and solo processing on the audio thread
-- [ ] Master output and level meters
-- [ ] Export stereo mix to WAV
-
-## Later (Deferred)
-
-- Non-destructive edits, fades, automation, plugin hosting, MIDI, virtual instruments, undo/redo, and expanded format support.
+- [ ] Expose multi-track timeline editing, faders, pan knobs, mute/solo buttons, and live peak/RMS meters in the desktop shell
+- [ ] Connect input device selection, track record arming, and `AudioRecordService` take creation in the shell
+- [ ] Render graphical waveform thumbnails
+- [ ] Host external CLAP/VST3 plugins through `ExternalPluginNode` adapters

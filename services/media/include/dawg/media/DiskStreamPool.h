@@ -54,7 +54,7 @@ private:
         std::vector<float*> resamplePlanes;
         std::uint64_t clipStartSource {};
         std::uint64_t clipEndSource {};
-        std::uint64_t nextSourceRead {};
+        std::atomic<std::uint64_t> nextSourceRead {0};
         std::uint64_t nextTargetWrite {};
         std::size_t capacityFrames {};
         std::uint16_t channelCount {};

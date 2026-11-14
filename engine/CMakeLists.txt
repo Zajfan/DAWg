@@ -1,5 +1,8 @@
+find_package(Threads REQUIRED)
+
 add_library(dawg_engine_core STATIC
     src/AudioEngine.cpp
+    src/DspGraph.cpp
     src/GraphHandoff.cpp
     src/Metronome.cpp
     src/PlaybackRingBuffer.cpp
@@ -7,8 +10,10 @@ add_library(dawg_engine_core STATIC
     src/RenderSnapshotPublisher.cpp
     src/TempoMap.cpp
     src/TransportCommandQueue.cpp
+    src/WorkStealingScheduler.cpp
 )
 target_include_directories(dawg_engine_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(dawg_engine_core PUBLIC Threads::Threads)
 target_compile_features(dawg_engine_core PUBLIC cxx_std_20)
 target_compile_options(dawg_engine_core PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>

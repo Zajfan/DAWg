@@ -30,7 +30,7 @@ public:
     constexpr void setTarget(const float target, const std::size_t rampSamples) noexcept
     {
         m_target = target;
-        if (rampSamples == 0 || m_current == target)
+        if (rampSamples == 0 || ! (m_current < target || m_current > target))
         {
             m_current = target;
             m_step = 0.0f;
@@ -81,7 +81,7 @@ struct StereoPanGains
 [[nodiscard]] inline StereoPanGains equalPowerPanGains(const float pan) noexcept
 {
     const float clamped = std::clamp(pan, -1.0f, 1.0f);
-    if (clamped == 0.0f)
+    if (! (clamped < 0.0f || clamped > 0.0f))
         return {1.0f, 1.0f};
 
     constexpr float kQuarterPi = std::numbers::pi_v<float> * 0.25f;

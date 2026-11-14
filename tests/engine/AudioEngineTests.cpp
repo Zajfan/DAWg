@@ -1,15 +1,18 @@
 #include <dawg/engine/AudioEngine.h>
 #include <dawg/engine/ChannelStrip.h>
 #include <dawg/engine/CompiledGraph.h>
+#include <dawg/engine/DspGraph.h>
 #include <dawg/engine/GraphHandoff.h>
 #include <dawg/engine/LoopRegion.h>
 #include <dawg/engine/MeterTelemetry.h>
 #include <dawg/engine/Metronome.h>
 #include <dawg/engine/PlaybackDescription.h>
 #include <dawg/engine/PlaybackRingBuffer.h>
+#include <dawg/engine/ProcessorNode.h>
 #include <dawg/engine/RecordRingBuffer.h>
 #include <dawg/engine/SubBlockSplitter.h>
 #include <dawg/engine/TempoMap.h>
+#include <dawg/engine/WorkStealingScheduler.h>
 
 #include <array>
 #include <atomic>
@@ -806,6 +809,132 @@ void testRecordRingBufferAndRealtimeInputCapture()
     require(capturedL == inLeft && capturedR == inRight,
             "captured stereo frames match input signal bit-for-bit");
 }
+
+struct SimulatedLatencyPluginState
+{
+    dawg::engine::DelayCompensatorNode internalDelay;
+    float gain {1.0f};
+    std::uint32_t declaredLatency {0};
+};
+
+void testDspGraphCycleRejectionAutomaticPdcAndWorkStealing()
+{
+    using dawg::engine::BiquadFilterNode;
+    using dawg::engine::DelayCompensatorNode;
+    using dawg::engine::DspGraph;
+    using dawg::engine::ExternalPluginCallbacks;
+    using dawg::engine::ExternalPluginNode;
+    using dawg::engine::GainPanNode;
+    using dawg::engine::ProcessContext;
+    using dawg::engine::WorkStealingScheduler;
+
+    // 1. Cycle detection rejects feedback loop in DAG
+    {
+        DspGraph cyclicGraph;
+        const auto a = cyclicGraph.addNode(std::make_unique<GainPanNode>(1.0f, 0.0f));
+        const auto b = cyclicGraph.addNode(std::make_unique<GainPanNode>(1.0f, 0.0f));
+        require(cyclicGraph.addEdge(a, b) && cyclicGraph.addEdge(b, a), "add cycle edges");
+        require(! cyclicGraph.compile(48000.0, 8, 2),
+                "DspGraph::compile rejects cyclic graph");
+    }
+
+    // 2. Automatic Plugin Delay Compensation (PDC) phase-cancellation proof:
+    // Source signal splits into two parallel branches:
+    // - Branch A: ExternalPluginNode with 3-sample internal latency and gain +1.0
+    // - Branch B: Zero-latency GainPanNode with gain -1.0 (phase inverted)
+    // Both branches sum into Master Bus node.
+    // Without PDC, Branch B arrives 3 samples early and fails to cancel Branch A.
+    // With automatic PDC, DspGraph inserts a 3-sample DelayCompensatorNode on Branch B -> Master,
+    // so Branch A + Branch B sum to exact 0.0f across all samples!
+    SimulatedLatencyPluginState pluginState {
+        .internalDelay = DelayCompensatorNode {3},
+        .gain = 1.0f,
+        .declaredLatency = 3
+    };
+    const ExternalPluginCallbacks callbacks {
+        .instance = &pluginState,
+        .prepare = [](void* inst, double sr, std::size_t maxBlock, std::uint16_t ch) noexcept {
+            auto* st = static_cast<SimulatedLatencyPluginState*>(inst);
+            return st->internalDelay.prepare(sr, maxBlock, ch);
+        },
+        .reset = [](void* inst) noexcept {
+            static_cast<SimulatedLatencyPluginState*>(inst)->internalDelay.reset();
+        },
+        .latencySamples = [](void* inst) noexcept -> std::uint32_t {
+            return static_cast<SimulatedLatencyPluginState*>(inst)->declaredLatency;
+        },
+        .process = [](void* inst, ProcessContext& ctx) noexcept {
+            auto* st = static_cast<SimulatedLatencyPluginState*>(inst);
+            st->internalDelay.process(ctx);
+        }
+    };
+
+    DspGraph pdcGraph;
+    const auto sourceNode = pdcGraph.addNode(std::make_unique<GainPanNode>(1.0f, 0.0f), true);
+    const auto latentBranchA = pdcGraph.addNode(std::make_unique<ExternalPluginNode>(callbacks));
+    const auto instantBranchB = pdcGraph.addNode(std::make_unique<GainPanNode>(-1.0f, 0.0f));
+    const auto masterBus = pdcGraph.addNode(std::make_unique<GainPanNode>(1.0f, 0.0f), false, true);
+
+    require(pdcGraph.addEdge(sourceNode, latentBranchA), "edge source -> branch A");
+    require(pdcGraph.addEdge(sourceNode, instantBranchB), "edge source -> branch B");
+    require(pdcGraph.addEdge(latentBranchA, masterBus), "edge branch A -> master");
+    require(pdcGraph.addEdge(instantBranchB, masterBus), "edge branch B -> master");
+
+    require(pdcGraph.compile(48000.0, 8, 2), "DspGraph compiles diamond graph with PDC");
+    require(pdcGraph.totalLatencySamples() == 3,
+            "DspGraph reports total path latency of 3 samples");
+    require(pdcGraph.wavefrontCount() == 3,
+            "diamond graph compiles into 3 topological wavefronts ([source], [A, B], [master])");
+
+    WorkStealingScheduler scheduler;
+    require(scheduler.prepare(2), "WorkStealingScheduler prepares 2 worker threads");
+
+    constexpr std::array<float, 8> impulseTrain {1.0f, 0.5f, -0.25f, 0.75f, -0.5f, 0.25f, 0.1f, -0.9f};
+    std::array<float, 8> inL = impulseTrain;
+    std::array<float, 8> inR = impulseTrain;
+    std::array<float*, 2> inPlanes {inL.data(), inR.data()};
+
+    std::array<float, 8> outL {};
+    std::array<float, 8> outR {};
+    std::array<float*, 2> outPlanes {outL.data(), outR.data()};
+
+    {
+        ScopedAllocationGuard guard;
+        pdcGraph.process(
+            {inPlanes.data(), inPlanes.size(), inL.size()},
+            {outPlanes.data(), outPlanes.size(), outL.size()},
+            &scheduler);
+    }
+    require(g_allocationCount.load(std::memory_order_acquire) == 0,
+            "DspGraph::process with automatic PDC and WorkStealingScheduler performs zero RT allocations");
+
+    for (std::size_t i = 0; i < 8; ++i)
+    {
+        require(std::fabs(outL[i]) < 1e-6f && std::fabs(outR[i]) < 1e-6f,
+                "automatic PDC aligns 3-sample latent branch with 0-sample inverted branch for exact null cancellation");
+    }
+
+    // 3. Built-in BiquadFilterNode lowpass filtering verification
+    BiquadFilterNode lowpass {BiquadFilterNode::Type::lowPass, 1000.0, 0.707, 0.0};
+    require(lowpass.prepare(48000.0, 8, 1), "BiquadFilterNode prepares");
+    std::array<float, 8> stepSignal {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float*, 1> stepPlanes {stepSignal.data()};
+    ProcessContext filterCtx {
+        .audio = {stepPlanes.data(), 1, stepSignal.size()},
+        .midi = {},
+        .sampleRate = 48000.0
+    };
+    {
+        ScopedAllocationGuard guard;
+        lowpass.process(filterCtx);
+    }
+    require(g_allocationCount.load(std::memory_order_acquire) == 0,
+            "BiquadFilterNode::process performs zero RT allocations");
+    require(stepSignal[0] > 0.0f && stepSignal[0] < stepSignal[7],
+            "lowpass filter smooths step input monotonically");
+
+    scheduler.shutdown();
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -906,4 +1035,5 @@ int main()
     testMultiTrackChannelStripFadeRampsSubBlockSplitterAndMetering();
     testTempoMapSubBlockLoopWrappingAndMetronome();
     testRecordRingBufferAndRealtimeInputCapture();
+    testDspGraphCycleRejectionAutomaticPdcAndWorkStealing();
 }

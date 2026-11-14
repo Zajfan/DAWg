@@ -58,7 +58,7 @@ std::expected<VoiceStreamId, MediaError> DiskStreamPool::addVoice(
     voice->reader = std::move(*opened);
     voice->clipStartSource = clip.sourceOffset;
     voice->clipEndSource = clip.sourceOffset + clip.lengthSamples;
-    voice->nextSourceRead = clip.sourceOffset;
+    voice->nextSourceRead.store(clip.sourceOffset, std::memory_order_relaxed);
     voice->nextTargetWrite = clip.sourceOffset;
     voice->capacityFrames = ringCapacityFrames;
     voice->channelCount = asset.channelCount;
@@ -157,7 +157,7 @@ void DiskStreamPool::workerLoop() noexcept
         for (const auto& voicePtr : m_voices)
         {
             auto& voice = *voicePtr;
-            if (voice.nextSourceRead >= voice.clipEndSource)
+            if (voice.nextSourceRead.load(std::memory_order_acquire) >= voice.clipEndSource)
                 continue;
             const auto avail = voice.ring.availableFrames();
             if (avail >= voice.capacityFrames)
@@ -207,19 +207,20 @@ bool DiskStreamPool::refillVoice(VoiceStream& voice) noexcept
 
     if (! voice.anchored)
     {
-        voice.nextSourceRead = requested;
+        voice.nextSourceRead.store(requested, std::memory_order_release);
         voice.nextTargetWrite = requested;
         voice.resampler.reset();
         voice.anchored = true;
     }
 
+    const auto currentSourceRead = voice.nextSourceRead.load(std::memory_order_relaxed);
     const auto available = voice.ring.availableFrames();
-    if (available >= voice.capacityFrames || voice.nextSourceRead >= voice.clipEndSource)
+    if (available >= voice.capacityFrames || currentSourceRead >= voice.clipEndSource)
         return false;
 
     const auto freeTargetFrames = voice.capacityFrames - available;
     const auto remainingSource =
-        static_cast<std::size_t>(voice.clipEndSource - voice.nextSourceRead);
+        static_cast<std::size_t>(voice.clipEndSource - currentSourceRead);
 
     if (! voice.usesResampler)
     {
@@ -227,13 +228,13 @@ bool DiskStreamPool::refillVoice(VoiceStream& voice) noexcept
         if (toRead == 0)
             return false;
 
-        if (! voice.reader->read(voice.nextSourceRead, voice.decodePlanes, toRead))
+        if (! voice.reader->read(currentSourceRead, voice.decodePlanes, toRead))
             return false;
 
         const std::span<const float* const> srcPlanes {
             voice.decodePlanes.data(), voice.decodePlanes.size()};
         const auto written = voice.ring.write(voice.nextTargetWrite, srcPlanes, toRead);
-        voice.nextSourceRead += written;
+        voice.nextSourceRead.store(currentSourceRead + written, std::memory_order_release);
         voice.nextTargetWrite += written;
         return written > 0;
     }
@@ -242,7 +243,7 @@ bool DiskStreamPool::refillVoice(VoiceStream& voice) noexcept
     if (toReadSource == 0)
         return false;
 
-    if (! voice.reader->read(voice.nextSourceRead, voice.decodePlanes, toReadSource))
+    if (! voice.reader->read(currentSourceRead, voice.decodePlanes, toReadSource))
         return false;
 
     const std::span<const float* const> srcPlanes {
@@ -257,7 +258,7 @@ bool DiskStreamPool::refillVoice(VoiceStream& voice) noexcept
         voice.resamplePlanes.data(), voice.resamplePlanes.size()};
     const auto written = voice.ring.write(
         voice.nextTargetWrite, resampledPlanes, producedTarget);
-    voice.nextSourceRead += consumedSource;
+    voice.nextSourceRead.store(currentSourceRead + consumedSource, std::memory_order_release);
     voice.nextTargetWrite += written;
     return written > 0;
 }

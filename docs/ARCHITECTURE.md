@@ -49,22 +49,26 @@ without rewriting them.
 ## Module contracts
 
 - `dawg_engine_core` is C++20 and can be built/tested with `DAWG_BUILD_APP=OFF`.
-  It owns `AudioEngine`, `RenderSnapshotPublisher`, `TransportCommandQueue`,
-  `PlaybackRingBuffer`, and `PlaybackDescription`.
+  It owns:
+  - **Pillar 1 (Compiled Graph & Lock-Free Epoch Handoff):** `CompiledGraph` (`CompiledTrack`, `CompiledClip`) and `GraphHandoff` (lock-free pointer exchange with an intrusive Treiber stack for zero-allocation audio-thread retirement and control-thread reclamation).
+  - **Pillar 2 (Multi-Track Scheduler, Channel Strip Mixer, & Metering):** `ChannelStrip` (`SmoothedParameter`, compensated `equalPowerPanGains`, `clipEnvelopeGain` fade-in/fade-out ramps, `isTrackAudible` mute/solo-in-place resolution), `SubBlockSplitter` (sample-accurate block boundary splitting), and `MeterTelemetry` (lock-free per-track and master bus peak/RMS metering).
+  - **Pillar 3 (Musical Timebase, Sub-Block Loop Engine, & Metronome):** `TempoMap` (piecewise-constant BPM and time-signature map converting sample frames $\leftrightarrow$ ticks at 960 PPQ and `BarBeatTick`), `LoopRegion` (sub-block loop boundary detection and wrapping), and `Metronome` (synthesized phase-continuous click generator with downbeat accent).
+  - **Pillar 4 (Realtime Recording Ring):** `RecordRingBuffer` (preallocated planar SPSC capture ring buffer written by `AudioEngine::process` and drained off the audio thread) alongside `PlaybackRingBuffer` (with backward loop-retention window support).
+  - **Pillar 5 (DAG Processor Graph, Automatic PDC, & Multi-Core Work-Stealing):** `ProcessorNode` (`GainPanNode`, `BiquadFilterNode`, `DelayCompensatorNode`, and air-gapped `ExternalPluginNode` / `ExternalPluginCallbacks`), `DspGraph` (Kahn topological compiler, cycle detector, wavefront builder, and automatic Plugin Delay Compensation on parallel branches), and `WorkStealingScheduler` (lock-free C++20 atomic epoch barrier and work-stealing wavefront dispatcher).
 - `dawg_project_model` is C++20 and owns stable project, track, media asset, and
-  clip IDs, ordered value snapshots, clip bounds validation, and version 2
-  snapshot reconstruction.
+  clip IDs, channel strip parameters (`gainLinear`, `pan`, `phaseInvert`, `muted`, `solo`), clip envelope parameters (`gainLinear`, `fadeInSamples`, `fadeOutSamples`), ordered value snapshots, clip bounds validation, and version 2 snapshot reconstruction.
 - `dawg_services_commands` applies project commands and media asset registration
-  on the message thread and advances the render snapshot generation.
+  on the message thread, compiles `ProjectSnapshot` + ring buffer bindings into an immutable `CompiledGraph` via `GraphCompiler`, and publishes it through `GraphHandoff`.
 - `dawg_services_persistence` is C++23, writes format version 2 JSON documents
   (including `assets` and `clips`) through a sibling temporary file followed by
   atomic replacement, and normalizes legacy format version 1 files to version 2
   with empty media collections on load. Audio media stays external to `.dawg`
   project files (`projectRelative` or `absolute` path references).
 - `dawg_services_media` is C++20 and JUCE-free. It defines the `AudioAssetReader`
-  and `AudioAssetReaderFactory` decoder seam and owns `AudioMediaService`, which
-  inspects WAV metadata on the message thread and runs a single background worker
-  to refill a preallocated `PlaybackRingBuffer`.
+  and `AudioAssetWriter` seams and owns:
+  - `AudioMediaService` (single-track streaming service) and `DiskStreamPool` (multiplexed multi-voice disk scheduler prioritized by lowest buffered frames / highest urgency, with loop-lookahead pre-spooling across `[loopStart, loopEnd)` seams).
+  - `AudioResampler` (stateful 4-point Catmull-Rom cubic Hermite streaming sample-rate converter with zero per-call heap allocations after `prepare()`).
+  - `AudioRecordService` (background worker draining `RecordRingBuffer` into `AudioAssetWriter` and finalizing recorded takes with latency-compensated timeline placement).
 - `dawg_platform_juce` adapts JUCE audio callbacks, device lifecycle, and
   `juce::WavAudioFormat` decoding (`JuceWavAssetReaderFactory`) to the engine and
   media service without exposing JUCE headers across the core or service layers.
