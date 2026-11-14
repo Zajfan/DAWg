@@ -81,27 +81,40 @@ void testRoundTrip(const fs::path& root)
     auto project = Project::create("Round Trip \"mix\"\n音楽", 42);
     project.addAudioTrack("Audio 1");
     project.addAudioTrack("Audio 2");
+    require(project.addAudioAsset(
+                {4, "audio/tone.wav", AudioAssetPathKind::projectRelative, 48000, 2, 960}) == 4,
+            "register relative asset");
+    require(project.addAudioAsset(
+                {7, "/tmp/lead.wav", AudioAssetPathKind::absolute, 44100, 1, 480}) == 7,
+            "register absolute asset");
+    require(project.addAudioClip({9, 4, 48000, 120, 840}) == 9, "register first clip");
+    require(project.addAudioClip({12, 7, 0, 0, 480}) == 12, "register second clip");
     auto original = project.snapshot();
     original.tracks.front().muted = true;
     original.tracks.back().solo = true;
     const auto path = root / "round-trip.dawg";
-    require(saveProject(original, path).has_value(), "save succeeds");
+    require(saveProject(original, path).has_value(), "v2 project saves");
     const auto loaded = loadProject(path);
-    require(loaded.has_value(), "load succeeds");
-    require(loaded->formatVersion == original.formatVersion, "version survives round trip");
+    require(loaded.has_value() && loaded->formatVersion == 2, "v2 project loads");
     require(loaded->id == original.id && loaded->name == original.name,
             "project ID and escaped Unicode name survive round trip");
     require(loaded->tracks == original.tracks, "ordered tracks and flags survive round trip");
+    require(loaded->assets == original.assets && loaded->clips == original.clips,
+            "asset metadata and clip timing survive round trip");
     const auto document = readDocument(path);
     for (const auto key : {"\"formatVersion\"", "\"projectId\"", "\"name\"", "\"tracks\"",
-                           "\"id\"", "\"muted\"", "\"solo\""})
-        require(document.find(key) != std::string::npos, "document has the public schema fields");
+                           "\"assets\"", "\"clips\"", "\"id\"", "\"muted\"", "\"solo\"",
+                           "\"path\"", "\"pathKind\"", "\"projectRelative\"", "\"absolute\"",
+                           "\"sampleRate\"", "\"channelCount\"", "\"frameCount\"",
+                           "\"assetId\"", "\"startSample\"", "\"sourceOffset\"", "\"lengthSamples\""})
+        require(document.find(key) != std::string::npos, "document has the public v2 schema fields");
 
-    const ProjectSnapshot empty {1, std::numeric_limits<ProjectId>::max(), "Empty", {}, {}, {}};
+    const ProjectSnapshot empty {2, std::numeric_limits<ProjectId>::max(), "Empty", {}, {}, {}};
     require(saveProject(empty, path).has_value(), "existing file can be replaced with empty project");
     const auto reloaded = loadProject(path);
-    require(reloaded.has_value() && reloaded->tracks.empty() && reloaded->id == empty.id,
-            "empty tracks and maximum project ID survive replacement");
+    require(reloaded.has_value() && reloaded->formatVersion == 2 && reloaded->tracks.empty()
+                && reloaded->assets.empty() && reloaded->clips.empty() && reloaded->id == empty.id,
+            "empty collections and maximum project ID survive replacement");
 }
 
 void testExternalDocument(const fs::path& root)
@@ -110,8 +123,9 @@ void testExternalDocument(const fs::path& root)
     writeDocument(path, R"({"formatVersion":1,"projectId":18446744073709551615,"name":"Loaded","tracks":[{"id":7,"name":"First","muted":true,"solo":true},{"id":4000,"name":"Lead","muted":false,"solo":true},{"id":3,"name":"Last","muted":false,"solo":false}]})");
     const auto loaded = loadProject(path);
     require(loaded.has_value(), "independent version-one fixture loads");
-    require(loaded->formatVersion == 1 && loaded->id == std::numeric_limits<ProjectId>::max()
-                && loaded->name == "Loaded", "external metadata loads exactly");
+    require(loaded->formatVersion == 2 && loaded->id == std::numeric_limits<ProjectId>::max()
+                && loaded->name == "Loaded" && loaded->assets.empty() && loaded->clips.empty(),
+            "version-one fixture normalizes to version two with empty media arrays");
     require(loaded->tracks == std::vector<Track> {
                 {7, "First", true, true}, {4000, "Lead", false, true}, {3, "Last", false, false}},
             "external tracks preserve IDs, flags and document order");
@@ -120,9 +134,11 @@ void testExternalDocument(const fs::path& root)
             "loaded snapshot reconstructs with the largest-ID high-water mark");
     auto maximum = *loaded;
     maximum.tracks.front().id = std::numeric_limits<TrackId>::max();
-    require(saveProject(maximum, path).has_value(), "maximum track ID saves without narrowing");
+    require(saveProject(maximum, path).has_value(),
+            "normalized v1 snapshot with maximum track ID saves back as v2 without narrowing");
     const auto reloaded = loadProject(path);
-    require(reloaded.has_value() && reloaded->tracks == maximum.tracks,
+    require(reloaded.has_value() && reloaded->formatVersion == 2
+                && reloaded->tracks == maximum.tracks,
             "maximum track ID reloads without narrowing");
 }
 
@@ -160,6 +176,28 @@ void testMalformedDocuments(const fs::path& root)
         R"({"formatVersion":1,"projectId":42,"name":"P","tracks":[{"id":1,"name":"T","muted":0,"solo":false}]})",
         R"({"formatVersion":1,"projectId":42,"name":"P","tracks":[{"id":1,"name":"T","muted":false,"solo":"false"}]})",
         R"({"formatVersion":1,"projectId":42,"name":"P","tracks":[{"id":1,"name":"T","muted":false,"solo":false},{"id":1,"name":"U","muted":true,"solo":true}]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"clips":[]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":{},"clips":[]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[],"clips":{}})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[null],"clips":[]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[],"clips":[null]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[{"id":0,"path":"a.wav","pathKind":"projectRelative","sampleRate":48000,"channelCount":1,"frameCount":8}],"clips":[]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[{"id":1,"path":"","pathKind":"projectRelative","sampleRate":48000,"channelCount":1,"frameCount":8}],"clips":[]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[{"id":1,"path":"a.wav","pathKind":"unknown","sampleRate":48000,"channelCount":1,"frameCount":8}],"clips":[]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[{"id":1,"path":"a.wav","pathKind":0,"sampleRate":48000,"channelCount":1,"frameCount":8}],"clips":[]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[{"id":1,"path":"a.wav","pathKind":"projectRelative","sampleRate":0,"channelCount":1,"frameCount":8}],"clips":[]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[{"id":1,"path":"a.wav","pathKind":"projectRelative","sampleRate":4294967296,"channelCount":1,"frameCount":8}],"clips":[]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[{"id":1,"path":"a.wav","pathKind":"projectRelative","sampleRate":48000,"channelCount":0,"frameCount":8}],"clips":[]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[{"id":1,"path":"a.wav","pathKind":"projectRelative","sampleRate":48000,"channelCount":65536,"frameCount":8}],"clips":[]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[{"id":1,"path":"a.wav","pathKind":"projectRelative","sampleRate":48000,"channelCount":1,"frameCount":0}],"clips":[]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[{"id":1,"path":"a.wav","pathKind":"projectRelative","sampleRate":48000,"channelCount":1,"frameCount":8},{"id":1,"path":"b.wav","pathKind":"absolute","sampleRate":48000,"channelCount":1,"frameCount":8}],"clips":[]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[{"id":1,"path":"a.wav","pathKind":"projectRelative","sampleRate":48000,"channelCount":1,"frameCount":8}],"clips":[{"id":0,"assetId":1,"startSample":0,"sourceOffset":0,"lengthSamples":8}]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[{"id":1,"path":"a.wav","pathKind":"projectRelative","sampleRate":48000,"channelCount":1,"frameCount":8}],"clips":[{"id":1,"assetId":99,"startSample":0,"sourceOffset":0,"lengthSamples":8}]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[{"id":1,"path":"a.wav","pathKind":"projectRelative","sampleRate":48000,"channelCount":1,"frameCount":8}],"clips":[{"id":1,"assetId":1,"startSample":0,"sourceOffset":9,"lengthSamples":1}]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[{"id":1,"path":"a.wav","pathKind":"projectRelative","sampleRate":48000,"channelCount":1,"frameCount":8}],"clips":[{"id":1,"assetId":1,"startSample":0,"sourceOffset":0,"lengthSamples":0}]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[{"id":1,"path":"a.wav","pathKind":"projectRelative","sampleRate":48000,"channelCount":1,"frameCount":8}],"clips":[{"id":1,"assetId":1,"startSample":0,"sourceOffset":4,"lengthSamples":5}]})",
+        R"({"formatVersion":2,"projectId":42,"name":"P","tracks":[],"assets":[{"id":1,"path":"a.wav","pathKind":"projectRelative","sampleRate":48000,"channelCount":1,"frameCount":8}],"clips":[{"id":1,"assetId":1,"startSample":0,"sourceOffset":0,"lengthSamples":4},{"id":1,"assetId":1,"startSample":4,"sourceOffset":0,"lengthSamples":4}]})",
         R"({"formatVersion":1,"projectId":42,"name":"P","tracks":[]} {})",
         R"({"formatVersion":1,"projectId":42,"name":"P","tracks":[]} trailing)"
     };
@@ -168,7 +206,7 @@ void testMalformedDocuments(const fs::path& root)
         writeDocument(path, document);
         requireError(loadProject(path), Code::invalidFormat);
     }
-    for (const auto version : {"0", "2", "999", "-1", "4294967297", "18446744073709551615"})
+    for (const auto version : {"0", "3", "999", "-1", "4294967297", "18446744073709551615"})
     {
         writeDocument(path, std::string {R"({"formatVersion":)"} + version +
                             R"(,"projectId":42,"name":"P","tracks":[]})");
@@ -179,16 +217,24 @@ void testMalformedDocuments(const fs::path& root)
 void testRejectedSaves(const fs::path& root)
 {
     const auto path = root / "preserved.dawg";
-    const ProjectSnapshot valid {1, 42, "Original", {{1, "Track", false, true}}, {}, {}};
+    const ProjectSnapshot valid {2, 42, "Original", {{1, "Track", false, true}}, {}, {}};
     require(saveProject(valid, path).has_value(), "create original destination");
     const auto before = readDocument(path);
     const auto entries = entryCount(root);
-    const std::array<ProjectSnapshot, 6> invalid {{
-        {1, 0, "P", {}, {}, {}}, {1, 1, "", {}, {}, {}},
-        {1, 1, "P", {{0, "T", false, false}}, {}, {}},
-        {1, 1, "P", {{1, "", false, false}}, {}, {}},
-        {1, 1, "P", {{7, "T", false, false}, {7, "U", true, false}}, {}, {}},
-        {1, 1, std::string(1, static_cast<char>(0xff)), {}, {}, {}}
+    const std::array<ProjectSnapshot, 11> invalid {{
+        {2, 0, "P", {}, {}, {}}, {2, 1, "", {}, {}, {}},
+        {2, 1, "P", {{0, "T", false, false}}, {}, {}},
+        {2, 1, "P", {{1, "", false, false}}, {}, {}},
+        {2, 1, "P", {{7, "T", false, false}, {7, "U", true, false}}, {}, {}},
+        {2, 1, std::string(1, static_cast<char>(0xff)), {}, {}, {}},
+        {2, 1, "P", {}, {{1, "a.wav", AudioAssetPathKind::projectRelative, 48000, 1, 8},
+                         {1, "b.wav", AudioAssetPathKind::absolute, 48000, 1, 8}}, {}},
+        {2, 1, "P", {}, {{1, "a.wav", static_cast<AudioAssetPathKind>(9), 48000, 1, 8}}, {}},
+        {2, 1, "P", {}, {}, {{1, 99, 0, 0, 8}}},
+        {2, 1, "P", {}, {{1, "a.wav", AudioAssetPathKind::projectRelative, 48000, 1, 8}},
+         {{1, 1, 0, 4, 5}}},
+        {2, 1, "P", {}, {{1, "a.wav", AudioAssetPathKind::projectRelative, 48000, 1, 8}},
+         {{1, 1, 0, 0, 4}, {1, 1, 4, 0, 4}}}
     }};
     for (const auto& snapshot : invalid)
     {
@@ -196,15 +242,18 @@ void testRejectedSaves(const fs::path& root)
         require(readDocument(path) == before, "invalid save preserves original bytes");
         require(entryCount(root) == entries, "invalid save leaves no temporary files");
     }
-    auto unsupported = valid;
-    unsupported.formatVersion = 999;
-    requireError(saveProject(unsupported, path), Code::unsupportedVersion);
-    require(readDocument(path) == before, "unsupported save preserves original bytes");
+    for (const auto version : {0u, 1u, 999u})
+    {
+        auto unsupported = valid;
+        unsupported.formatVersion = version;
+        requireError(saveProject(unsupported, path), Code::unsupportedVersion);
+        require(readDocument(path) == before, "unsupported save preserves original bytes");
+    }
 }
 
 void testPathFailures(const fs::path& root)
 {
-    const ProjectSnapshot snapshot {1, 42, "Original", {}, {}, {}};
+    const ProjectSnapshot snapshot {2, 42, "Original", {}, {}, {}};
     for (const auto& path : {fs::path {}, root / ".", root / "..",
                              root / std::string("nul\0suffix", 10)})
     {
@@ -228,7 +277,7 @@ void testPathFailures(const fs::path& root)
 
 void testRenameFailure(const fs::path& root)
 {
-    const ProjectSnapshot snapshot {1, 7, "Replacement", {}, {}, {}};
+    const ProjectSnapshot snapshot {2, 7, "Replacement", {}, {}, {}};
     const auto destination = root / "directory.dawg";
     fs::create_directory(destination);
     const auto marker = destination / "keep.dawg";
@@ -245,10 +294,10 @@ void testRenameFailure(const fs::path& root)
 void testReplacement(const fs::path& root)
 {
     const auto path = root / "replace.dawg";
-    const ProjectSnapshot original {1, 1, "Long original name", {{99, "Original", true, true}}, {}, {}};
+    const ProjectSnapshot original {2, 1, "Long original name", {{99, "Original", true, true}}, {}, {}};
     require(saveProject(original, path).has_value(), "seed replaceable file");
     const auto entries = entryCount(root);
-    const ProjectSnapshot replacement {1, 2, "New", {}, {}, {}};
+    const ProjectSnapshot replacement {2, 2, "New", {}, {}, {}};
     require(saveProject(replacement, path).has_value(), "replace existing destination");
     const auto loaded = loadProject(path);
     require(loaded.has_value() && loaded->id == 2 && loaded->name == "New" && loaded->tracks.empty(),

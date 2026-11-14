@@ -62,9 +62,15 @@ void testProjectAndAudioVerticalSlice()
 
     ProjectController controller {Project::create("Untitled", 1)};
     require(controller.dispatch(AddAudioTrack {"Audio 1"}), "track command succeeds");
+    const auto assetId = controller.addAudioAsset(
+        {0, "fixtures/tone.wav", AudioAssetPathKind::projectRelative, 48000, 1, 64});
+    require(assetId.has_value() && *assetId == 1, "asset registration succeeds");
+    require(controller.dispatch(AddAudioClip {{0, *assetId, 0, 0, 64}}), "clip command succeeds");
     const auto saved = controller.snapshot();
     require(saved.tracks.size() == 1 && saved.tracks.front().name == "Audio 1",
             "project snapshot contains the created track");
+    require(saved.assets.size() == 1 && saved.clips.size() == 1,
+            "project snapshot contains the registered asset and clip");
     require(saveProject(saved, path).has_value(), "project saves");
 
     require(engine.publishRenderSnapshot(controller.latestRenderSnapshot()),
@@ -86,9 +92,10 @@ void testProjectAndAudioVerticalSlice()
 
     const auto loaded = loadProject(path);
     require(loaded.has_value(), "saved project reloads");
-    require(loaded->id == saved.id && loaded->name == saved.name
-                && loaded->tracks == saved.tracks,
-            "reloaded project equals saved snapshot");
+    require(loaded->formatVersion == saved.formatVersion && loaded->id == saved.id
+                && loaded->name == saved.name && loaded->tracks == saved.tracks
+                && loaded->assets == saved.assets && loaded->clips == saved.clips,
+            "reloaded project equals saved snapshot including media metadata");
 }
 
 } // namespace
