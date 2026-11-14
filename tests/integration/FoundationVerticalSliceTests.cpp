@@ -1,11 +1,16 @@
+#include <dawg/commands/GraphCompiler.h>
 #include <dawg/commands/ProjectController.h>
 #include <dawg/engine/AudioEngine.h>
 #include <dawg/engine/PlaybackRingBuffer.h>
+#include <dawg/engine/RecordRingBuffer.h>
+#include <dawg/media/AudioAssetWriter.h>
+#include <dawg/media/AudioRecordService.h>
 #include <dawg/persistence/ProjectFile.h>
 #include <dawg/project/Project.h>
 
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -173,10 +178,109 @@ void testProjectAndAudioVerticalSlice()
             require(sample == 0.0f, "missing media renders deterministic silence");
 }
 
+void testFivePillarEndToEndIntegration()
+{
+    using namespace dawg::commands;
+    using namespace dawg::engine;
+    using namespace dawg::media;
+    using namespace dawg::persistence;
+    using namespace dawg::project;
+
+    TestDirectory directory;
+    const auto v3Path = directory.path / "five-pillar-v3.dawg";
+
+    ProjectController controller {Project::create("FivePillarSession", 10)};
+    require(controller.dispatch(AddAudioTrack {"Drums"}), "add Drums");
+    require(controller.dispatch(AddAudioTrack {"Synth"}), "add Synth");
+    require(controller.dispatch(SetTrackGainPan {1, 0.5f, 0.0f, false}), "set Drums gain 0.5");
+    require(controller.dispatch(SetTrackGainPan {2, 0.25f, 0.0f, false}), "set Synth gain 0.25");
+    require(controller.dispatch(SetProjectTempo {128.0, 4, 4, true}), "set tempo 128 BPM 4/4");
+    require(controller.dispatch(SetProjectLoop {true, 0, 4}), "set loop [0, 4)");
+
+    const auto a1 = controller.addAudioAsset({0, "audio/drums.wav", AudioAssetPathKind::projectRelative, 48000, 1, 4});
+    const auto a2 = controller.addAudioAsset({0, "audio/synth.wav", AudioAssetPathKind::projectRelative, 48000, 1, 4});
+    require(a1.has_value() && a2.has_value(), "register both assets");
+
+    require(controller.dispatch(AddAudioClip {AudioClip {
+                .id = 0, .assetId = *a1, .startSample = 0, .sourceOffset = 0, .lengthSamples = 4, .trackId = 1
+            }}), "add clip 1");
+    require(controller.dispatch(AddAudioClip {AudioClip {
+                .id = 0, .assetId = *a2, .startSample = 0, .sourceOffset = 0, .lengthSamples = 4, .trackId = 2
+            }}), "add clip 2");
+
+    auto v3Snapshot = controller.snapshot();
+    v3Snapshot.formatVersion = 3;
+    require(saveProject(v3Snapshot, v3Path).has_value(), "save v3 session");
+
+    const auto reloaded = loadProject(v3Path);
+    require(reloaded.has_value() && reloaded->formatVersion == 3, "reload v3 session");
+    require(reloaded->tempo == v3Snapshot.tempo && reloaded->loop == v3Snapshot.loop,
+            "v3 tempo and loop survive persistence");
+
+    PlaybackRingBuffer ring1;
+    PlaybackRingBuffer ring2;
+    require(ring1.prepare(1, 16) && ring2.prepare(1, 16), "prepare playback rings");
+    constexpr std::array<float, 4> ones {1.0f, 1.0f, 1.0f, 1.0f};
+    const std::array<const float*, 1> srcPlanes {ones.data()};
+    require(ring1.write(0, srcPlanes, 4) == 4 && ring2.write(0, srcPlanes, 4) == 4, "prefill playback rings");
+
+    const std::array<ClipBufferBinding, 2> bindings {{
+        {1, &ring1},
+        {2, &ring2}
+    }};
+    auto compiled = GraphCompiler::compile(*reloaded, controller.latestRenderSnapshot().generation, bindings);
+    require(compiled != nullptr && compiled->loop.enabled && compiled->bpm == 128.0,
+            "GraphCompiler propagates v3 loop and tempo into CompiledGraph");
+
+    AudioEngine engine;
+    require(engine.prepare({48000.0, 8, 2}), "prepare engine");
+
+    MemoryAudioAssetWriterFactory writerFactory;
+    AudioRecordService recordService {writerFactory};
+    require(recordService.prepare("takes/take1.wav", 48000, 2, 64).has_value(),
+            "prepare AudioRecordService");
+    engine.setRecordBuffer(&recordService.buffer());
+    engine.setRecording(true);
+    recordService.start();
+
+    engine.publishCompiledGraph(std::move(compiled));
+    require(engine.enqueueCommand({EngineCommandType::play, 0}), "enqueue play");
+
+    constexpr std::array<float, 8> liveInL {0.1f, 0.2f, 0.3f, 0.4f, -0.1f, -0.2f, -0.3f, -0.4f};
+    constexpr std::array<float, 8> liveInR {-0.1f, -0.2f, -0.3f, -0.4f, 0.1f, 0.2f, 0.3f, 0.4f};
+    const std::array<const float*, 2> inPlanes {liveInL.data(), liveInR.data()};
+
+    std::array<float, 8> outL {};
+    std::array<float, 8> outR {};
+    std::array<float*, 2> outPlanes {outL.data(), outR.data()};
+
+    engine.process(
+        AudioInputBufferView {inPlanes.data(), inPlanes.size(), liveInL.size()},
+        AudioBufferView {outPlanes.data(), outPlanes.size(), outL.size()},
+        {},
+        {});
+
+    for (std::size_t i = 0; i < 8; ++i)
+    {
+        require(std::fabs(outL[i] - 0.75f) < 1e-5f && std::fabs(outR[i] - 0.75f) < 1e-5f,
+                "multi-track playback sums and loops while recording input");
+    }
+
+    engine.setRecording(false);
+    const auto take = recordService.stopAndFinalize(1, 880);
+    require(take.has_value(), "AudioRecordService finalizes recorded take");
+    require(take->clip.startSample == 880 && take->clip.lengthSamples == 8,
+            "recorded take is placed at timeline sample 880 with 8 captured frames");
+    require(writerFactory.finalized && writerFactory.channels.size() == 2
+                && writerFactory.channels[0].size() == 8,
+            "MemoryAudioAssetWriterFactory received all 8 stereo input frames");
+}
+
 } // namespace
 
 int main()
 {
     testProjectAndAudioVerticalSlice();
-    std::puts("PASS: foundation project and audio vertical slice");
+    testFivePillarEndToEndIntegration();
+    std::puts("PASS: foundation and 5-pillar end-to-end vertical slice");
 }

@@ -2,6 +2,7 @@
 
 #include "EditorViewModel.h"
 
+#include <dawg/commands/GraphCompiler.h>
 #include <dawg/commands/ProjectController.h>
 #include <dawg/engine/AudioEngine.h>
 #include <dawg/engine/PlaybackRingBuffer.h>
@@ -10,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace dawg::app {
 
@@ -24,6 +26,25 @@ public:
     void setPlaybackBuffer(engine::PlaybackRingBuffer* buffer) noexcept
     {
         m_playbackBuffer = buffer;
+        m_renderPending = true;
+    }
+
+    void setClipBuffer(const project::ClipId clipId, engine::PlaybackRingBuffer* buffer)
+    {
+        for (auto& binding : m_clipBindings) {
+            if (binding.clipId == clipId) {
+                binding.buffer = buffer;
+                m_renderPending = true;
+                return;
+            }
+        }
+        m_clipBindings.push_back({clipId, buffer});
+        m_renderPending = true;
+    }
+
+    void clearClipBuffers() noexcept
+    {
+        m_clipBindings.clear();
         m_renderPending = true;
     }
 
@@ -85,7 +106,9 @@ public:
             .playing = transport.playing,
             .mediaAvailable = m_mediaAvailable,
             .mediaError = m_mediaError,
-            .underrunCount = m_engine.underrunCount()
+            .underrunCount = m_engine.underrunCount(),
+            .masterMeter = m_engine.meterReading(),
+            .recording = m_engine.isRecording()
         };
     }
 
@@ -107,17 +130,33 @@ public:
         auto render = m_controller.latestRenderSnapshot();
         render.playback = {};
 
-        if (m_playbackBuffer != nullptr && m_mediaAvailable) {
-            const auto projectSnapshot = m_controller.snapshot();
-            if (const auto resolved = resolveClipAndAsset(projectSnapshot)) {
-                render.playback = engine::PlaybackDescription {
-                    .buffer = m_playbackBuffer,
-                    .clipStartSample = resolved->first.startSample,
-                    .clipLengthSamples = resolved->first.lengthSamples,
-                    .sourceOffset = resolved->first.sourceOffset,
-                    .channelCount = resolved->second.channelCount
-                };
+        const auto projectSnapshot = m_controller.snapshot();
+        std::vector<commands::ClipBufferBinding> activeBindings;
+
+        if (m_mediaAvailable) {
+            if (!m_clipBindings.empty()) {
+                activeBindings = m_clipBindings;
             }
+            if (m_playbackBuffer != nullptr) {
+                if (const auto resolved = resolveClipAndAsset(projectSnapshot)) {
+                    render.playback = engine::PlaybackDescription {
+                        .buffer = m_playbackBuffer,
+                        .clipStartSample = resolved->first.startSample,
+                        .clipLengthSamples = resolved->first.lengthSamples,
+                        .sourceOffset = resolved->first.sourceOffset,
+                        .channelCount = resolved->second.channelCount
+                    };
+                    if (activeBindings.empty()) {
+                        activeBindings.push_back({resolved->first.id, m_playbackBuffer});
+                    }
+                }
+            }
+        }
+
+        if (!m_clipBindings.empty() || !projectSnapshot.tracks.empty() || !projectSnapshot.clips.empty()) {
+            auto compiled = commands::GraphCompiler::compile(
+                projectSnapshot, render.generation, activeBindings);
+            m_engine.publishCompiledGraph(std::move(compiled));
         }
 
         m_renderPending = !m_engine.publishRenderSnapshot(render);
@@ -150,6 +189,7 @@ private:
     commands::ProjectController& m_controller;
     engine::AudioEngine& m_engine;
     engine::PlaybackRingBuffer* m_playbackBuffer {};
+    std::vector<commands::ClipBufferBinding> m_clipBindings;
     bool m_mediaAvailable {true};
     std::string m_mediaError;
     bool m_renderPending {true};

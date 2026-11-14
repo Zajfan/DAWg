@@ -97,6 +97,7 @@ if(DAWG_BUILD_TESTS)
     )
     target_link_libraries(dawg_foundation_vertical_slice_tests PRIVATE
         dawg_services_commands
+        dawg_services_media
         dawg_services_persistence
     )
     target_compile_features(dawg_foundation_vertical_slice_tests PRIVATE cxx_std_23)

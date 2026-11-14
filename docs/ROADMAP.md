@@ -41,7 +41,14 @@ waveform thumbnail generation remain explicitly deferred to subsequent milestone
 - [x] **Pillar 4 (Scalable Disk I/O Pool, Resampling, & Recording Pipeline):** Multiplexed `DiskStreamPool` prioritized by lowest buffered frames, 4-point Catmull-Rom cubic Hermite `AudioResampler`, and lock-free `RecordRingBuffer` + `AudioRecordService` + `AudioAssetWriter` with latency-compensated timeline placement
 - [x] **Pillar 5 (DAG Processor Graph, Automatic PDC, & Multi-Core Work-Stealing):** `ProcessorNode` (`GainPanNode`, `BiquadFilterNode`, `DelayCompensatorNode`, air-gapped `ExternalPluginNode`), `DspGraph` topological compiler with cycle detection and automatic Plugin Delay Compensation (PDC), and lock-free `WorkStealingScheduler`
 
-## 0.4.0 — Multi-Track & Mixer UI Shell Integration (Next)
+## 0.4.0 — Phase 1 Engine Runtime & Format v3 Integration
+
+- [x] Project `TempoSetting` and `LoopSetting` model + `SetProjectTempo` and `SetProjectLoop` commands
+- [x] Format version 3 transactional JSON persistence (track mixer strip, clip fades/track assignment, tempo, and loop region) with v1/v2 compatibility
+- [x] Hardware input channel forwarding (`AudioInputBufferView`, `JuceAudioCallbackAdapter`, `JuceAudioDeviceBridge`) and 32-bit float `JuceWavAssetWriterFactory`
+- [x] Multi-track `CompiledGraph` compilation and publication in `ApplicationState`, live lock-free `MeterReading` in `EditorViewModel`, and `DiskStreamPool` + `AudioRecordService` wiring in `Application`
+
+## 0.5.0 — Configurable Workbench UI (Next)
 
 - [ ] Expose multi-track timeline editing, faders, pan knobs, mute/solo buttons, and live peak/RMS meters in the desktop shell
 - [ ] Connect input device selection, track record arming, and `AudioRecordService` take creation in the shell

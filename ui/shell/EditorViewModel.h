@@ -1,5 +1,6 @@
 #pragma once
 
+#include <dawg/engine/MeterTelemetry.h>
 #include <dawg/project/ProjectSnapshot.h>
 
 #include <cstddef>
@@ -19,6 +20,8 @@ struct EditorViewModel
     bool mediaAvailable {true};
     std::string mediaError;
     std::uint64_t underrunCount {};
+    engine::MeterReading masterMeter {};
+    bool recording {};
 
     [[nodiscard]] std::size_t trackCount() const noexcept { return project.tracks.size(); }
 };

@@ -37,6 +37,15 @@ std::unique_ptr<const engine::CompiledGraph> GraphCompiler::compile(
 {
     auto graph = std::make_unique<engine::CompiledGraph>();
     graph->generation = generation;
+    graph->loop = engine::LoopRegion {
+        .enabled = snapshot.loop.enabled,
+        .startSample = snapshot.loop.startSample,
+        .endSample = snapshot.loop.endSample
+    };
+    graph->bpm = snapshot.tempo.bpm;
+    graph->timeSigNumerator = snapshot.tempo.timeSigNumerator;
+    graph->timeSigDenominator = snapshot.tempo.timeSigDenominator;
+    graph->metronomeEnabled = snapshot.tempo.metronomeEnabled;
 
     if (snapshot.tracks.empty() && ! snapshot.clips.empty())
     {

@@ -16,7 +16,7 @@ The module graph is:
 DAWg application
 ├── apps/dawg + ui/shell (Application, ApplicationState, EditorViewModel)
 ├── platform/juce/audio  (JuceAudioDeviceBridge, JuceAudioCallbackAdapter)
-├── platform/juce/media  (JuceWavAssetReaderFactory, JuceWavAssetReader)
+├── platform/juce/media  (JuceWavAssetReaderFactory, JuceWavAssetWriterFactory)
 └── platform/juce/window (WindowManager, ManagedWindow, WindowRegistry)
               │
               ▼
@@ -59,8 +59,8 @@ without rewriting them.
   clip IDs, channel strip parameters (`gainLinear`, `pan`, `phaseInvert`, `muted`, `solo`), clip envelope parameters (`gainLinear`, `fadeInSamples`, `fadeOutSamples`), ordered value snapshots, clip bounds validation, and version 2 snapshot reconstruction.
 - `dawg_services_commands` applies project commands and media asset registration
   on the message thread, compiles `ProjectSnapshot` + ring buffer bindings into an immutable `CompiledGraph` via `GraphCompiler`, and publishes it through `GraphHandoff`.
-- `dawg_services_persistence` is C++23, writes format version 2 JSON documents
-  (including `assets` and `clips`) through a sibling temporary file followed by
+- `dawg_services_persistence` is C++23, writes format version 2 and version 3 JSON documents
+  (including `assets`, `clips`, track mixer parameters, clip fades/track assignments, `tempo`, and `loop`) through a sibling temporary file followed by
   atomic replacement, and normalizes legacy format version 1 files to version 2
   with empty media collections on load. Audio media stays external to `.dawg`
   project files (`projectRelative` or `absolute` path references).
@@ -69,9 +69,9 @@ without rewriting them.
   - `AudioMediaService` (single-track streaming service) and `DiskStreamPool` (multiplexed multi-voice disk scheduler prioritized by lowest buffered frames / highest urgency, with loop-lookahead pre-spooling across `[loopStart, loopEnd)` seams).
   - `AudioResampler` (stateful 4-point Catmull-Rom cubic Hermite streaming sample-rate converter with zero per-call heap allocations after `prepare()`).
   - `AudioRecordService` (background worker draining `RecordRingBuffer` into `AudioAssetWriter` and finalizing recorded takes with latency-compensated timeline placement).
-- `dawg_platform_juce` adapts JUCE audio callbacks, device lifecycle, and
-  `juce::WavAudioFormat` decoding (`JuceWavAssetReaderFactory`) to the engine and
-  media service without exposing JUCE headers across the core or service layers.
+- `dawg_platform_juce` adapts JUCE audio callbacks (both output and hardware input channels), device lifecycle, and
+  `juce::WavAudioFormat` decoding/encoding (`JuceWavAssetReaderFactory` and `JuceWavAssetWriterFactory`) to the engine and
+  media services without exposing JUCE headers across the core or service layers.
 - `platform/juce/window` owns native window operations: create/resize/close,
   child/modal relationships, fullscreen/maximized/minimized state, opacity,
   monitor selection, and logical/physical DPI conversions.

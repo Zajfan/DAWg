@@ -38,6 +38,10 @@ struct CompiledGraph
 {
     std::uint64_t generation {};
     LoopRegion loop {};
+    double bpm {120.0};
+    std::uint8_t timeSigNumerator {4};
+    std::uint8_t timeSigDenominator {4};
+    bool metronomeEnabled {false};
     std::vector<CompiledTrack> tracks;
     std::vector<CompiledClip> clips;
 

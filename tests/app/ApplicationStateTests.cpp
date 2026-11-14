@@ -123,10 +123,92 @@ void testPlaybackCommandsAndSnapshotComposition()
     require(readyView.mediaAvailable && readyView.mediaError.empty(),
             "previously captured EditorViewModel remains independent value copy");
 }
+
+void testMultiTrackCompiledGraphAndMeteringInApplicationState()
+{
+    dawg::engine::AudioEngine engine;
+    require(engine.prepare({48000.0, 8, 2}), "engine prepares");
+    dawg::commands::ProjectController controller {dawg::project::Project::create("MultiTrack", 1)};
+    dawg::app::ApplicationState state {controller, engine};
+
+    require(state.dispatch(dawg::project::AddAudioTrack {"Drums"}), "add Drums track");
+    require(state.dispatch(dawg::project::AddAudioTrack {"Bass"}), "add Bass track");
+    require(state.dispatch(dawg::project::SetTrackGainPan {1, 0.5f, 0.0f, false}), "set Drums gain 0.5");
+    require(state.dispatch(dawg::project::SetTrackGainPan {2, 0.25f, 0.0f, false}), "set Bass gain 0.25");
+    require(state.dispatch(dawg::project::SetProjectLoop {true, 0, 4}), "enable 4-sample loop [0, 4)");
+
+    const auto asset1 = state.addAudioAsset({
+        .id = 0,
+        .path = "drums.wav",
+        .pathKind = dawg::project::AudioAssetPathKind::projectRelative,
+        .sampleRate = 48000,
+        .channelCount = 1,
+        .frameCount = 4
+    });
+    const auto asset2 = state.addAudioAsset({
+        .id = 0,
+        .path = "bass.wav",
+        .pathKind = dawg::project::AudioAssetPathKind::projectRelative,
+        .sampleRate = 48000,
+        .channelCount = 1,
+        .frameCount = 4
+    });
+    require(asset1.has_value() && asset2.has_value(), "both assets registered");
+
+    const auto clip1 = state.addAudioClip({
+        .id = 0,
+        .assetId = *asset1,
+        .startSample = 0,
+        .sourceOffset = 0,
+        .lengthSamples = 4,
+        .trackId = 1,
+        .gainLinear = 1.0f
+    });
+    const auto clip2 = state.addAudioClip({
+        .id = 0,
+        .assetId = *asset2,
+        .startSample = 0,
+        .sourceOffset = 0,
+        .lengthSamples = 4,
+        .trackId = 2,
+        .gainLinear = 1.0f
+    });
+    require(clip1.has_value() && clip2.has_value(), "both clips registered");
+
+    dawg::engine::PlaybackRingBuffer ring1;
+    dawg::engine::PlaybackRingBuffer ring2;
+    require(ring1.prepare(1, 16) && ring2.prepare(1, 16), "both ring buffers prepare");
+    constexpr std::array<float, 4> ones {1.0f, 1.0f, 1.0f, 1.0f};
+    const std::array<const float*, 1> planes {ones.data()};
+    require(ring1.write(0, planes, 4) == 4 && ring2.write(0, planes, 4) == 4, "prefill both rings");
+
+    state.setClipBuffer(*clip1, &ring1);
+    state.setClipBuffer(*clip2, &ring2);
+    require(state.flushRenderSnapshot(), "flush multi-track CompiledGraph");
+    require(state.play(), "queue play");
+
+    std::array<float, 8> outL {};
+    std::array<float, 8> outR {};
+    std::array<float*, 2> outPlanes {outL.data(), outR.data()};
+    engine.process({outPlanes.data(), outPlanes.size(), outL.size()}, {}, {});
+
+    // Track 1 (1.0 * 0.5) + Track 2 (1.0 * 0.25) = 0.75 across all 8 samples (loop [0, 4) wrapped mid-block!)
+    for (std::size_t i = 0; i < 8; ++i) {
+        require(std::fabs(outL[i] - 0.75f) < 1e-5f && std::fabs(outR[i] - 0.75f) < 1e-5f,
+                "ApplicationState multi-track CompiledGraph sums and loops across mid-block seam");
+    }
+    require(engine.transportState().samplePosition == 0,
+            "transport wrapped twice at 4-sample loop boundary [0, 4) after 8-sample block");
+
+    const auto vm = state.editorViewModel();
+    require(std::fabs(vm.masterMeter.peakLeft - 0.75f) < 1e-5f,
+            "EditorViewModel exposes live lock-free master meter reading");
+}
 } // namespace
 
 int main()
 {
     testCommandsUpdateEditorAndPublishToEngine();
     testPlaybackCommandsAndSnapshotComposition();
+    testMultiTrackCompiledGraphAndMeteringInApplicationState();
 }

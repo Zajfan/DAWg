@@ -3,13 +3,18 @@
 #include "ApplicationState.h"
 #include "audio/JuceAudioDeviceBridge.h"
 #include "media/JuceWavAssetReader.h"
+#include "media/JuceWavAssetWriter.h"
 #include "window/WindowManager.h"
 
 #include <dawg/commands/ProjectController.h>
 #include <dawg/engine/AudioEngine.h>
+#include <dawg/engine/RecordRingBuffer.h>
 #include <dawg/media/AudioMediaService.h>
+#include <dawg/media/AudioRecordService.h>
+#include <dawg/media/DiskStreamPool.h>
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace dawg::app {
@@ -24,11 +29,15 @@ bool Application::moreThanOneInstanceAllowed() { return true; }
 void Application::initialise(const juce::String&)
 {
     m_assetReaderFactory = std::make_unique<platform::juce::JuceWavAssetReaderFactory>();
+    m_assetWriterFactory = std::make_unique<platform::juce::JuceWavAssetWriterFactory>();
     m_engine = std::make_unique<engine::AudioEngine>();
     m_controller = std::make_unique<commands::ProjectController>(project::Project::create("Untitled", 1));
     m_state = std::make_unique<ApplicationState>(*m_controller, *m_engine);
     m_audioBridge = std::make_unique<platform::juce::JuceAudioDeviceBridge>(*m_engine);
     m_mediaService = std::make_unique<media::AudioMediaService>(*m_assetReaderFactory);
+    m_diskStreamPool = std::make_unique<media::DiskStreamPool>(*m_assetReaderFactory, 2);
+    m_recordService = std::make_unique<media::AudioRecordService>(*m_assetWriterFactory);
+    m_engine->setRecordBuffer(&m_recordService->buffer());
     m_windowManager = std::make_unique<platform::juce::window::WindowManager>();
     restartAudio();
     static_cast<void>(m_state->flushRenderSnapshot());
@@ -69,19 +78,26 @@ void Application::shutdown()
 {
     stopTimer();
     m_fileChooser.reset();
-    // Stop the media worker before removing the device callback, then tear down
-    // UI, media service, audio bridge, state, controller, engine, and factory.
+    // Stop the media workers before removing the device callback, then tear down
+    // UI, media services, audio bridge, state, controller, engine, and factories.
+    if (m_recordService)
+        m_recordService->stop();
+    if (m_diskStreamPool)
+        m_diskStreamPool->stop();
     if (m_mediaService)
         m_mediaService->stop();
     if (m_audioBridge)
         m_audioBridge->shutdown();
     m_windowManager.reset();
     m_mainComponent = nullptr;
+    m_recordService.reset();
+    m_diskStreamPool.reset();
     m_mediaService.reset();
     m_audioBridge.reset();
     m_state.reset();
     m_controller.reset();
     m_engine.reset();
+    m_assetWriterFactory.reset();
     m_assetReaderFactory.reset();
 }
 
@@ -108,7 +124,7 @@ void Application::promptImportWav()
 
 void Application::importWavFile(const juce::File& file)
 {
-    if (!m_mediaService || !m_state)
+    if (!m_mediaService || !m_diskStreamPool || !m_state)
         return;
 
     const auto fullPath = file.getFullPathName().toStdString();
@@ -154,7 +170,8 @@ void Application::importWavFile(const juce::File& file)
         }
     }
 
-    const auto assetId = m_state->addAudioAsset(std::move(asset));
+    const auto trackId = m_state->editorViewModel().project.tracks.back().id;
+    const auto assetId = m_state->addAudioAsset(asset);
     if (!assetId.has_value()) {
         m_state->setMediaStatus(false, "Cannot register imported WAV asset in project");
         refreshMainComponent();
@@ -166,7 +183,8 @@ void Application::importWavFile(const juce::File& file)
         .assetId = *assetId,
         .startSample = 0,
         .sourceOffset = 0,
-        .lengthSamples = draftAsset.frameCount
+        .lengthSamples = draftAsset.frameCount,
+        .trackId = trackId
     });
     if (!clipId.has_value()) {
         m_state->setMediaStatus(false, "Cannot create audio clip for imported WAV");
@@ -174,10 +192,34 @@ void Application::importWavFile(const juce::File& file)
         return;
     }
 
+    auto registeredAsset = asset;
+    registeredAsset.id = *assetId;
+    const project::AudioClip registeredClip {
+        .id = *clipId,
+        .assetId = *assetId,
+        .startSample = 0,
+        .sourceOffset = 0,
+        .lengthSamples = draftAsset.frameCount,
+        .trackId = trackId
+    };
+    const auto deviceRate = (m_audioBridge && m_audioBridge->sampleRate() > 0.0)
+        ? static_cast<std::uint32_t>(std::llround(m_audioBridge->sampleRate()))
+        : registeredAsset.sampleRate;
+    const auto voiceId = m_diskStreamPool->addVoice(
+        registeredAsset, registeredClip, ringCapacityFrames, deviceRate);
+    if (!voiceId.has_value()) {
+        m_state->setMediaStatus(false, voiceId.error().message);
+        static_cast<void>(m_state->flushRenderSnapshot());
+        refreshMainComponent();
+        return;
+    }
+
+    auto* voiceBuffer = m_diskStreamPool->buffer(*voiceId);
     m_state->setMediaStatus(true, {});
-    m_state->setPlaybackBuffer(&m_mediaService->buffer());
+    m_state->setClipBuffer(*clipId, voiceBuffer);
+    m_state->setPlaybackBuffer(voiceBuffer);
     static_cast<void>(m_state->flushRenderSnapshot());
-    m_mediaService->start();
+    m_diskStreamPool->start();
     refreshMainComponent();
 }
 
