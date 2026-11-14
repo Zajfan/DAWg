@@ -23,8 +23,9 @@ const char* getNoteName(const int pitch) noexcept
 
 } // namespace
 
-PianoRollView::PianoRollView(CommandHandler handler)
+PianoRollView::PianoRollView(CommandHandler handler, AuditionCallback auditionCb)
     : m_handler(std::move(handler))
+    , m_auditionCallback(std::move(auditionCb))
 {
     setOpaque(true);
     setWantsKeyboardFocus(true);
@@ -482,6 +483,10 @@ void PianoRollView::mouseDown(const juce::MouseEvent& e)
 
     if (e.x < m_keyWidth)
     {
+        const auto pitch = pixelToPitch(e.y);
+        m_auditioningPitch = pitch;
+        if (m_auditionCallback)
+            m_auditionCallback(pitch, 100, true);
         return;
     }
 
@@ -490,6 +495,8 @@ void PianoRollView::mouseDown(const juce::MouseEvent& e)
 
     if (note != nullptr)
     {
+        if (m_auditionCallback)
+            m_auditionCallback(note->pitch, note->velocity, true);
         if (e.mods.isShiftDown() || e.mods.isCtrlDown())
         {
             const auto it = std::find(m_selectedNoteIds.begin(), m_selectedNoteIds.end(), note->id);
@@ -526,6 +533,8 @@ void PianoRollView::mouseDown(const juce::MouseEvent& e)
             .lengthSamples = len
         };
         m_handler(project::AddMidiNote {clip->id, newNote});
+        if (m_auditionCallback)
+            m_auditionCallback(pitch, 100, true);
         return;
     }
 
@@ -608,6 +617,12 @@ void PianoRollView::mouseDrag(const juce::MouseEvent& e)
 
 void PianoRollView::mouseUp(const juce::MouseEvent&)
 {
+    if (m_auditioningPitch.has_value())
+    {
+        if (m_auditionCallback)
+            m_auditionCallback(*m_auditioningPitch, 0, false);
+        m_auditioningPitch.reset();
+    }
     m_dragMode = DragMode::none;
     m_draggedNoteId.reset();
     m_lassoRect = {};
@@ -625,17 +640,62 @@ void PianoRollView::mouseWheelMove(const juce::MouseEvent&, const juce::MouseWhe
 
 bool PianoRollView::keyPressed(const juce::KeyPress& key)
 {
+    const int code = key.getKeyCode();
+
+    // Octave controls
+    if (code == 'Z' || code == 'z')
+    {
+        m_virtualKeyboardOctave = std::max(0, m_virtualKeyboardOctave - 1);
+        return true;
+    }
+    if (code == 'X' || code == 'x')
+    {
+        m_virtualKeyboardOctave = std::min(8, m_virtualKeyboardOctave + 1);
+        return true;
+    }
+
+    // Musical typing keys mapping:
+    // A=C, W=C#, S=D, E=D#, D=E, F=F, T=F#, G=G, Y=G#, H=A, U=A#, J=B, K=C+1, O=C#+1, L=D+1
+    int noteOffset = -1;
+    switch (code)
+    {
+    case 'A': case 'a': noteOffset = 0; break;
+    case 'W': case 'w': noteOffset = 1; break;
+    case 'S': case 's': noteOffset = 2; break;
+    case 'E': case 'e': noteOffset = 3; break;
+    case 'D': case 'd': noteOffset = 4; break;
+    case 'F': case 'f': noteOffset = 5; break;
+    case 'T': case 't': noteOffset = 6; break;
+    case 'G': case 'g': noteOffset = 7; break;
+    case 'Y': case 'y': noteOffset = 8; break;
+    case 'H': case 'h': noteOffset = 9; break;
+    case 'U': case 'u': noteOffset = 10; break;
+    case 'J': case 'j': noteOffset = 11; break;
+    case 'K': case 'k': noteOffset = 12; break;
+    case 'O': case 'o': noteOffset = 13; break;
+    case 'L': case 'l': noteOffset = 14; break;
+    default: break;
+    }
+
+    if (noteOffset >= 0)
+    {
+        const auto pitch = static_cast<std::uint8_t>(std::clamp(m_virtualKeyboardOctave * 12 + noteOffset, 0, 127));
+        if (m_auditionCallback)
+            m_auditionCallback(pitch, 100, true);
+        return true;
+    }
+
     const auto* clip = findActiveClip();
     if (clip == nullptr || ! m_handler)
         return false;
 
-    if (key.getKeyCode() == 'Q' || key.getKeyCode() == 'q')
+    if (code == 'Q' || code == 'q')
     {
         quantizeNotes();
         return true;
     }
 
-    if (key.getModifiers().isCtrlDown() && (key.getKeyCode() == 'A' || key.getKeyCode() == 'a'))
+    if (key.getModifiers().isCtrlDown() && (code == 'A' || code == 'a'))
     {
         selectAllNotes();
         return true;

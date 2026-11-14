@@ -72,6 +72,7 @@ void JuceAudioDeviceBridge::audioDeviceAboutToStart(::juce::AudioIODevice* devic
                                static_cast<std::size_t>(channels)}))
         return;
 
+    m_callbackAdapter.prepare(rate, static_cast<std::size_t>(frames));
     m_sampleRate.store(rate, std::memory_order_relaxed);
     m_blockSize.store(frames, std::memory_order_relaxed);
     m_deviceReady.store(true, std::memory_order_release);
@@ -100,9 +101,32 @@ void JuceAudioDeviceBridge::audioDeviceStopped()
     m_deviceReady.store(false, std::memory_order_release);
 }
 
+void JuceAudioDeviceBridge::triggerAuditionNote(const std::uint8_t pitch,
+                                                const std::uint8_t velocity,
+                                                const bool isNoteOn) noexcept
+{
+    m_callbackAdapter.triggerLiveSynthNote(pitch, velocity, isNoteOn);
+}
+
 void JuceAudioDeviceBridge::handleIncomingMidiMessage(::juce::MidiInput* /*source*/,
                                                       const ::juce::MidiMessage& message)
 {
+    if (message.isNoteOn())
+    {
+        const auto pitch = static_cast<std::uint8_t>(message.getNoteNumber());
+        const auto vel = static_cast<std::uint8_t>(message.getVelocity());
+        m_callbackAdapter.triggerLiveSynthNote(pitch, vel, true);
+        if (m_midiNoteCallback)
+            m_midiNoteCallback(pitch, vel, true);
+    }
+    else if (message.isNoteOff())
+    {
+        const auto pitch = static_cast<std::uint8_t>(message.getNoteNumber());
+        m_callbackAdapter.triggerLiveSynthNote(pitch, 0, false);
+        if (m_midiNoteCallback)
+            m_midiNoteCallback(pitch, 0, false);
+    }
+
     dawg::engine::MidiEvent ev {};
     ev.size = std::min<std::uint8_t>(3, static_cast<std::uint8_t>(message.getRawDataSize()));
     for (std::uint8_t i = 0; i < ev.size; ++i)

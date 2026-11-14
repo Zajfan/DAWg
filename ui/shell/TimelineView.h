@@ -55,11 +55,26 @@ public:
     void toggleAutomation() noexcept;
     [[nodiscard]] bool showAutomation() const noexcept { return m_showAutomation; }
 
+    struct TimelineMarker
+    {
+        std::uint64_t samplePosition {0};
+        std::string name;
+        juce::Colour color {juce::Colour(0xff58a6ff)};
+    };
+
+    void addMarker(std::uint64_t samplePosition, std::string name, juce::Colour color = juce::Colour(0xff58a6ff));
+    void jumpToNextMarker();
+    void jumpToPrevMarker();
+    [[nodiscard]] const std::vector<TimelineMarker>& markers() const noexcept { return m_markers; }
+    [[nodiscard]] int tracksTopY() const noexcept { return m_minimapHeight + m_rulerHeight; }
+
 private:
     enum class DragMode
     {
         none,
         seekRuler,
+        panMinimap,
+        resizeTrackHeight,
         moveClip,
         trimLeft,
         trimRight,
@@ -70,6 +85,7 @@ private:
         swipeComping
     };
 
+    void drawMinimap(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawRuler(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawAutomationOverlay(juce::Graphics& g, const project::Track& track, int currentY, int laneWidth);
@@ -112,13 +128,18 @@ private:
     juce::TextButton m_snapButton {"Snap: 1/16"};
     juce::TextButton m_autoButton {"Auto: OFF"};
     juce::TextButton m_razorButton {"Razor [S]"};
+    juce::TextButton m_addMarkerButton {"+ Marker"};
     bool m_razorMode {false};
+
+    std::vector<TimelineMarker> m_markers;
 
     double m_samplesPerPixel {256.0};
     int m_scrollOffsetX {0};
-    int m_headerWidth {124};
+    int m_headerWidth {150};
+    int m_minimapHeight {22};
     int m_rulerHeight {28};
     int m_trackLaneHeight {64};
+    int m_dragInitialTrackHeight {64};
 };
 
 } // namespace dawg::ui

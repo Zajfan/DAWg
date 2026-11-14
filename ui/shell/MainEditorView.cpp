@@ -151,15 +151,66 @@ MainEditorView::MainEditorView(EditorViewModel model,
         });
     addChildComponent(*m_pluginBrowser);
 
+    m_sampleBrowser = std::make_unique<SampleBrowserPanel>(
+        [this](const std::filesystem::path& path) {
+            if (m_transportCallbacks.importSample)
+                m_transportCallbacks.importSample(path);
+        },
+        [this](const std::filesystem::path& path, const bool /*syncTempo*/) {
+            if (! path.empty())
+            {
+                if (m_transportCallbacks.audition)
+                    m_transportCallbacks.audition(60, 100, true);
+            }
+            else
+            {
+                if (m_transportCallbacks.audition)
+                    m_transportCallbacks.audition(60, 0, false);
+            }
+        });
+    addChildComponent(*m_sampleBrowser);
+
+    m_sidebarTabPluginsButton.onClick = [this] { setSidebarTab(SidebarTab::plugins); };
+    m_sidebarTabPluginsButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1f6feb));
+    addChildComponent(m_sidebarTabPluginsButton);
+
+    m_sidebarTabSamplesButton.onClick = [this] { setSidebarTab(SidebarTab::samples); };
+    m_sidebarTabSamplesButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff21262d));
+    addChildComponent(m_sidebarTabSamplesButton);
+
+    m_pianoRollView.setAuditionCallback(m_transportCallbacks.audition);
+
     setDockMode(BottomDockMode::mixer);
     setViewModel(m_model);
+}
+
+void MainEditorView::setSidebarTab(const SidebarTab tab)
+{
+    m_sidebarTab = tab;
+    m_sidebarTabPluginsButton.setColour(juce::TextButton::buttonColourId,
+        tab == SidebarTab::plugins ? juce::Colour(0xff1f6feb) : juce::Colour(0xff21262d));
+    m_sidebarTabSamplesButton.setColour(juce::TextButton::buttonColourId,
+        tab == SidebarTab::samples ? juce::Colour(0xff1f6feb) : juce::Colour(0xff21262d));
+
+    if (m_browserVisible)
+    {
+        if (m_pluginBrowser)
+            m_pluginBrowser->setVisible(tab == SidebarTab::plugins);
+        if (m_sampleBrowser)
+            m_sampleBrowser->setVisible(tab == SidebarTab::samples);
+    }
+    resized();
 }
 
 void MainEditorView::togglePluginBrowser()
 {
     m_browserVisible = ! m_browserVisible;
     if (m_pluginBrowser)
-        m_pluginBrowser->setVisible(m_browserVisible);
+        m_pluginBrowser->setVisible(m_browserVisible && m_sidebarTab == SidebarTab::plugins);
+    if (m_sampleBrowser)
+        m_sampleBrowser->setVisible(m_browserVisible && m_sidebarTab == SidebarTab::samples);
+    m_sidebarTabPluginsButton.setVisible(m_browserVisible);
+    m_sidebarTabSamplesButton.setVisible(m_browserVisible);
     m_tabBrowserButton.setColour(juce::TextButton::buttonColourId,
                                 m_browserVisible ? juce::Colour::fromRGB(45, 95, 145) : juce::Colour::fromRGB(28, 30, 36));
     resized();
@@ -427,6 +478,12 @@ bool MainEditorView::keyPressed(const juce::KeyPress& key)
         return true;
     }
 
+    if (m_dockMode == BottomDockMode::pianoRoll)
+    {
+        if (m_pianoRollView.keyPressed(key))
+            return true;
+    }
+
     return false;
 }
 
@@ -457,10 +514,18 @@ void MainEditorView::resized()
     m_mixerPanel.setBounds(bottomDockArea);
     m_pianoRollView.setBounds(bottomDockArea);
 
-    // 4. Right Sidebar Plugin Browser
-    if (m_browserVisible && m_pluginBrowser)
+    // 4. Right Sidebar Plugin / Sample Browser
+    if (m_browserVisible)
     {
-        m_pluginBrowser->setBounds(area.removeFromRight(260));
+        auto sidebarArea = area.removeFromRight(270);
+        auto tabArea = sidebarArea.removeFromTop(24);
+        m_sidebarTabPluginsButton.setBounds(tabArea.removeFromLeft(tabArea.getWidth() / 2).reduced(2, 2));
+        m_sidebarTabSamplesButton.setBounds(tabArea.reduced(2, 2));
+
+        if (m_pluginBrowser && m_sidebarTab == SidebarTab::plugins)
+            m_pluginBrowser->setBounds(sidebarArea);
+        if (m_sampleBrowser && m_sidebarTab == SidebarTab::samples)
+            m_sampleBrowser->setBounds(sidebarArea);
     }
 
     // 5. Center Multi-Track Timeline View

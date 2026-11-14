@@ -99,6 +99,13 @@ void Application::initialise(const juce::String&)
         }
     });
 
+    m_audioBridge->setMidiNoteCallback([this](const std::uint8_t pitch, const std::uint8_t velocity, const bool isNoteOn) {
+        if (m_state && m_engine && m_engine->isRecording())
+        {
+            handleIncomingLiveMidiNote(pitch, velocity, isNoteOn);
+        }
+    });
+
     static_cast<void>(m_state->flushRenderSnapshot());
 
     ui::MainEditorView::TransportCallbacks transportCallbacks {
@@ -119,6 +126,13 @@ void Application::initialise(const juce::String&)
                 m_state->setMasterLimiterEnabled(enabled);
                 refreshMainComponent();
             }
+        },
+        .audition = [this](const std::uint8_t pitch, const std::uint8_t velocity, const bool isNoteOn) {
+            if (m_audioBridge)
+                m_audioBridge->triggerAuditionNote(pitch, velocity, isNoteOn);
+        },
+        .importSample = [this](const std::filesystem::path& path) {
+            importWavFile(juce::File(juce::String(path.string())));
         }
     };
 
@@ -451,7 +465,64 @@ void Application::stopRecordingSession()
     if (m_waveformCache)
         m_waveformCache->requestThumbnail(recordedTake.asset);
 
+    // Finalize any recorded live MIDI notes into a MidiClip on the armed track
+    if (! m_recordedMidiNotes.empty())
+    {
+        const auto armedTrack = m_recordingTrackId != 0 ? m_recordingTrackId : (m_state->firstArmedTrackId().value_or(1));
+        const auto curTimelineSample = static_cast<std::uint64_t>(std::max<std::int64_t>(0, m_engine->transportState().samplePosition));
+        const auto clipLen = std::max<std::uint64_t>(48000, curTimelineSample > m_recordStartTimelineSample ? curTimelineSample - m_recordStartTimelineSample : 48000);
+
+        project::MidiClip recordedClip {
+            .id = 0,
+            .trackId = armedTrack,
+            .startSample = m_recordStartTimelineSample,
+            .lengthSamples = clipLen,
+            .notes = std::move(m_recordedMidiNotes)
+        };
+        m_recordedMidiNotes.clear();
+        dispatchProjectCommand(project::AddMidiClip { std::move(recordedClip) });
+    }
+
     static_cast<void>(m_state->flushRenderSnapshot());
+}
+
+void Application::handleIncomingLiveMidiNote(const std::uint8_t pitch, const std::uint8_t velocity, const bool isNoteOn)
+{
+    if (pitch >= 128 || ! m_state)
+        return;
+
+    const auto curTimeline = static_cast<std::uint64_t>(
+        std::max<std::int64_t>(0, m_engine ? m_engine->transportState().samplePosition : 0));
+
+    if (isNoteOn)
+    {
+        m_activeMidiNotes[pitch] = {
+            .startTimelineSample = curTimeline,
+            .velocity = velocity,
+            .active = true
+        };
+    }
+    else
+    {
+        auto& note = m_activeMidiNotes[pitch];
+        if (note.active)
+        {
+            const auto noteStart = (note.startTimelineSample >= m_recordStartTimelineSample)
+                ? (note.startTimelineSample - m_recordStartTimelineSample)
+                : 0;
+            const auto noteLen = std::max<std::uint64_t>(
+                2400, (curTimeline > note.startTimelineSample) ? (curTimeline - note.startTimelineSample) : 2400);
+
+            m_recordedMidiNotes.push_back(project::MidiNote {
+                .id = static_cast<project::NoteId>(m_recordedMidiNotes.size() + 1),
+                .pitch = pitch,
+                .velocity = note.velocity,
+                .startSample = noteStart,
+                .lengthSamples = noteLen
+            });
+            note.active = false;
+        }
+    }
 }
 
 void Application::undo()

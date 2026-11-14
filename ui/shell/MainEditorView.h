@@ -4,6 +4,7 @@
 #include "MixerPanel.h"
 #include "PianoRollView.h"
 #include "PluginBrowserPanel.h"
+#include "SampleBrowserPanel.h"
 #include "TimelineView.h"
 #include "TransportBar.h"
 
@@ -22,6 +23,8 @@ public:
     using ActionHandler = std::function<void()>;
     using SeekCallback = std::function<void(std::int64_t samplePosition)>;
     using LimiterCallback = std::function<void(bool enabled)>;
+    using AuditionCallback = std::function<void(std::uint8_t pitch, std::uint8_t velocity, bool isNoteOn)>;
+    using SampleImportCallback = std::function<void(const std::filesystem::path& path)>;
 
     struct TransportCallbacks
     {
@@ -34,6 +37,8 @@ public:
         ActionHandler redo;
         SeekCallback seek;
         LimiterCallback setMasterLimiter;
+        AuditionCallback audition;
+        SampleImportCallback importSample;
     };
 
     struct MenuCallbacks
@@ -55,6 +60,12 @@ public:
         pianoRoll
     };
 
+    enum class SidebarTab : std::uint8_t
+    {
+        plugins,
+        samples
+    };
+
     MainEditorView(EditorViewModel model,
                    CommandHandler commandHandler,
                    TransportCallbacks transportCallbacks = {},
@@ -69,6 +80,8 @@ public:
     [[nodiscard]] BottomDockMode dockMode() const noexcept { return m_dockMode; }
     void togglePluginBrowser();
     [[nodiscard]] bool isPluginBrowserVisible() const noexcept { return m_browserVisible; }
+    void setSidebarTab(SidebarTab tab);
+    [[nodiscard]] SidebarTab sidebarTab() const noexcept { return m_sidebarTab; }
 
     // MenuBarModel
     juce::StringArray getMenuBarNames() override;
@@ -97,6 +110,10 @@ private:
     MixerPanel m_mixerPanel;
     PianoRollView m_pianoRollView;
     std::unique_ptr<PluginBrowserPanel> m_pluginBrowser;
+    std::unique_ptr<SampleBrowserPanel> m_sampleBrowser;
+    juce::TextButton m_sidebarTabPluginsButton {"Plugins"};
+    juce::TextButton m_sidebarTabSamplesButton {"Samples"};
+    SidebarTab m_sidebarTab {SidebarTab::plugins};
     bool m_browserVisible {false};
 };
 

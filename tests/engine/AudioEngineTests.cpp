@@ -1850,6 +1850,10 @@ void testDspGraphExternalSidechainRoutingWithPdc()
 #endif
 
 #if !defined(DAWG_TSAN_ACTIVE)
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
+#endif
 void* operator new(std::size_t size)
 {
     if (g_trackAllocations.load(std::memory_order_acquire))
@@ -1921,6 +1925,9 @@ void operator delete[](void* ptr, std::size_t, std::align_val_t) noexcept
 {
     ::operator delete(ptr);
 }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 #endif
 
 int main()

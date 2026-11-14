@@ -1,3 +1,4 @@
+#include <dawg/plugins/ClapPluginLoader.h>
 #include <dawg/plugins/PluginScanner.h>
 
 #include <cassert>
@@ -47,6 +48,10 @@ void testBuiltInPlugins()
     }
 
     assert(foundSynth && foundEq && foundComp && foundReverb);
+    (void) foundSynth;
+    (void) foundEq;
+    (void) foundComp;
+    (void) foundReverb;
     std::cout << "testBuiltInPlugins: PASSED\n";
 }
 
@@ -85,10 +90,124 @@ void testDirectoryScanning()
     std::cout << "testDirectoryScanning: PASSED\n";
 }
 
+void testClapPluginLoader()
+{
+    // 1. Empty path handling
+    const auto emptyRes = ClapPluginLoader::loadPlugin("");
+    assert(! emptyRes.ok());
+    assert(! emptyRes.errorMessage.empty());
+
+    // 2. Non-existent library path
+    const auto missingRes = ClapPluginLoader::loadPlugin("/invalid/path/to/plugin.clap");
+    assert(! missingRes.ok());
+    assert(! missingRes.errorMessage.empty());
+
+    // 3. Mock instance testing
+    static const clap_plugin_descriptor mockDesc {
+        .clap_version = CLAP_VERSION_INIT,
+        .id = "tnhc.mock_plugin",
+        .name = "Mock Clap Effect",
+        .vendor = "TNHC",
+        .url = "https://tnhc.audio",
+        .manual_url = "",
+        .support_url = "",
+        .version = "1.0.0",
+        .description = "A mock CLAP plugin for testing",
+        .features = nullptr
+    };
+
+    static clap_param_info mockParam {
+        .id = 42,
+        .flags = 0,
+        .cookie = nullptr,
+        .name = "Cutoff",
+        .module = "Filter",
+        .min_value = 20.0,
+        .max_value = 20000.0,
+        .default_value = 1000.0
+    };
+
+    static const clap_plugin_params mockParamsExt {
+        .count = [](const clap_plugin*) -> std::uint32_t { return 1; },
+        .get_info = [](const clap_plugin*, std::uint32_t, clap_param_info* info) -> bool {
+            *info = mockParam;
+            return true;
+        },
+        .get_value = [](const clap_plugin*, std::uint32_t, double* val) -> bool {
+            *val = 1500.0;
+            return true;
+        },
+        .value_to_text = nullptr,
+        .text_to_value = nullptr,
+        .flush = nullptr
+    };
+
+    static bool activated = false;
+    static bool resetCalled = false;
+    static const clap_plugin mockPlugin {
+        .desc = &mockDesc,
+        .plugin_data = nullptr,
+        .init = [](const clap_plugin*) -> bool { return true; },
+        .destroy = [](const clap_plugin*) {},
+        .activate = [](const clap_plugin*, double, std::uint32_t, std::uint32_t) -> bool {
+            activated = true;
+            return true;
+        },
+        .deactivate = [](const clap_plugin*) {},
+        .start_processing = [](const clap_plugin*) -> bool { return true; },
+        .stop_processing = [](const clap_plugin*) {},
+        .reset = [](const clap_plugin*) { resetCalled = true; },
+        .process = nullptr,
+        .get_extension = [](const clap_plugin*, const char* id) -> const void* {
+            if (std::string(id) == CLAP_EXT_PARAMS)
+                return &mockParamsExt;
+            return nullptr;
+        },
+        .on_main_thread = nullptr
+    };
+
+    ClapInstance instance(nullptr, nullptr, &mockPlugin);
+    assert(instance.isValid());
+    assert(instance.pluginName() == "Mock Clap Effect");
+    assert(instance.pluginVendor() == "TNHC");
+    assert(instance.pluginVersion() == "1.0.0");
+    assert(instance.pluginId() == "tnhc.mock_plugin");
+
+    const auto params = instance.getParameters();
+    assert(params.size() == 1);
+    assert(params[0].id == 42);
+    assert(params[0].name == "Cutoff");
+    assert(params[0].module == "Filter");
+    assert(params[0].minValue == 20.0);
+    assert(params[0].maxValue == 20000.0);
+    assert(params[0].defaultValue == 1000.0);
+    assert(params[0].currentValue == 1500.0);
+
+    double val = 0.0;
+    assert(instance.getParameterValue(42, val));
+    assert(val == 1500.0);
+    (void) val;
+
+    // Test crash mark and restart supervisor
+    assert(! instance.isCrashed());
+    instance.markCrashed();
+    assert(instance.isCrashed());
+
+    assert(instance.restart(48000.0, 512));
+    assert(! instance.isCrashed());
+    assert(activated);
+    assert(resetCalled);
+    (void) activated;
+    (void) resetCalled;
+
+    std::cout << "testClapPluginLoader: PASSED\n";
+}
+
 int main()
 {
     testBuiltInPlugins();
     testDirectoryScanning();
+    testClapPluginLoader();
     std::cout << "All PluginScanner tests PASSED!\n";
     return 0;
 }

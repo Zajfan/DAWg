@@ -151,6 +151,36 @@ void testInputChannelCaptureForwarding()
     require(readLeft == inLeft && readRight == inRight,
             "captured frames match hardware input channels bit-for-bit");
 }
+
+void testLiveSynthAuditionNote()
+{
+    dawg::engine::AudioEngine engine;
+    require(engine.prepare({48000.0, 64, 2}), "engine prepares for live synth audition");
+    dawg::platform::juce::JuceAudioCallbackAdapter adapter {engine};
+    adapter.prepare(48000.0, 64);
+
+    // Trigger note-on C4 (pitch 60)
+    adapter.triggerLiveSynthNote(60, 100, true);
+
+    std::array<std::array<float, 64>, 2> samples {};
+    std::array<float*, 2> channels {samples[0].data(), samples[1].data()};
+
+    adapter.process(channels.data(), channels.size(), samples[0].size());
+
+    bool hasNonZeroSample = false;
+    for (const auto sample : samples[0])
+    {
+        if (std::abs(sample) > 1e-4f)
+        {
+            hasNonZeroSample = true;
+            break;
+        }
+    }
+    require(hasNonZeroSample, "live synth produces audible waveform during audition");
+
+    // Trigger note-off
+    adapter.triggerLiveSynthNote(60, 0, false);
+}
 }
 
 int main()
@@ -159,5 +189,6 @@ int main()
     testCallbackRendersPrefilledClipPcm();
     testSparseChannelsAndBorrowedBounds();
     testInputChannelCaptureForwarding();
-    std::puts("PASS: JUCE-free audio callback adapter (4 cases)");
+    testLiveSynthAuditionNote();
+    std::puts("PASS: JUCE-free audio callback adapter (5 cases)");
 }

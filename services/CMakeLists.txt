@@ -3,8 +3,10 @@ add_subdirectory(media)
 
 add_library(dawg_services_plugins STATIC
     plugins/src/PluginScanner.cpp
+    plugins/src/ClapPluginLoader.cpp
 )
 target_include_directories(dawg_services_plugins PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/plugins/include)
+target_link_libraries(dawg_services_plugins PUBLIC dawg_engine_core ${CMAKE_DL_LIBS})
 target_compile_features(dawg_services_plugins PUBLIC cxx_std_20)
 target_compile_options(dawg_services_plugins PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>

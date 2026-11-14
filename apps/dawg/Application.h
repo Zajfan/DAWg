@@ -2,10 +2,13 @@
 
 #include "MainComponent.h"
 
+#include <dawg/project/ProjectTypes.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <array>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace dawg::project { class Project; }
 namespace dawg::commands { class ProjectController; }
@@ -88,6 +91,16 @@ private:
     project::TrackId m_recordingTrackId {0};
     std::uint64_t m_recordStartTimelineSample {0};
     std::size_t m_takeCounter {0};
+
+    void handleIncomingLiveMidiNote(std::uint8_t pitch, std::uint8_t velocity, bool isNoteOn);
+    struct LiveMidiNoteInProgress
+    {
+        std::uint64_t startTimelineSample {0};
+        std::uint8_t velocity {100};
+        bool active {false};
+    };
+    std::array<LiveMidiNoteInProgress, 128> m_activeMidiNotes {};
+    std::vector<project::MidiNote> m_recordedMidiNotes;
 };
 
 } // namespace dawg::app

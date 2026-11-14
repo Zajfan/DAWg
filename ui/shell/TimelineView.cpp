@@ -26,6 +26,60 @@ TimelineView::TimelineView(Callbacks callbacks, media::WaveformCache* waveformCa
         repaint();
     };
     addAndMakeVisible(m_razorButton);
+
+    m_addMarkerButton.onClick = [this] {
+        const auto curSample = static_cast<std::uint64_t>(std::max<std::int64_t>(0, m_model.playbackPosition));
+        addMarker(curSample, "Marker " + std::to_string(m_markers.size() + 1));
+    };
+    m_addMarkerButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(30, 70, 110));
+    addAndMakeVisible(m_addMarkerButton);
+
+    // Initial arrangement song sections (assuming standard 48k sample rate, 120bpm)
+    constexpr std::uint64_t barSamples = 96000;
+    m_markers.push_back({0, "Intro", juce::Colour(0xff58a6ff)});
+    m_markers.push_back({8 * barSamples, "Verse 1", juce::Colour(0xff3fb950)});
+    m_markers.push_back({16 * barSamples, "Chorus", juce::Colour(0xffd29922)});
+    m_markers.push_back({24 * barSamples, "Verse 2", juce::Colour(0xff3fb950)});
+    m_markers.push_back({32 * barSamples, "Bridge", juce::Colour(0xffbc8cff)});
+    m_markers.push_back({40 * barSamples, "Chorus 2", juce::Colour(0xffd29922)});
+    m_markers.push_back({48 * barSamples, "Outro", juce::Colour(0xfff85149)});
+}
+
+void TimelineView::addMarker(const std::uint64_t samplePosition, std::string name, const juce::Colour color)
+{
+    m_markers.push_back({samplePosition, std::move(name), color});
+    std::sort(m_markers.begin(), m_markers.end(), [](const TimelineMarker& a, const TimelineMarker& b) {
+        return a.samplePosition < b.samplePosition;
+    });
+    repaint();
+}
+
+void TimelineView::jumpToNextMarker()
+{
+    const auto cur = static_cast<std::uint64_t>(std::max<std::int64_t>(0, m_model.playbackPosition));
+    for (const auto& m : m_markers)
+    {
+        if (m.samplePosition > cur + 100)
+        {
+            if (m_callbacks.seek)
+                m_callbacks.seek(static_cast<std::int64_t>(m.samplePosition));
+            return;
+        }
+    }
+}
+
+void TimelineView::jumpToPrevMarker()
+{
+    const auto cur = static_cast<std::uint64_t>(std::max<std::int64_t>(0, m_model.playbackPosition));
+    for (auto it = m_markers.rbegin(); it != m_markers.rend(); ++it)
+    {
+        if (it->samplePosition + 100 < cur)
+        {
+            if (m_callbacks.seek)
+                m_callbacks.seek(static_cast<std::int64_t>(it->samplePosition));
+            return;
+        }
+    }
 }
 
 void TimelineView::toggleAutomation() noexcept
@@ -132,13 +186,13 @@ juce::Rectangle<int> TimelineView::getClipBounds(const project::AudioClip& clip,
 
 const project::AudioClip* TimelineView::findClipAt(juce::Point<int> pos, int& outLaneY) const noexcept
 {
-    if (pos.x < m_headerWidth || pos.y < m_rulerHeight)
+    if (pos.x < m_headerWidth || pos.y < tracksTopY())
         return nullptr;
 
     const auto& tracks = m_model.project.tracks;
     const auto& clips = m_model.project.clips;
 
-    int currentY = m_rulerHeight;
+    int currentY = tracksTopY();
     for (const auto& track : tracks)
     {
         if (pos.y >= currentY && pos.y < currentY + m_trackLaneHeight)
@@ -174,13 +228,85 @@ void TimelineView::paint(juce::Graphics& g)
     g.fillAll(juce::Colour::fromRGB(20, 21, 25));
 
     auto totalBounds = getLocalBounds();
+    const auto minimapBounds = totalBounds.removeFromTop(m_minimapHeight);
     const auto rulerBounds = totalBounds.removeFromTop(m_rulerHeight);
     const auto tracksBounds = totalBounds;
 
+    drawMinimap(g, minimapBounds);
     drawRuler(g, rulerBounds);
     drawTracksAndClips(g, tracksBounds);
     drawLoopRegion(g, getLocalBounds());
     drawPlayhead(g, getLocalBounds());
+}
+
+void TimelineView::drawMinimap(juce::Graphics& g, juce::Rectangle<int> bounds)
+{
+    g.setColour(juce::Colour(0xff12151c));
+    g.fillRect(bounds);
+
+    auto headerCorner = bounds.removeFromLeft(m_headerWidth);
+    g.setColour(juce::Colour(0xff161b22));
+    g.fillRect(headerCorner);
+
+    g.setColour(juce::Colour(0xff8b949e));
+    g.setFont(juce::FontOptions(10.0f).withStyle("Bold"));
+    g.drawText("OVERVIEW", headerCorner.reduced(6, 0), juce::Justification::centredLeft);
+
+    g.setColour(juce::Colour(0xff30363d));
+    g.drawHorizontalLine(bounds.getBottom() - 1, 0.0f, static_cast<float>(getWidth()));
+    g.drawVerticalLine(m_headerWidth, static_cast<float>(bounds.getY()), static_cast<float>(bounds.getBottom()));
+
+    if (bounds.getWidth() <= 10)
+        return;
+
+    std::uint64_t maxArrangementSamples = 64 * 96000;
+    for (const auto& c : m_model.project.clips)
+        maxArrangementSamples = std::max(maxArrangementSamples, c.startSample + c.lengthSamples + 96000);
+
+    const int minimapW = bounds.getWidth();
+    const int minimapX = bounds.getX();
+    const int minimapY = bounds.getY();
+    const int minimapH = bounds.getHeight();
+
+    const auto& tracks = m_model.project.tracks;
+    if (! tracks.empty())
+    {
+        const int miniTrackH = std::max(2, (minimapH - 2) / static_cast<int>(tracks.size()));
+        for (std::size_t ti = 0; ti < tracks.size(); ++ti)
+        {
+            const auto& tr = tracks[ti];
+            const int trackY = minimapY + 1 + static_cast<int>(ti) * miniTrackH;
+
+            for (const auto& clip : m_model.project.clips)
+            {
+                if (clip.trackId == tr.id)
+                {
+                    const int cx = minimapX + static_cast<int>((clip.startSample * static_cast<std::uint64_t>(minimapW)) / maxArrangementSamples);
+                    const int cw = std::max(2, static_cast<int>((clip.lengthSamples * static_cast<std::uint64_t>(minimapW)) / maxArrangementSamples));
+
+                    g.setColour(juce::Colour(0xff58a6ff).withAlpha(0.7f));
+                    g.fillRect(cx, trackY, cw, miniTrackH - 1);
+                }
+            }
+        }
+    }
+
+    for (const auto& m : m_markers)
+    {
+        const int mx = minimapX + static_cast<int>((m.samplePosition * static_cast<std::uint64_t>(minimapW)) / maxArrangementSamples);
+        g.setColour(m.color.withAlpha(0.6f));
+        g.drawVerticalLine(mx, static_cast<float>(minimapY), static_cast<float>(minimapY + minimapH));
+    }
+
+    const auto vpStartSample = static_cast<std::uint64_t>(pixelToSample(m_headerWidth));
+    const auto vpEndSample = static_cast<std::uint64_t>(pixelToSample(getWidth()));
+    const int vx = minimapX + static_cast<int>((vpStartSample * static_cast<std::uint64_t>(minimapW)) / maxArrangementSamples);
+    const int vw = std::max(16, static_cast<int>(((vpEndSample - vpStartSample) * static_cast<std::uint64_t>(minimapW)) / maxArrangementSamples));
+
+    g.setColour(juce::Colour(0x3358a6ff));
+    g.fillRect(vx, minimapY, vw, minimapH);
+    g.setColour(juce::Colour(0xff58a6ff));
+    g.drawRect(vx, minimapY, vw, minimapH, 1);
 }
 
 void TimelineView::drawRuler(juce::Graphics& g, juce::Rectangle<int> bounds)
@@ -237,6 +363,33 @@ void TimelineView::drawRuler(juce::Graphics& g, juce::Rectangle<int> bounds)
                 g.setColour(juce::Colour::fromRGB(50, 54, 65));
                 g.drawVerticalLine(beatPx, static_cast<float>(bounds.getY() + 18), static_cast<float>(bounds.getBottom() - 1));
             }
+        }
+    }
+
+    // Section markers
+    for (const auto& marker : m_markers)
+    {
+        const int mPx = m_headerWidth + sampleToPixel(static_cast<std::int64_t>(marker.samplePosition));
+        if (mPx >= m_headerWidth && mPx <= getWidth())
+        {
+            g.setColour(marker.color.withAlpha(0.5f));
+            g.drawVerticalLine(mPx, static_cast<float>(bounds.getY()), static_cast<float>(getHeight()));
+
+            const int flagW = 54;
+            const int flagH = 15;
+            juce::Rectangle<int> flagRect(mPx, bounds.getY() + 1, flagW, flagH);
+            g.setColour(marker.color);
+            g.fillRoundedRectangle(flagRect.toFloat(), 3.0f);
+
+            juce::Path tagTip;
+            tagTip.addTriangle(static_cast<float>(mPx), static_cast<float>(bounds.getY() + flagH),
+                               static_cast<float>(mPx + 6), static_cast<float>(bounds.getY() + flagH),
+                               static_cast<float>(mPx), static_cast<float>(bounds.getY() + flagH + 4));
+            g.fillPath(tagTip);
+
+            g.setColour(juce::Colours::white);
+            g.setFont(juce::FontOptions(9.0f).withStyle("Bold"));
+            g.drawText(marker.name, flagRect.reduced(2, 0), juce::Justification::centredLeft, true);
         }
     }
 }
@@ -618,20 +771,42 @@ void TimelineView::drawPlayhead(juce::Graphics& g, juce::Rectangle<int> bounds)
 
 void TimelineView::resized()
 {
-    const int btnWidth = (m_headerWidth - 16) / 3;
-    m_snapButton.setBounds(4, 4, btnWidth, m_rulerHeight - 8);
-    m_autoButton.setBounds(4 + btnWidth + 2, 4, btnWidth, m_rulerHeight - 8);
-    m_razorButton.setBounds(4 + (btnWidth + 2) * 2, 4, btnWidth, m_rulerHeight - 8);
+    const int btnWidth = (m_headerWidth - 16) / 4;
+    m_snapButton.setBounds(4, m_minimapHeight + 4, btnWidth, m_rulerHeight - 8);
+    m_autoButton.setBounds(4 + btnWidth + 2, m_minimapHeight + 4, btnWidth, m_rulerHeight - 8);
+    m_razorButton.setBounds(4 + (btnWidth + 2) * 2, m_minimapHeight + 4, btnWidth, m_rulerHeight - 8);
+    m_addMarkerButton.setBounds(4 + (btnWidth + 2) * 3, m_minimapHeight + 4, btnWidth, m_rulerHeight - 8);
 }
 
 void TimelineView::mouseMove(const juce::MouseEvent& e)
 {
     m_lastMousePos = e.getPosition();
 
-    if (e.y < m_rulerHeight)
+    if (e.y < m_minimapHeight)
+    {
+        if (e.x >= m_headerWidth)
+            setMouseCursor(juce::MouseCursor::PointingHandCursor);
+        else
+            setMouseCursor(juce::MouseCursor::NormalCursor);
+        return;
+    }
+
+    if (e.y < tracksTopY())
     {
         setMouseCursor(juce::MouseCursor::PointingHandCursor);
         return;
+    }
+
+    // Check if hovering near bottom border of any track lane
+    int curY = tracksTopY();
+    for (const auto& track : m_model.project.tracks)
+    {
+        curY += m_trackLaneHeight + (track.takeLanesExpanded ? static_cast<int>(track.takes.size()) * 32 : 0);
+        if (std::abs(e.y - curY) <= 4)
+        {
+            setMouseCursor(juce::MouseCursor::UpDownResizeCursor);
+            return;
+        }
     }
 
     if (m_razorMode)
@@ -673,11 +848,55 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
     grabKeyboardFocus();
     m_lastMousePos = e.getPosition();
 
-    if (e.y < m_rulerHeight)
+    if (e.y < m_minimapHeight)
     {
+        if (e.x >= m_headerWidth)
+        {
+            m_dragMode = DragMode::panMinimap;
+            std::uint64_t maxArrangementSamples = 64 * 96000;
+            for (const auto& c : m_model.project.clips)
+                maxArrangementSamples = std::max(maxArrangementSamples, c.startSample + c.lengthSamples + 96000);
+            const int minimapW = getWidth() - m_headerWidth;
+            if (minimapW > 0)
+            {
+                const double norm = static_cast<double>(e.x - m_headerWidth) / static_cast<double>(minimapW);
+                const auto targetSample = static_cast<std::int64_t>(norm * static_cast<double>(maxArrangementSamples));
+                m_scrollOffsetX = std::max(0, static_cast<int>(static_cast<double>(targetSample) / m_samplesPerPixel) - (getWidth() - m_headerWidth) / 2);
+                repaint();
+            }
+        }
+        return;
+    }
+
+    if (e.y < tracksTopY())
+    {
+        for (const auto& marker : m_markers)
+        {
+            const int mPx = m_headerWidth + sampleToPixel(static_cast<std::int64_t>(marker.samplePosition));
+            if (e.x >= mPx && e.x <= mPx + 54)
+            {
+                if (m_callbacks.seek)
+                    m_callbacks.seek(static_cast<std::int64_t>(marker.samplePosition));
+                return;
+            }
+        }
+
         m_dragMode = DragMode::seekRuler;
         seekToX(e.x);
         return;
+    }
+
+    int curTrackY = tracksTopY();
+    for (const auto& track : m_model.project.tracks)
+    {
+        curTrackY += m_trackLaneHeight + (track.takeLanesExpanded ? static_cast<int>(track.takes.size()) * 32 : 0);
+        if (std::abs(e.y - curTrackY) <= 4)
+        {
+            m_dragMode = DragMode::resizeTrackHeight;
+            m_dragStartPos = e.getPosition();
+            m_dragInitialTrackHeight = m_trackLaneHeight;
+            return;
+        }
     }
 
     if (m_razorMode)
@@ -876,6 +1095,31 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
 
 void TimelineView::mouseDrag(const juce::MouseEvent& e)
 {
+    if (m_dragMode == DragMode::panMinimap)
+    {
+        std::uint64_t maxArrangementSamples = 64 * 96000;
+        for (const auto& c : m_model.project.clips)
+            maxArrangementSamples = std::max(maxArrangementSamples, c.startSample + c.lengthSamples + 96000);
+        const int minimapW = getWidth() - m_headerWidth;
+        if (minimapW > 0)
+        {
+            const double norm = static_cast<double>(std::clamp(e.x - m_headerWidth, 0, minimapW)) / static_cast<double>(minimapW);
+            const auto targetSample = static_cast<std::int64_t>(norm * static_cast<double>(maxArrangementSamples));
+            m_scrollOffsetX = std::max(0, static_cast<int>(static_cast<double>(targetSample) / m_samplesPerPixel) - (getWidth() - m_headerWidth) / 2);
+            repaint();
+        }
+        return;
+    }
+
+    if (m_dragMode == DragMode::resizeTrackHeight)
+    {
+        const int deltaY = e.getPosition().y - m_dragStartPos.y;
+        m_trackLaneHeight = std::clamp(m_dragInitialTrackHeight + deltaY, 36, 240);
+        resized();
+        repaint();
+        return;
+    }
+
     if (m_dragMode == DragMode::seekRuler)
     {
         seekToX(e.x);
@@ -891,8 +1135,8 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
 
     if (m_dragMode == DragMode::moveAutomationPoint)
     {
-        const int laneIdx = (e.y - m_rulerHeight) / m_trackLaneHeight;
-        const int laneTop = m_rulerHeight + laneIdx * m_trackLaneHeight + 6;
+        const int laneIdx = (e.y - tracksTopY()) / m_trackLaneHeight;
+        const int laneTop = tracksTopY() + laneIdx * m_trackLaneHeight + 6;
         const int laneH = m_trackLaneHeight - 12;
 
         const auto newSample = static_cast<std::uint64_t>(std::max<std::int64_t>(0, snapSample(pixelToSample(e.x))));
@@ -919,7 +1163,7 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
         m_dragTargetStartSample = snapSample(rawStart);
 
         // Track reassignment based on Y
-        const int laneIdx = std::clamp((e.y - m_rulerHeight) / m_trackLaneHeight, 0,
+        const int laneIdx = std::clamp((e.y - tracksTopY()) / m_trackLaneHeight, 0,
                                        static_cast<int>(m_model.project.tracks.size()) - 1);
         if (! m_model.project.tracks.empty())
         {
@@ -1162,11 +1406,51 @@ bool TimelineView::keyPressed(const juce::KeyPress& key)
         }
     }
 
+    // Section marker navigation shortcuts: [ and ]
+    if (key.getKeyCode() == '[' || key.getTextCharacter() == '[')
+    {
+        jumpToPrevMarker();
+        return true;
+    }
+    if (key.getKeyCode() == ']' || key.getTextCharacter() == ']')
+    {
+        jumpToNextMarker();
+        return true;
+    }
+
+    // Vertical track height shortcuts: Ctrl+Up / Ctrl+Down
+    if (key.getModifiers().isCtrlDown() && key.getKeyCode() == juce::KeyPress::upKey)
+    {
+        m_trackLaneHeight = std::min(240, m_trackLaneHeight + 12);
+        resized();
+        repaint();
+        return true;
+    }
+    if (key.getModifiers().isCtrlDown() && key.getKeyCode() == juce::KeyPress::downKey)
+    {
+        m_trackLaneHeight = std::max(36, m_trackLaneHeight - 12);
+        resized();
+        repaint();
+        return true;
+    }
+
     return false;
 }
 
-void TimelineView::mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
+void TimelineView::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
 {
+    if (e.mods.isCtrlDown())
+    {
+        const float delta = wheel.deltaY;
+        if (std::abs(delta) > 1e-4f)
+        {
+            m_trackLaneHeight = std::clamp(m_trackLaneHeight + (delta > 0.0f ? 8 : -8), 36, 240);
+            resized();
+            repaint();
+            return;
+        }
+    }
+
     if (std::abs(wheel.deltaY) > 1e-4f)
     {
         const double factor = wheel.deltaY > 0.0f ? 0.85 : 1.15;

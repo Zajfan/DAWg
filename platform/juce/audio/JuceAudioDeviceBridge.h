@@ -18,6 +18,7 @@ class JuceAudioDeviceBridge final : private ::juce::AudioIODeviceCallback,
 {
 public:
     using MidiControlCallback = std::function<void(const dawg::engine::ProcessedMidiControl&)>;
+    using MidiNoteCallback = std::function<void(std::uint8_t pitch, std::uint8_t velocity, bool isNoteOn)>;
 
     explicit JuceAudioDeviceBridge(dawg::engine::AudioEngine& engine);
     ~JuceAudioDeviceBridge() override;
@@ -29,6 +30,8 @@ public:
     void shutdown() noexcept;
 
     void setMidiControlCallback(MidiControlCallback cb) { m_midiControlCallback = std::move(cb); }
+    void setMidiNoteCallback(MidiNoteCallback cb) { m_midiNoteCallback = std::move(cb); }
+    void triggerAuditionNote(std::uint8_t pitch, std::uint8_t velocity, bool isNoteOn) noexcept;
     [[nodiscard]] dawg::engine::MidiControllerManager& controllerManager() noexcept { return m_controllerManager; }
     [[nodiscard]] ::juce::AudioDeviceManager& deviceManager() noexcept { return m_deviceManager; }
 
@@ -52,6 +55,7 @@ private:
     ::juce::AudioDeviceManager m_deviceManager;
     dawg::engine::MidiControllerManager m_controllerManager;
     MidiControlCallback m_midiControlCallback;
+    MidiNoteCallback m_midiNoteCallback;
 
     std::atomic<bool> m_deviceReady {false};
     std::atomic<double> m_sampleRate {0.0};

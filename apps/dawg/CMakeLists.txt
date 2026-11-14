@@ -21,6 +21,10 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/BounceDialog.h
     ../../ui/shell/PluginBrowserPanel.cpp
     ../../ui/shell/PluginBrowserPanel.h
+    ../../ui/shell/ClapParameterEditorDialog.cpp
+    ../../ui/shell/ClapParameterEditorDialog.h
+    ../../ui/shell/SampleBrowserPanel.cpp
+    ../../ui/shell/SampleBrowserPanel.h
 )
 target_include_directories(DAWg PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ../../ui/shell)
 target_link_libraries(DAWg PRIVATE dawg_platform_juce dawg_services_commands dawg_services_media dawg_services_persistence dawg_services_plugins)

@@ -14,13 +14,15 @@ class PianoRollView final : public juce::Component
 {
 public:
     using CommandHandler = std::function<void(project::ProjectCommand)>;
+    using AuditionCallback = std::function<void(std::uint8_t pitch, std::uint8_t velocity, bool isNoteOn)>;
 
-    explicit PianoRollView(CommandHandler handler);
+    explicit PianoRollView(CommandHandler handler, AuditionCallback auditionCb = nullptr);
     ~PianoRollView() override = default;
 
     void setViewModel(const EditorViewModel& model);
     void setActiveClipId(std::optional<project::MidiClipId> clipId);
     [[nodiscard]] std::optional<project::MidiClipId> activeClipId() const noexcept { return m_activeClipId; }
+    void setAuditionCallback(AuditionCallback cb) noexcept { m_auditionCallback = std::move(cb); }
 
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -71,8 +73,11 @@ private:
     void selectAllNotes();
 
     CommandHandler m_handler;
+    AuditionCallback m_auditionCallback;
     EditorViewModel m_model;
     std::optional<project::MidiClipId> m_activeClipId;
+    std::optional<std::uint8_t> m_auditioningPitch;
+    int m_virtualKeyboardOctave {4};
 
     std::vector<project::NoteId> m_selectedNoteIds;
     std::optional<project::NoteId> m_draggedNoteId;
