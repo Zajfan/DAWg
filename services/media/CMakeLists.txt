@@ -1,6 +1,11 @@
 find_package(Threads REQUIRED)
 
-add_library(dawg_services_media STATIC src/AudioMediaService.cpp)
+add_library(dawg_services_media STATIC
+    src/AudioMediaService.cpp
+    src/AudioRecordService.cpp
+    src/AudioResampler.cpp
+    src/DiskStreamPool.cpp
+)
 target_include_directories(dawg_services_media PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(dawg_services_media
     PUBLIC dawg_engine_core dawg_project_model

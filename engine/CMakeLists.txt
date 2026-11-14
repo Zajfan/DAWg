@@ -3,6 +3,7 @@ add_library(dawg_engine_core STATIC
     src/GraphHandoff.cpp
     src/Metronome.cpp
     src/PlaybackRingBuffer.cpp
+    src/RecordRingBuffer.cpp
     src/RenderSnapshotPublisher.cpp
     src/TempoMap.cpp
     src/TransportCommandQueue.cpp

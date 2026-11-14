@@ -76,6 +76,21 @@ MeterReading AudioEngine::meterReading() const noexcept
     return m_meterPublisher.read();
 }
 
+void AudioEngine::setRecordBuffer(RecordRingBuffer* buffer) noexcept
+{
+    m_recordBuffer.store(buffer, std::memory_order_release);
+}
+
+void AudioEngine::setRecording(const bool recording) noexcept
+{
+    m_recording.store(recording, std::memory_order_release);
+}
+
+bool AudioEngine::isRecording() const noexcept
+{
+    return m_recording.load(std::memory_order_acquire);
+}
+
 bool AudioEngine::prepare(const EngineConfig& config) noexcept
 {
     if (! std::isfinite(config.sampleRate) || config.sampleRate <= 0.0
@@ -116,9 +131,26 @@ void AudioEngine::reset() noexcept
     m_meterPublisher.reset();
 }
 
-void AudioEngine::process(const AudioBufferView output, const MidiBufferView,
-                          const TransportSnapshot&) noexcept
+void AudioEngine::process(const AudioBufferView output, const MidiBufferView midi,
+                          const TransportSnapshot& transport) noexcept
 {
+    process({}, output, midi, transport);
+}
+
+void AudioEngine::process(const AudioBufferView input, const AudioBufferView output,
+                          const MidiBufferView, const TransportSnapshot&) noexcept
+{
+    if (m_prepared && m_recording.load(std::memory_order_acquire))
+    {
+        if (auto* recBuf = m_recordBuffer.load(std::memory_order_acquire);
+            recBuf != nullptr && input.channels != nullptr && input.frameCount > 0)
+        {
+            const std::span<const float* const> inPlanes {
+                const_cast<const float* const*>(input.channels), input.channelCount};
+            static_cast<void>(recBuf->write(inPlanes, input.frameCount));
+        }
+    }
+
     const auto snapshot = m_snapshotPublisher.consume();
     if (snapshot.generation >= m_renderSnapshot.generation)
         m_renderSnapshot = snapshot;

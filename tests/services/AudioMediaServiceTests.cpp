@@ -1,5 +1,9 @@
 #include <dawg/media/AudioAssetReader.h>
+#include <dawg/media/AudioAssetWriter.h>
 #include <dawg/media/AudioMediaService.h>
+#include <dawg/media/AudioRecordService.h>
+#include <dawg/media/AudioResampler.h>
+#include <dawg/media/DiskStreamPool.h>
 
 #include <array>
 #include <chrono>
@@ -81,7 +85,10 @@ public:
             return std::unexpected(MediaError {MediaError::Code::invalidPath, "empty path"});
         if (failOpen || path == "missing.wav")
             return std::unexpected(MediaError {openErrorCode, "cannot open asset"});
-        return std::make_unique<FakeAudioAssetReader>(metadata, samples, failReads);
+        auto meta = metadata;
+        if (path == "voice3_24k.wav")
+            meta.sampleRate = 24000;
+        return std::make_unique<FakeAudioAssetReader>(meta, samples, failReads);
     }
 };
 
@@ -196,6 +203,79 @@ void testOpenAndReadFailures()
             "read failure records diagnostic and writes no corrupt frames");
     service.stop();
 }
+
+void testAudioResamplerDiskStreamPoolAndRecordService()
+{
+    using dawg::media::AudioRecordService;
+    using dawg::media::AudioResampler;
+    using dawg::media::DiskStreamPool;
+    using dawg::media::MemoryAudioAssetWriterFactory;
+
+    // 1. Streaming AudioResampler (24kHz -> 48kHz 2x upsampling and 96kHz -> 48kHz 0.5x downsampling)
+    AudioResampler upsampler;
+    require(upsampler.prepare(24000, 48000, 1, 32), "prepare 24kHz -> 48kHz upsampler");
+    constexpr std::array<float, 8> srcRamp {0.0f, 0.2f, 0.4f, 0.6f, 0.8f, 1.0f, 1.0f, 1.0f};
+    const std::array<const float*, 1> srcPlanes {srcRamp.data()};
+    std::array<float, 16> dstUpsampled {};
+    std::array<float*, 1> dstPlanes {dstUpsampled.data()};
+    std::size_t consumed = 0;
+    const auto produced = upsampler.process(srcPlanes, srcRamp.size(), dstPlanes, dstUpsampled.size(), consumed);
+    require(consumed == srcRamp.size() && produced >= 14,
+            "24kHz -> 48kHz resampler consumes input and produces ~2x output frames");
+
+    // 2. Multiplexed DiskStreamPool streaming 3 voices concurrently (including a resampled voice)
+    FakeAudioAssetReaderFactory factory;
+    DiskStreamPool pool {factory, 2};
+
+    const AudioAsset asset1 {1, "voice1.wav", AudioAssetPathKind::projectRelative, 48000, 1, 8};
+    const AudioAsset asset2 {2, "voice2.wav", AudioAssetPathKind::projectRelative, 48000, 1, 8};
+    const AudioAsset asset3 {3, "voice3_24k.wav", AudioAssetPathKind::projectRelative, 24000, 1, 8};
+
+    const auto v1 = pool.addVoice(asset1, {1, 1, 0, 0, 8}, 16, 48000);
+    const auto v2 = pool.addVoice(asset2, {2, 2, 0, 2, 6}, 16, 48000);
+    const auto v3 = pool.addVoice(asset3, {3, 3, 0, 0, 8}, 32, 48000);
+    require(v1.has_value() && v2.has_value() && v3.has_value(),
+            "DiskStreamPool registers three concurrent voice streams");
+
+    pool.start();
+    require(waitFor([&] {
+        auto* b1 = pool.buffer(*v1);
+        auto* b2 = pool.buffer(*v2);
+        auto* b3 = pool.buffer(*v3);
+        return b1 != nullptr && b2 != nullptr && b3 != nullptr
+            && b1->availableFrames() == 8
+            && b2->availableFrames() == 6
+            && b3->availableFrames() >= 14;
+    }), "DiskStreamPool workers fill all three voice ring buffers including resampled voice");
+    pool.stop();
+
+    // 3. AudioRecordService background writer draining RecordRingBuffer
+    MemoryAudioAssetWriterFactory writerFactory;
+    AudioRecordService recordService {writerFactory};
+    require(recordService.prepare("recorded_take.wav", 48000, 2, 32).has_value(),
+            "AudioRecordService prepares recording session");
+    recordService.start();
+
+    constexpr std::array<float, 4> recL {0.5f, 0.25f, -0.25f, -0.5f};
+    constexpr std::array<float, 4> recR {-0.5f, -0.25f, 0.25f, 0.5f};
+    const std::array<const float*, 2> recPlanes {recL.data(), recR.data()};
+    require(recordService.buffer().write(recPlanes, 4) == 4,
+            "audio thread writes 4 stereo frames to record service ring");
+
+    require(waitFor([&] { return recordService.recordedFrames() == 4; }),
+            "AudioRecordService worker drains and writes all 4 frames");
+    const auto finalizedAsset = recordService.stopAndFinalize(7, 16);
+    require(finalizedAsset.has_value(), "stopAndFinalize returns finalized asset/clip pair");
+    require(finalizedAsset->asset.sampleRate == 48000
+                && finalizedAsset->asset.channelCount == 2
+                && finalizedAsset->asset.frameCount == 4,
+            "finalized recorded AudioAsset has exact metadata");
+    require(finalizedAsset->clip.startSample == 16 && finalizedAsset->clip.lengthSamples == 4,
+            "finalized recorded AudioClip is placed at timeline start sample");
+    require(writerFactory.finalized && writerFactory.channels.size() == 2
+                && writerFactory.channels[0].size() == 4,
+            "writer factory received and finalized all recorded stereo samples");
+}
 } // namespace
 
 int main()
@@ -203,5 +283,6 @@ int main()
     testInspectPrepareAndWorkerFill();
     testSourceOffsetBoundedCapacityAndSeekJump();
     testOpenAndReadFailures();
-    std::puts("PASS: 3 media service behavior tests");
+    testAudioResamplerDiskStreamPoolAndRecordService();
+    std::puts("PASS: 4 media service, resampler, disk pool, and recording tests");
 }

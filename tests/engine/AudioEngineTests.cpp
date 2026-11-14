@@ -7,6 +7,7 @@
 #include <dawg/engine/Metronome.h>
 #include <dawg/engine/PlaybackDescription.h>
 #include <dawg/engine/PlaybackRingBuffer.h>
+#include <dawg/engine/RecordRingBuffer.h>
 #include <dawg/engine/SubBlockSplitter.h>
 #include <dawg/engine/TempoMap.h>
 
@@ -761,6 +762,50 @@ void testTempoMapSubBlockLoopWrappingAndMetronome()
         clickEnergy += std::fabs(s);
     require(clickEnergy > 0.01f, "Metronome synthesizes audible downbeat click at sample 0");
 }
+
+void testRecordRingBufferAndRealtimeInputCapture()
+{
+    using dawg::engine::RecordRingBuffer;
+
+    RecordRingBuffer recordRing;
+    require(recordRing.prepare(2, 8), "stereo RecordRingBuffer prepares");
+
+    AudioEngine engine;
+    require(engine.prepare({48000.0, 4, 2}), "engine prepares for input capture");
+    engine.setRecordBuffer(&recordRing);
+    engine.setRecording(true);
+    require(engine.isRecording(), "engine reports recording armed/active");
+
+    constexpr std::array<float, 4> inLeft {0.11f, 0.22f, 0.33f, 0.44f};
+    constexpr std::array<float, 4> inRight {-0.11f, -0.22f, -0.33f, -0.44f};
+    std::array<float, 4> inLeftMut = inLeft;
+    std::array<float, 4> inRightMut = inRight;
+    std::array<float*, 2> inChannels {inLeftMut.data(), inRightMut.data()};
+
+    std::array<float, 4> outLeft {};
+    std::array<float, 4> outRight {};
+    std::array<float*, 2> outChannels {outLeft.data(), outRight.data()};
+
+    {
+        ScopedAllocationGuard guard;
+        engine.process(
+            {inChannels.data(), inChannels.size(), inLeftMut.size()},
+            {outChannels.data(), outChannels.size(), outLeft.size()},
+            {},
+            {});
+    }
+    require(g_allocationCount.load(std::memory_order_acquire) == 0,
+            "realtime input capture performs zero heap allocations");
+    require(recordRing.availableFrames() == 4 && recordRing.droppedFrames() == 0,
+            "RecordRingBuffer captures all 4 stereo input frames");
+
+    std::array<float, 4> capturedL {};
+    std::array<float, 4> capturedR {};
+    std::array<float*, 2> capturedPlanes {capturedL.data(), capturedR.data()};
+    require(recordRing.read(capturedPlanes, 4) == 4, "worker drains 4 captured frames");
+    require(capturedL == inLeft && capturedR == inRight,
+            "captured stereo frames match input signal bit-for-bit");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -860,4 +905,5 @@ int main()
     testGraphHandoffAndZeroAllocationCompiledGraphAdoption();
     testMultiTrackChannelStripFadeRampsSubBlockSplitterAndMetering();
     testTempoMapSubBlockLoopWrappingAndMetronome();
+    testRecordRingBufferAndRealtimeInputCapture();
 }

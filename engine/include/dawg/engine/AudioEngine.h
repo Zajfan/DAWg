@@ -8,6 +8,7 @@
 #include <dawg/engine/GraphHandoff.h>
 #include <dawg/engine/MeterTelemetry.h>
 #include <dawg/engine/MidiEvent.h>
+#include <dawg/engine/RecordRingBuffer.h>
 #include <dawg/engine/RenderSnapshotPublisher.h>
 #include <dawg/engine/TransportSnapshot.h>
 #include <dawg/engine/TransportState.h>
@@ -58,12 +59,18 @@ public:
     [[nodiscard]] std::uint64_t underrunCount() const noexcept;
     [[nodiscard]] MeterReading meterReading() const noexcept;
 
+    void setRecordBuffer(RecordRingBuffer* buffer) noexcept;
+    void setRecording(bool recording) noexcept;
+    [[nodiscard]] bool isRecording() const noexcept;
+
     // Adopts the latest render snapshot, then applies at most 64 queued commands
     // in FIFO order before rendering.
     // Bounded by queue capacity and supplied view; no allocation, I/O, blocking.
     // The initial renderer clears output even when unprepared, skips null
     // channels, and leaves the supplied MIDI and TransportSnapshot untouched.
     void process(AudioBufferView output, MidiBufferView midi,
+                 const TransportSnapshot& transport) noexcept;
+    void process(AudioBufferView input, AudioBufferView output, MidiBufferView midi,
                  const TransportSnapshot& transport) noexcept;
     [[nodiscard]] bool isPrepared() const noexcept;
 
@@ -77,6 +84,8 @@ private:
     std::vector<float> m_scratchRight;
     RenderSnapshot m_renderSnapshot {};
     TransportState m_transportState {};
+    std::atomic<RecordRingBuffer*> m_recordBuffer {nullptr};
+    std::atomic<bool> m_recording {false};
     bool m_prepared {};
 };
 
