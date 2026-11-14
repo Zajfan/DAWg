@@ -183,6 +183,32 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
                 ? project::TrackKind::instrument
                 : project::TrackKind::audio;
         }
+        if (track.contains("inserts"))
+        {
+            const auto& inserts = track.at("inserts");
+            if (! inserts.is_array())
+                return failure(Code::invalidFormat, "Expected array for track inserts");
+            for (const auto& ins : inserts)
+            {
+                project::DspNodeDescriptor desc;
+                desc.slotIndex = ins.at("slotIndex").get<std::uint32_t>();
+                const auto typeStr = ins.at("type").get<std::string>();
+                if (typeStr == "parametricEq") desc.type = project::DspNodeType::parametricEq;
+                else if (typeStr == "dynamicsCompressor") desc.type = project::DspNodeType::dynamicsCompressor;
+                else if (typeStr == "brickwallLimiter") desc.type = project::DspNodeType::brickwallLimiter;
+                else if (typeStr == "tnhcSynth") desc.type = project::DspNodeType::tnhcSynth;
+                else if (typeStr == "clapPlugin") desc.type = project::DspNodeType::clapPlugin;
+                desc.bypassed = ins.at("bypassed").get<bool>();
+                desc.name = ins.at("name").get<std::string>();
+                if (ins.contains("pluginId")) desc.pluginId = ins.at("pluginId").get<std::string>();
+                if (ins.contains("parameters") && ins.at("parameters").is_array())
+                {
+                    for (const auto& p : ins.at("parameters"))
+                        desc.parameters.push_back(p.get<float>());
+                }
+                parsedTrack.inserts.push_back(std::move(desc));
+            }
+        }
         snapshot.tracks.push_back(std::move(parsedTrack));
     }
 
@@ -271,6 +297,24 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
                     return failure(Code::invalidFormat, "Expected uint32 clip fadeOutSamples");
                 parsedClip.fadeOutSamples = static_cast<std::uint32_t>(fadeOut.get<std::uint64_t>());
             }
+            if (clip.contains("warpingEnabled"))
+            {
+                parsedClip.warpingEnabled = clip.at("warpingEnabled").get<bool>();
+            }
+            if (clip.contains("warpMarkers"))
+            {
+                const auto& markers = clip.at("warpMarkers");
+                if (! markers.is_array())
+                    return failure(Code::invalidFormat, "Expected array for clip warpMarkers");
+                for (const auto& m : markers)
+                {
+                    parsedClip.warpMarkers.push_back(project::WarpMarker {
+                        .id = m.at("id").get<std::uint32_t>(),
+                        .sourceSample = m.at("sourceSample").get<std::uint64_t>(),
+                        .targetSample = m.at("targetSample").get<std::uint64_t>()
+                    });
+                }
+            }
             snapshot.clips.push_back(parsedClip);
         }
 
@@ -345,6 +389,43 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
                 snapshot.midiClips.push_back(std::move(parsedMidiClip));
             }
         }
+
+        if (document.contains("automationLanes"))
+        {
+            const auto& aLanes = document.at("automationLanes");
+            if (! aLanes.is_array())
+                return failure(Code::invalidFormat, "Expected array for automationLanes");
+            for (const auto& al : aLanes)
+            {
+                project::AutomationLane lane;
+                lane.id = al.at("id").get<project::AutomationLaneId>();
+                if (al.contains("target"))
+                {
+                    const auto& tgt = al.at("target");
+                    const auto kindStr = tgt.at("kind").get<std::string>();
+                    if (kindStr == "trackVolume") lane.target.kind = project::AutomationTargetKind::trackVolume;
+                    else if (kindStr == "trackPan") lane.target.kind = project::AutomationTargetKind::trackPan;
+                    else if (kindStr == "trackSend") lane.target.kind = project::AutomationTargetKind::trackSend;
+                    else if (kindStr == "dspParameter") lane.target.kind = project::AutomationTargetKind::dspParameter;
+                    lane.target.trackId = tgt.at("trackId").get<project::TrackId>();
+                    lane.target.slotIndex = tgt.at("slotIndex").get<std::uint32_t>();
+                    lane.target.parameterIndex = tgt.at("parameterIndex").get<std::uint32_t>();
+                }
+                if (al.contains("points") && al.at("points").is_array())
+                {
+                    for (const auto& pt : al.at("points"))
+                    {
+                        lane.points.push_back(project::AutomationPoint {
+                            .id = pt.at("id").get<project::AutomationPointId>(),
+                            .samplePosition = pt.at("samplePosition").get<std::uint64_t>(),
+                            .value = pt.at("value").get<float>(),
+                            .curveTension = pt.contains("curveTension") ? pt.at("curveTension").get<float>() : 0.0f
+                        });
+                    }
+                }
+                snapshot.automationLanes.push_back(std::move(lane));
+            }
+        }
     }
 
     // Keep model invariants (including duplicate IDs and clip ranges) owned by the project layer.
@@ -378,6 +459,31 @@ std::expected<void, ProjectFileError> saveProject(
                 trackJson["pan"] = track.pan;
                 trackJson["phaseInvert"] = track.phaseInvert;
                 trackJson["kind"] = (track.kind == project::TrackKind::instrument) ? "instrument" : "audio";
+                if (! track.inserts.empty())
+                {
+                    Json inserts = Json::array();
+                    for (const auto& ins : track.inserts)
+                    {
+                        std::string typeStr = "parametricEq";
+                        switch (ins.type)
+                        {
+                        case project::DspNodeType::parametricEq: typeStr = "parametricEq"; break;
+                        case project::DspNodeType::dynamicsCompressor: typeStr = "dynamicsCompressor"; break;
+                        case project::DspNodeType::brickwallLimiter: typeStr = "brickwallLimiter"; break;
+                        case project::DspNodeType::tnhcSynth: typeStr = "tnhcSynth"; break;
+                        case project::DspNodeType::clapPlugin: typeStr = "clapPlugin"; break;
+                        }
+                        inserts.push_back({
+                            {"slotIndex", ins.slotIndex},
+                            {"type", typeStr},
+                            {"bypassed", ins.bypassed},
+                            {"name", ins.name},
+                            {"pluginId", ins.pluginId},
+                            {"parameters", ins.parameters}
+                        });
+                    }
+                    trackJson["inserts"] = std::move(inserts);
+                }
             }
             tracks.push_back(std::move(trackJson));
         }
@@ -401,6 +507,20 @@ std::expected<void, ProjectFileError> saveProject(
                 clipJson["gainLinear"] = clip.gainLinear;
                 clipJson["fadeInSamples"] = clip.fadeInSamples;
                 clipJson["fadeOutSamples"] = clip.fadeOutSamples;
+                clipJson["warpingEnabled"] = clip.warpingEnabled;
+                if (! clip.warpMarkers.empty())
+                {
+                    Json markers = Json::array();
+                    for (const auto& m : clip.warpMarkers)
+                    {
+                        markers.push_back({
+                            {"id", m.id},
+                            {"sourceSample", m.sourceSample},
+                            {"targetSample", m.targetSample}
+                        });
+                    }
+                    clipJson["warpMarkers"] = std::move(markers);
+                }
             }
             clips.push_back(std::move(clipJson));
         }
@@ -446,6 +566,42 @@ std::expected<void, ProjectFileError> saveProject(
                     mClips.push_back(std::move(mcJson));
                 }
                 document["midiClips"] = std::move(mClips);
+            }
+            if (! snapshot.automationLanes.empty())
+            {
+                Json aLanes = Json::array();
+                for (const auto& al : snapshot.automationLanes)
+                {
+                    std::string kindStr = "trackVolume";
+                    switch (al.target.kind)
+                    {
+                    case project::AutomationTargetKind::trackVolume: kindStr = "trackVolume"; break;
+                    case project::AutomationTargetKind::trackPan: kindStr = "trackPan"; break;
+                    case project::AutomationTargetKind::trackSend: kindStr = "trackSend"; break;
+                    case project::AutomationTargetKind::dspParameter: kindStr = "dspParameter"; break;
+                    }
+                    Json points = Json::array();
+                    for (const auto& pt : al.points)
+                    {
+                        points.push_back({
+                            {"id", pt.id},
+                            {"samplePosition", pt.samplePosition},
+                            {"value", pt.value},
+                            {"curveTension", pt.curveTension}
+                        });
+                    }
+                    aLanes.push_back({
+                        {"id", al.id},
+                        {"target", {
+                            {"kind", kindStr},
+                            {"trackId", al.target.trackId},
+                            {"slotIndex", al.target.slotIndex},
+                            {"parameterIndex", al.target.parameterIndex}
+                        }},
+                        {"points", std::move(points)}
+                    });
+                }
+                document["automationLanes"] = std::move(aLanes);
             }
         }
         // Serialize completely before creating a temporary file (e.g. invalid UTF-8).

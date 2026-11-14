@@ -456,4 +456,197 @@ void TnhcSynthNode::process(ProcessContext& context) noexcept
     }
 }
 
+std::vector<SynthPreset> TnhcSynthNode::factoryPresets()
+{
+    return {
+        SynthPreset {
+            .name = "303 Acid Bass",
+            .category = "Bass",
+            .osc1Wave = SynthWaveform::saw,
+            .osc2Wave = SynthWaveform::saw,
+            .oscMix = 0.0f,
+            .osc2DetuneCents = 0.0f,
+            .pulseWidth = 0.5f,
+            .filterMode = SynthFilterMode::lowpass,
+            .filterCutoff = 450.0f,
+            .filterResonance = 14.0f,
+            .filterEnvAmount = 0.85f,
+            .ampParams = AdsrParams {0.002f, 0.25f, 0.0f, 0.05f},
+            .filterParams = AdsrParams {0.002f, 0.2f, 0.0f, 0.05f},
+            .lfoRate = 1.0f,
+            .lfoPitchDepth = 0.0f,
+            .lfoFilterDepth = 0.0f
+        },
+        SynthPreset {
+            .name = "Sub Sonic",
+            .category = "Bass",
+            .osc1Wave = SynthWaveform::sine,
+            .osc2Wave = SynthWaveform::triangle,
+            .oscMix = 0.2f,
+            .osc2DetuneCents = 0.0f,
+            .pulseWidth = 0.5f,
+            .filterMode = SynthFilterMode::lowpass,
+            .filterCutoff = 220.0f,
+            .filterResonance = 1.2f,
+            .filterEnvAmount = 0.0f,
+            .ampParams = AdsrParams {0.01f, 0.4f, 0.9f, 0.15f},
+            .filterParams = AdsrParams {0.01f, 0.2f, 0.8f, 0.2f},
+            .lfoRate = 2.0f,
+            .lfoPitchDepth = 0.0f,
+            .lfoFilterDepth = 0.0f
+        },
+        SynthPreset {
+            .name = "Classic Saw Lead",
+            .category = "Lead",
+            .osc1Wave = SynthWaveform::saw,
+            .osc2Wave = SynthWaveform::saw,
+            .oscMix = 0.5f,
+            .osc2DetuneCents = 12.0f,
+            .pulseWidth = 0.5f,
+            .filterMode = SynthFilterMode::lowpass,
+            .filterCutoff = 3500.0f,
+            .filterResonance = 3.0f,
+            .filterEnvAmount = 0.35f,
+            .ampParams = AdsrParams {0.005f, 0.1f, 0.8f, 0.25f},
+            .filterParams = AdsrParams {0.01f, 0.2f, 0.5f, 0.3f},
+            .lfoRate = 5.0f,
+            .lfoPitchDepth = 0.2f,
+            .lfoFilterDepth = 0.4f
+        },
+        SynthPreset {
+            .name = "Sync PWM Lead",
+            .category = "Lead",
+            .osc1Wave = SynthWaveform::pulse,
+            .osc2Wave = SynthWaveform::pulse,
+            .oscMix = 0.5f,
+            .osc2DetuneCents = 9.0f,
+            .pulseWidth = 0.3f,
+            .filterMode = SynthFilterMode::lowpass,
+            .filterCutoff = 4800.0f,
+            .filterResonance = 4.0f,
+            .filterEnvAmount = 0.4f,
+            .ampParams = AdsrParams {0.01f, 0.2f, 0.7f, 0.2f},
+            .filterParams = AdsrParams {0.02f, 0.3f, 0.4f, 0.3f},
+            .lfoRate = 3.0f,
+            .lfoPitchDepth = 0.1f,
+            .lfoFilterDepth = 0.6f
+        },
+        SynthPreset {
+            .name = "Warm Analog Pad",
+            .category = "Pad",
+            .osc1Wave = SynthWaveform::saw,
+            .osc2Wave = SynthWaveform::pulse,
+            .oscMix = 0.5f,
+            .osc2DetuneCents = 14.0f,
+            .pulseWidth = 0.5f,
+            .filterMode = SynthFilterMode::lowpass,
+            .filterCutoff = 1200.0f,
+            .filterResonance = 2.0f,
+            .filterEnvAmount = 0.4f,
+            .ampParams = AdsrParams {0.6f, 0.8f, 0.9f, 1.2f},
+            .filterParams = AdsrParams {0.8f, 1.0f, 0.6f, 1.5f},
+            .lfoRate = 0.5f,
+            .lfoPitchDepth = 0.05f,
+            .lfoFilterDepth = 0.8f
+        },
+        SynthPreset {
+            .name = "Cosmic Shimmer",
+            .category = "Pad",
+            .osc1Wave = SynthWaveform::triangle,
+            .osc2Wave = SynthWaveform::sine,
+            .oscMix = 0.6f,
+            .osc2DetuneCents = 18.0f,
+            .pulseWidth = 0.5f,
+            .filterMode = SynthFilterMode::bandpass,
+            .filterCutoff = 2200.0f,
+            .filterResonance = 6.0f,
+            .filterEnvAmount = 0.2f,
+            .ampParams = AdsrParams {0.8f, 1.2f, 0.8f, 1.8f},
+            .filterParams = AdsrParams {1.0f, 1.2f, 0.7f, 2.0f},
+            .lfoRate = 0.2f,
+            .lfoPitchDepth = 0.0f,
+            .lfoFilterDepth = 1.5f
+        },
+        SynthPreset {
+            .name = "Snappy Pluck",
+            .category = "Pluck",
+            .osc1Wave = SynthWaveform::pulse,
+            .osc2Wave = SynthWaveform::saw,
+            .oscMix = 0.6f,
+            .osc2DetuneCents = 10.0f,
+            .pulseWidth = 0.25f,
+            .filterMode = SynthFilterMode::lowpass,
+            .filterCutoff = 800.0f,
+            .filterResonance = 7.0f,
+            .filterEnvAmount = 0.9f,
+            .ampParams = AdsrParams {0.001f, 0.12f, 0.0f, 0.1f},
+            .filterParams = AdsrParams {0.001f, 0.08f, 0.0f, 0.08f},
+            .lfoRate = 2.0f,
+            .lfoPitchDepth = 0.0f,
+            .lfoFilterDepth = 0.0f
+        },
+        SynthPreset {
+            .name = "Noise Riser FX",
+            .category = "FX",
+            .osc1Wave = SynthWaveform::noise,
+            .osc2Wave = SynthWaveform::saw,
+            .oscMix = 0.85f,
+            .osc2DetuneCents = 0.0f,
+            .pulseWidth = 0.5f,
+            .filterMode = SynthFilterMode::bandpass,
+            .filterCutoff = 600.0f,
+            .filterResonance = 12.0f,
+            .filterEnvAmount = 0.95f,
+            .ampParams = AdsrParams {1.5f, 0.5f, 1.0f, 0.8f},
+            .filterParams = AdsrParams {2.0f, 0.5f, 1.0f, 0.8f},
+            .lfoRate = 8.0f,
+            .lfoPitchDepth = 0.0f,
+            .lfoFilterDepth = 2.0f
+        }
+    };
+}
+
+void TnhcSynthNode::loadPreset(const SynthPreset& preset) noexcept
+{
+    m_osc1Wave = preset.osc1Wave;
+    m_osc2Wave = preset.osc2Wave;
+    m_oscMix = std::clamp(preset.oscMix, 0.0f, 1.0f);
+    m_osc2DetuneCents = preset.osc2DetuneCents;
+    m_pulseWidth = std::clamp(preset.pulseWidth, 0.05f, 0.95f);
+
+    m_filterMode = preset.filterMode;
+    m_filterCutoff = std::clamp(preset.filterCutoff, 20.0f, 20000.0f);
+    m_filterResonance = std::clamp(preset.filterResonance, 0.5f, 20.0f);
+    m_filterEnvAmount = std::clamp(preset.filterEnvAmount, -1.0f, 1.0f);
+
+    m_ampParams = preset.ampParams;
+    m_filterParams = preset.filterParams;
+
+    m_lfoRate = std::clamp(preset.lfoRate, 0.05f, 40.0f);
+    m_lfoPitchDepth = std::clamp(preset.lfoPitchDepth, 0.0f, 12.0f);
+    m_lfoFilterDepth = std::clamp(preset.lfoFilterDepth, 0.0f, 5.0f);
+}
+
+SynthPreset TnhcSynthNode::currentPreset(std::string name) const noexcept
+{
+    return SynthPreset {
+        .name = std::move(name),
+        .category = "User",
+        .osc1Wave = m_osc1Wave,
+        .osc2Wave = m_osc2Wave,
+        .oscMix = m_oscMix,
+        .osc2DetuneCents = m_osc2DetuneCents,
+        .pulseWidth = m_pulseWidth,
+        .filterMode = m_filterMode,
+        .filterCutoff = m_filterCutoff,
+        .filterResonance = m_filterResonance,
+        .filterEnvAmount = m_filterEnvAmount,
+        .ampParams = m_ampParams,
+        .filterParams = m_filterParams,
+        .lfoRate = m_lfoRate,
+        .lfoPitchDepth = m_lfoPitchDepth,
+        .lfoFilterDepth = m_lfoFilterDepth
+    };
+}
+
 } // namespace dawg::engine

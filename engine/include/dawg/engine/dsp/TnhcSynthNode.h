@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace dawg::engine {
 
@@ -32,6 +34,30 @@ struct AdsrParams
     float decaySec {0.1f};
     float sustainLevel {0.7f};
     float releaseSec {0.2f};
+
+    friend bool operator==(const AdsrParams&, const AdsrParams&) = default;
+};
+
+struct SynthPreset
+{
+    std::string name {"Default Init"};
+    std::string category {"Init"};
+    SynthWaveform osc1Wave {SynthWaveform::saw};
+    SynthWaveform osc2Wave {SynthWaveform::pulse};
+    float oscMix {0.5f};
+    float osc2DetuneCents {7.0f};
+    float pulseWidth {0.5f};
+    SynthFilterMode filterMode {SynthFilterMode::lowpass};
+    float filterCutoff {2000.0f};
+    float filterResonance {2.0f};
+    float filterEnvAmount {0.5f};
+    AdsrParams ampParams {0.005f, 0.1f, 0.7f, 0.2f};
+    AdsrParams filterParams {0.01f, 0.15f, 0.3f, 0.3f};
+    float lfoRate {2.0f};
+    float lfoPitchDepth {0.0f};
+    float lfoFilterDepth {0.0f};
+
+    friend bool operator==(const SynthPreset&, const SynthPreset&) = default;
 };
 
 class TnhcSynthNode final : public ProcessorNode
@@ -85,6 +111,11 @@ public:
     void setLfoRate(float hz) noexcept { m_lfoRate = std::clamp(hz, 0.05f, 40.0f); }
     void setLfoPitchDepth(float semitones) noexcept { m_lfoPitchDepth = std::clamp(semitones, 0.0f, 12.0f); }
     void setLfoFilterDepth(float octaves) noexcept { m_lfoFilterDepth = std::clamp(octaves, 0.0f, 5.0f); }
+
+    // Preset management
+    [[nodiscard]] static std::vector<SynthPreset> factoryPresets();
+    void loadPreset(const SynthPreset& preset) noexcept;
+    [[nodiscard]] SynthPreset currentPreset(std::string name = "Custom") const noexcept;
 
 private:
     enum class EnvStage : std::uint8_t

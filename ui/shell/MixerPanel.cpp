@@ -34,6 +34,8 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
     addAndMakeVisible(m_armButton);
     addAndMakeVisible(m_eqButton);
     addAndMakeVisible(m_compButton);
+    addAndMakeVisible(m_synthButton);
+    addAndMakeVisible(m_limiterButton);
 
     m_panKnob.onValueChange = [this] {
         if (! m_updatingFromModel)
@@ -87,12 +89,24 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
             m_compButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(220, 140, 50));
     };
 
+    m_synthButton.onClick = [this] {
+        if (m_synthButton.getToggleState())
+            m_synthButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(180, 80, 230));
+    };
+
+    m_limiterButton.onClick = [this] {
+        if (m_limiterButton.getToggleState())
+            m_limiterButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(220, 60, 80));
+    };
+
     m_muteButton.setClickingTogglesState(true);
     m_soloButton.setClickingTogglesState(true);
     m_phaseButton.setClickingTogglesState(true);
     m_armButton.setClickingTogglesState(true);
     m_eqButton.setClickingTogglesState(true);
     m_compButton.setClickingTogglesState(true);
+    m_synthButton.setClickingTogglesState(true);
+    m_limiterButton.setClickingTogglesState(true);
 }
 
 void ChannelStripComponent::sendGainPan()
@@ -146,10 +160,16 @@ void ChannelStripComponent::resized()
     m_nameLabel.setBounds(area.removeFromTop(20));
     area.removeFromTop(2);
 
-    // DSP Inserts row: EQ, COMP
-    auto dspRow = area.removeFromTop(18);
-    m_eqButton.setBounds(dspRow.removeFromLeft(dspRow.getWidth() / 2).reduced(1));
-    m_compButton.setBounds(dspRow.reduced(1));
+    // DSP Inserts row 1: EQ, COMP
+    auto dspRow1 = area.removeFromTop(18);
+    m_eqButton.setBounds(dspRow1.removeFromLeft(dspRow1.getWidth() / 2).reduced(1));
+    m_compButton.setBounds(dspRow1.reduced(1));
+    area.removeFromTop(2);
+
+    // DSP Inserts row 2: SYNTH, LIMIT
+    auto dspRow2 = area.removeFromTop(18);
+    m_synthButton.setBounds(dspRow2.removeFromLeft(dspRow2.getWidth() / 2).reduced(1));
+    m_limiterButton.setBounds(dspRow2.reduced(1));
     area.removeFromTop(2);
 
     m_panKnob.setBounds(area.removeFromTop(26).reduced(6, 0));

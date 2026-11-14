@@ -42,6 +42,55 @@ void Application::initialise(const juce::String&)
     m_engine->setRecordBuffer(&m_recordService->buffer());
     m_windowManager = std::make_unique<platform::juce::window::WindowManager>();
     restartAudio();
+
+    m_audioBridge->setMidiControlCallback([this](const engine::ProcessedMidiControl& ctrl) {
+        if (ctrl.mcuEvent.type == engine::McuType::transport)
+        {
+            switch (ctrl.mcuEvent.transport)
+            {
+            case engine::McuTransport::play:
+                if (ctrl.mcuEvent.buttonState) playTransport();
+                break;
+            case engine::McuTransport::stop:
+                if (ctrl.mcuEvent.buttonState) stopTransport();
+                break;
+            case engine::McuTransport::record:
+                if (ctrl.mcuEvent.buttonState) toggleTransportRecord();
+                break;
+            case engine::McuTransport::rewind:
+                if (ctrl.mcuEvent.buttonState) returnTransportToStart();
+                break;
+            case engine::McuTransport::fastForward:
+                break;
+            case engine::McuTransport::cycleLoop:
+                if (ctrl.mcuEvent.buttonState && m_controller)
+                {
+                    const auto snap = m_controller->snapshot();
+                    dispatchProjectCommand(project::SetProjectLoop {
+                        ! snap.loop.enabled, snap.loop.startSample, snap.loop.endSample
+                    });
+                }
+                break;
+            case engine::McuTransport::none:
+                break;
+            }
+        }
+        else if (ctrl.mcuEvent.type == engine::McuType::fader)
+        {
+            if (m_controller && ctrl.mcuEvent.trackIndex < 8)
+            {
+                const auto snap = m_controller->snapshot();
+                if (ctrl.mcuEvent.trackIndex < snap.tracks.size())
+                {
+                    const auto& trk = snap.tracks[ctrl.mcuEvent.trackIndex];
+                    dispatchProjectCommand(project::SetTrackGainPan {
+                        trk.id, ctrl.mcuEvent.value * 2.0f, trk.pan, trk.phaseInvert
+                    });
+                }
+            }
+        }
+    });
+
     static_cast<void>(m_state->flushRenderSnapshot());
 
     ui::MainEditorView::TransportCallbacks transportCallbacks {

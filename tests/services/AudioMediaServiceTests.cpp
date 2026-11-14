@@ -3,6 +3,7 @@
 #include <dawg/media/AudioMediaService.h>
 #include <dawg/media/AudioRecordService.h>
 #include <dawg/media/AudioResampler.h>
+#include <dawg/media/AudioWarpService.h>
 #include <dawg/media/DiskStreamPool.h>
 #include <dawg/media/OfflineRenderService.h>
 #include <dawg/media/TransientDetector.h>
@@ -529,6 +530,37 @@ void testTransientDetectionOnPercussiveBursts()
     require(foundBurst1, "detected burst 1 near sample 4800");
     require(foundBurst2, "detected burst 2 near sample 24000");
 }
+
+void testAudioWarpServiceBeatMatching()
+{
+    // Generate synthetic 120 BPM audio with beat transients at 0, 24000, 48000, 72000
+    constexpr std::size_t numSamples = 96000;
+    std::vector<float> audio(numSamples, 0.0f);
+    for (std::size_t b = 0; b < 4; ++b)
+    {
+        const std::size_t offset = b * 24000;
+        for (std::size_t i = 0; i < 256; ++i)
+            audio[offset + i] = (i % 2 == 0 ? 0.9f : -0.9f) * (1.0f - static_cast<float>(i) / 256.0f);
+    }
+
+    // Auto-detect warp markers at 120 BPM
+    const auto markers = AudioWarpService::autoDetectBeatWarpMarkers(audio, 48000.0, 120.0, 1.2f);
+    require(! markers.empty(), "autoDetectBeatWarpMarkers finds markers");
+    require(markers[0].sourceSample == 0 && markers[0].targetSample == 0, "first marker starts at zero");
+
+    // Warping render with modified target positions (e.g. accelerating second half)
+    std::vector<WarpMarker> customMarkers = {
+        {.id = 1, .sourceSample = 0, .targetSample = 0},
+        {.id = 2, .sourceSample = 48000, .targetSample = 48000},
+        {.id = 3, .sourceSample = 96000, .targetSample = 72000} // Compress second half to 0.5x
+    };
+
+    std::array<std::span<const float>, 1> inChans {audio};
+    const auto warped = AudioWarpService::renderWarpedAudio(inChans, customMarkers, numSamples);
+    require(warped.size() == 1, "warped audio has 1 channel");
+    require(warped[0].size() > 0, "warped audio contains samples");
+    require(warped[0].size() < numSamples, "compressing second half reduces total sample length");
+}
 } // namespace
 
 int main()
@@ -540,5 +572,6 @@ int main()
     testWaveformCache();
     testOfflineRenderServiceMasterBounceStemsAndDither();
     testTransientDetectionOnPercussiveBursts();
-    std::puts("PASS: 7 media service, resampler, disk pool, record, waveform cache, offline render, and transient detection tests");
+    testAudioWarpServiceBeatMatching();
+    std::puts("PASS: 8 media service, resampler, disk pool, record, waveform cache, offline render, transient detection, and warp tests");
 }

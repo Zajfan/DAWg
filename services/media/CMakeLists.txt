@@ -4,6 +4,7 @@ add_library(dawg_services_media STATIC
     src/AudioMediaService.cpp
     src/AudioRecordService.cpp
     src/AudioResampler.cpp
+    src/AudioWarpService.cpp
     src/DiskStreamPool.cpp
     src/OfflineRenderService.cpp
     src/TransientDetector.cpp

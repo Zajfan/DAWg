@@ -1242,6 +1242,20 @@ void testTnhcSynthNodePolyphonyAndMidi()
         peakAfter = std::max(peakAfter, std::abs(leftBuf[f]));
     }
     require(peakAfter > 0.01f, "audio after note-on frame offset contains synthesized waveform");
+
+    // Factory presets verification
+    const auto presets = TnhcSynthNode::factoryPresets();
+    require(presets.size() == 8, "factory preset library contains exactly 8 studio presets");
+    require(presets[0].name == "303 Acid Bass" && presets[0].category == "Bass", "preset 0 is 303 Acid Bass");
+    require(presets[5].name == "Cosmic Shimmer" && presets[5].category == "Pad", "preset 5 is Cosmic Shimmer");
+
+    synth.loadPreset(presets[0]);
+    const auto p0 = synth.currentPreset("Active 303");
+    require(p0.filterCutoff == 450.0f && p0.filterResonance == 14.0f, "loaded preset parameters apply correctly");
+
+    synth.loadPreset(presets[5]);
+    const auto p5 = synth.currentPreset("Active Shimmer");
+    require(p5.filterMode == SynthFilterMode::bandpass && p5.filterCutoff == 2200.0f, "preset filter mode applies correctly");
 }
 
 static clap_plugin_latency g_mockLatency {

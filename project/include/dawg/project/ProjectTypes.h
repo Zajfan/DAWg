@@ -56,6 +56,15 @@ struct AutomationLane
 
 enum class AudioAssetPathKind : std::uint8_t { projectRelative, absolute };
 
+struct WarpMarker
+{
+    std::uint32_t id {0};
+    std::uint64_t sourceSample {0};
+    std::uint64_t targetSample {0};
+
+    friend bool operator==(const WarpMarker&, const WarpMarker&) = default;
+};
+
 struct AudioAsset
 {
     MediaAssetId id {};
@@ -79,6 +88,8 @@ struct AudioClip
     float gainLinear {1.0f};
     std::uint32_t fadeInSamples {};
     std::uint32_t fadeOutSamples {};
+    bool warpingEnabled {false};
+    std::vector<WarpMarker> warpMarkers {};
 
     friend bool operator==(const AudioClip&, const AudioClip&) = default;
 };
@@ -105,6 +116,27 @@ struct MidiClip
     friend bool operator==(const MidiClip&, const MidiClip&) = default;
 };
 
+enum class DspNodeType : std::uint8_t
+{
+    parametricEq,
+    dynamicsCompressor,
+    brickwallLimiter,
+    tnhcSynth,
+    clapPlugin
+};
+
+struct DspNodeDescriptor
+{
+    std::uint32_t slotIndex {0};
+    DspNodeType type {DspNodeType::parametricEq};
+    bool bypassed {false};
+    std::string name;
+    std::string pluginId;
+    std::vector<float> parameters;
+
+    friend bool operator==(const DspNodeDescriptor&, const DspNodeDescriptor&) = default;
+};
+
 struct Track
 {
     TrackId id {};
@@ -116,6 +148,7 @@ struct Track
     bool phaseInvert {};
     bool recordArmed {};
     TrackKind kind {TrackKind::audio};
+    std::vector<DspNodeDescriptor> inserts {};
 
     friend bool operator==(const Track&, const Track&) = default;
 };

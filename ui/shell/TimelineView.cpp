@@ -14,6 +14,19 @@ TimelineView::TimelineView(Callbacks callbacks, media::WaveformCache* waveformCa
 
     m_snapButton.onClick = [this] { cycleSnapMode(); };
     addAndMakeVisible(m_snapButton);
+
+    m_autoButton.onClick = [this] { toggleAutomation(); };
+    addAndMakeVisible(m_autoButton);
+}
+
+void TimelineView::toggleAutomation() noexcept
+{
+    m_showAutomation = ! m_showAutomation;
+    m_autoButton.setButtonText(m_showAutomation ? "Auto: ON" : "Auto: OFF");
+    m_autoButton.setColour(juce::TextButton::buttonColourId,
+                           m_showAutomation ? juce::Colour::fromRGB(40, 120, 140)
+                                            : juce::Colour::fromRGB(40, 42, 50));
+    repaint();
 }
 
 void TimelineView::setViewModel(const EditorViewModel& model)
@@ -338,11 +351,110 @@ void TimelineView::drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bo
             }
         }
 
+        drawAutomationOverlay(g, track, currentY, getWidth() - m_headerWidth);
+
         currentY += m_trackLaneHeight;
     }
 
     g.setColour(juce::Colour::fromRGB(45, 48, 56));
     g.drawVerticalLine(m_headerWidth, static_cast<float>(bounds.getY()), static_cast<float>(bounds.getBottom()));
+}
+
+void TimelineView::drawAutomationOverlay(juce::Graphics& g, const project::Track& track, const int currentY, const int laneWidth)
+{
+    const project::AutomationLane* trackLane = nullptr;
+    for (const auto& lane : m_model.project.automationLanes)
+    {
+        if (lane.target.trackId == track.id)
+        {
+            trackLane = &lane;
+            break;
+        }
+    }
+
+    if (! m_showAutomation && trackLane == nullptr)
+        return;
+
+    const int laneH = m_trackLaneHeight - 12;
+    const int topY = currentY + 6;
+    const int bottomY = topY + laneH;
+
+    if (m_showAutomation)
+    {
+        g.setColour(juce::Colour::fromRGB(0, 180, 210).withAlpha(0.06f));
+        g.fillRect(m_headerWidth, topY, laneWidth, laneH);
+    }
+
+    if (trackLane == nullptr || trackLane->points.empty())
+    {
+        if (m_showAutomation)
+        {
+            const float val = std::clamp(track.gainLinear, 0.0f, 1.0f);
+            const int lineY = bottomY - static_cast<int>(std::round(val * static_cast<float>(laneH)));
+            g.setColour(juce::Colour::fromRGB(0, 200, 230).withAlpha(0.5f));
+            g.drawHorizontalLine(lineY, static_cast<float>(m_headerWidth), static_cast<float>(m_headerWidth + laneWidth));
+        }
+        return;
+    }
+
+    const auto& points = trackLane->points;
+    juce::Path curvePath;
+    const auto valToY = [bottomY, laneH](const float v) noexcept -> float {
+        return static_cast<float>(bottomY) - std::clamp(v, 0.0f, 1.0f) * static_cast<float>(laneH);
+    };
+
+    const float firstX = static_cast<float>(m_headerWidth + sampleToPixel(static_cast<std::int64_t>(points.front().samplePosition)));
+    const float firstY = valToY(points.front().value);
+    curvePath.startNewSubPath(static_cast<float>(m_headerWidth), firstY);
+    curvePath.lineTo(firstX, firstY);
+
+    for (std::size_t p = 0; p + 1 < points.size(); ++p)
+    {
+        const auto& p1 = points[p];
+        const auto& p2 = points[p + 1];
+
+        const float x1 = static_cast<float>(m_headerWidth + sampleToPixel(static_cast<std::int64_t>(p1.samplePosition)));
+        const float y1 = valToY(p1.value);
+        const float x2 = static_cast<float>(m_headerWidth + sampleToPixel(static_cast<std::int64_t>(p2.samplePosition)));
+        const float y2 = valToY(p2.value);
+
+        const int steps = std::clamp(static_cast<int>(x2 - x1), 2, 40);
+        for (int s = 1; s <= steps; ++s)
+        {
+            const float t = static_cast<float>(s) / static_cast<float>(steps);
+            float shapedT = t;
+            if (std::abs(p1.curveTension) > 0.001f)
+            {
+                if (p1.curveTension > 0.0f)
+                    shapedT = std::pow(t, 1.0f + p1.curveTension * 3.0f);
+                else
+                    shapedT = 1.0f - std::pow(1.0f - t, 1.0f - p1.curveTension * 3.0f);
+            }
+            const float sx = x1 + t * (x2 - x1);
+            const float sy = y1 + shapedT * (y2 - y1);
+            curvePath.lineTo(sx, sy);
+        }
+    }
+
+    const float lastY = valToY(points.back().value);
+    curvePath.lineTo(static_cast<float>(m_headerWidth + laneWidth), lastY);
+
+    g.setColour(juce::Colour::fromRGB(0, 225, 255).withAlpha(0.85f));
+    g.strokePath(curvePath, juce::PathStrokeType(2.0f));
+
+    for (const auto& pt : points)
+    {
+        const int px = m_headerWidth + sampleToPixel(static_cast<std::int64_t>(pt.samplePosition));
+        const int py = static_cast<int>(std::round(valToY(pt.value)));
+
+        if (px >= m_headerWidth - 4 && px <= m_headerWidth + laneWidth + 4)
+        {
+            g.setColour(juce::Colour::fromRGB(255, 220, 70));
+            g.fillEllipse(static_cast<float>(px - 4), static_cast<float>(py - 4), 8.0f, 8.0f);
+            g.setColour(juce::Colour::fromRGB(20, 25, 30));
+            g.drawEllipse(static_cast<float>(px - 4), static_cast<float>(py - 4), 8.0f, 8.0f, 1.5f);
+        }
+    }
 }
 
 void TimelineView::drawLoopRegion(juce::Graphics& g, juce::Rectangle<int> bounds)
@@ -391,7 +503,9 @@ void TimelineView::drawPlayhead(juce::Graphics& g, juce::Rectangle<int> bounds)
 
 void TimelineView::resized()
 {
-    m_snapButton.setBounds(6, 4, m_headerWidth - 12, m_rulerHeight - 8);
+    const int btnWidth = (m_headerWidth - 16) / 2;
+    m_snapButton.setBounds(6, 4, btnWidth, m_rulerHeight - 8);
+    m_autoButton.setBounds(6 + btnWidth + 4, 4, btnWidth, m_rulerHeight - 8);
 }
 
 void TimelineView::mouseMove(const juce::MouseEvent& e)
@@ -433,6 +547,91 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
         m_dragMode = DragMode::seekRuler;
         seekToX(e.x);
         return;
+    }
+
+    // Automation interactions
+    if (m_showAutomation && e.x >= m_headerWidth)
+    {
+        const int laneIdx = (e.y - m_rulerHeight) / m_trackLaneHeight;
+        if (laneIdx >= 0 && laneIdx < static_cast<int>(m_model.project.tracks.size()))
+        {
+            const auto& track = m_model.project.tracks[static_cast<std::size_t>(laneIdx)];
+            const project::AutomationLane* trackLane = nullptr;
+            for (const auto& lane : m_model.project.automationLanes)
+            {
+                if (lane.target.trackId == track.id)
+                {
+                    trackLane = &lane;
+                    break;
+                }
+            }
+
+            const int laneTop = m_rulerHeight + laneIdx * m_trackLaneHeight + 6;
+            const int laneH = m_trackLaneHeight - 12;
+
+            if (trackLane != nullptr)
+            {
+                for (const auto& pt : trackLane->points)
+                {
+                    const int px = m_headerWidth + sampleToPixel(static_cast<std::int64_t>(pt.samplePosition));
+                    const int py = laneTop + laneH - static_cast<int>(std::round(pt.value * static_cast<float>(laneH)));
+                    if (std::abs(e.x - px) <= 10 && std::abs(e.y - py) <= 10)
+                    {
+                        m_dragMode = DragMode::moveAutomationPoint;
+                        m_dragAutomationLaneId = trackLane->id;
+                        m_dragAutomationPointId = pt.id;
+                        m_dragStartPos = e.getPosition();
+                        return;
+                    }
+                }
+            }
+
+            if (e.mods.isShiftDown() || e.getNumberOfClicks() >= 2)
+            {
+                const auto samplePos = static_cast<std::uint64_t>(std::max<std::int64_t>(0, snapSample(pixelToSample(e.x))));
+                const float normVal = std::clamp(1.0f - static_cast<float>(e.y - laneTop) / static_cast<float>(laneH), 0.0f, 1.0f);
+
+                if (trackLane != nullptr && m_callbacks.commandHandler)
+                {
+                    const auto ptId = static_cast<project::AutomationPointId>(trackLane->points.size() + 1);
+                    m_callbacks.commandHandler(project::AddAutomationPoint {
+                        trackLane->id,
+                        project::AutomationPoint {
+                            .id = ptId,
+                            .samplePosition = samplePos,
+                            .value = normVal,
+                            .curveTension = 0.0f
+                        }
+                    });
+                }
+                else if (m_callbacks.commandHandler)
+                {
+                    const auto newLaneId = static_cast<project::AutomationLaneId>(m_model.project.automationLanes.size() + 1);
+                    m_callbacks.commandHandler(project::AddAutomationLane {
+                        project::AutomationLane {
+                            .id = newLaneId,
+                            .target = project::AutomationTarget {
+                                .kind = project::AutomationTargetKind::trackVolume,
+                                .trackId = track.id,
+                                .slotIndex = 0,
+                                .parameterIndex = 0
+                            },
+                            .points = {}
+                        }
+                    });
+                    m_callbacks.commandHandler(project::AddAutomationPoint {
+                        newLaneId,
+                        project::AutomationPoint {
+                            .id = 1,
+                            .samplePosition = samplePos,
+                            .value = normVal,
+                            .curveTension = 0.0f
+                        }
+                    });
+                }
+                return;
+            }
+        }
     }
 
     int laneY = 0;
@@ -481,6 +680,24 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
     if (m_dragMode == DragMode::seekRuler)
     {
         seekToX(e.x);
+        return;
+    }
+
+    if (m_dragMode == DragMode::moveAutomationPoint)
+    {
+        const int laneIdx = (e.y - m_rulerHeight) / m_trackLaneHeight;
+        const int laneTop = m_rulerHeight + laneIdx * m_trackLaneHeight + 6;
+        const int laneH = m_trackLaneHeight - 12;
+
+        const auto newSample = static_cast<std::uint64_t>(std::max<std::int64_t>(0, snapSample(pixelToSample(e.x))));
+        const float newVal = std::clamp(1.0f - static_cast<float>(e.y - laneTop) / static_cast<float>(laneH), 0.0f, 1.0f);
+
+        if (m_callbacks.commandHandler && m_dragAutomationLaneId != 0 && m_dragAutomationPointId != 0)
+        {
+            m_callbacks.commandHandler(project::MoveAutomationPoint {
+                m_dragAutomationLaneId, m_dragAutomationPointId, newSample, newVal, 0.0f
+            });
+        }
         return;
     }
 
@@ -550,6 +767,15 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
 
 void TimelineView::mouseUp(const juce::MouseEvent&)
 {
+    if (m_dragMode == DragMode::moveAutomationPoint)
+    {
+        m_dragMode = DragMode::none;
+        m_dragAutomationLaneId = 0;
+        m_dragAutomationPointId = 0;
+        repaint();
+        return;
+    }
+
     if (m_draggedClipId.has_value() && m_callbacks.commandHandler)
     {
         if (m_dragMode == DragMode::moveClip)

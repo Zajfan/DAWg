@@ -24,6 +24,12 @@ JuceAudioDeviceBridge::~JuceAudioDeviceBridge()
         return ::juce::Result::fail(error);
 
     m_deviceManager.addAudioCallback(this);
+    m_deviceManager.addMidiInputDeviceCallback({}, this);
+
+    const auto midiDevices = ::juce::MidiInput::getAvailableDevices();
+    for (const auto& dev : midiDevices)
+        m_deviceManager.setMidiInputDeviceEnabled(dev.identifier, true);
+
     return ::juce::Result::ok();
 }
 
@@ -31,6 +37,7 @@ void JuceAudioDeviceBridge::shutdown() noexcept
 {
     // Removing the callback synchronizes with processing before releasing the
     // borrowed engine. Repeated shutdown (including destruction) is safe.
+    m_deviceManager.removeMidiInputDeviceCallback({}, this);
     m_deviceManager.removeAudioCallback(this);
     m_deviceManager.closeAudioDevice();
     audioDeviceStopped();
@@ -91,6 +98,19 @@ void JuceAudioDeviceBridge::audioDeviceStopped()
     m_sampleRate.store(0.0, std::memory_order_relaxed);
     m_blockSize.store(0, std::memory_order_relaxed);
     m_deviceReady.store(false, std::memory_order_release);
+}
+
+void JuceAudioDeviceBridge::handleIncomingMidiMessage(::juce::MidiInput* /*source*/,
+                                                      const ::juce::MidiMessage& message)
+{
+    dawg::engine::MidiEvent ev {};
+    ev.size = std::min<std::uint8_t>(3, static_cast<std::uint8_t>(message.getRawDataSize()));
+    for (std::uint8_t i = 0; i < ev.size; ++i)
+        ev.data[i] = static_cast<std::byte>(message.getRawData()[i]);
+
+    const auto processed = m_controllerManager.processEvent(ev);
+    if (m_midiControlCallback)
+        m_midiControlCallback(processed);
 }
 
 } // namespace dawg::platform::juce

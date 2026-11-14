@@ -244,15 +244,47 @@ void testVersionThreeFivePillarRoundTrip(const fs::path& root)
     auto v3Snapshot = project.snapshot();
     v3Snapshot.formatVersion = 3;
 
+    // Add track insert DSP descriptor
+    v3Snapshot.tracks[0].inserts.push_back(DspNodeDescriptor {
+        .slotIndex = 0,
+        .type = DspNodeType::parametricEq,
+        .bypassed = false,
+        .name = "Parametric EQ",
+        .pluginId = "",
+        .parameters = {1000.0f, 1.5f, 2.0f}
+    });
+
+    // Add warp markers to clip
+    v3Snapshot.clips[0].warpingEnabled = true;
+    v3Snapshot.clips[0].warpMarkers.push_back(WarpMarker {.id = 1, .sourceSample = 0, .targetSample = 0});
+    v3Snapshot.clips[0].warpMarkers.push_back(WarpMarker {.id = 2, .sourceSample = 24000, .targetSample = 23500});
+
+    // Add automation lane
+    v3Snapshot.automationLanes.push_back(AutomationLane {
+        .id = 1,
+        .target = AutomationTarget {
+            .kind = AutomationTargetKind::trackVolume,
+            .trackId = track1,
+            .slotIndex = 0,
+            .parameterIndex = 0
+        },
+        .points = {
+            AutomationPoint {.id = 1, .samplePosition = 0, .value = 1.0f, .curveTension = 0.0f},
+            AutomationPoint {.id = 2, .samplePosition = 48000, .value = 0.5f, .curveTension = 0.5f}
+        }
+    });
+
     const auto path = root / "session-v3.dawg";
     require(saveProject(v3Snapshot, path).has_value(), "save v3 project");
 
     const auto loaded = loadProject(path);
     require(loaded.has_value() && loaded->formatVersion == 3, "load v3 project");
     require(loaded->tracks == v3Snapshot.tracks,
-            "v3 track channel strip parameters (gainLinear, pan, phaseInvert, muted, solo) survive round trip");
+            "v3 track channel strip parameters and inserts survive round trip");
     require(loaded->clips == v3Snapshot.clips,
-            "v3 clip parameters (trackId, gainLinear, fadeInSamples, fadeOutSamples) survive round trip");
+            "v3 clip parameters, warpingEnabled, and warpMarkers survive round trip");
+    require(loaded->automationLanes == v3Snapshot.automationLanes,
+            "v3 automation lanes survive round trip");
     require(loaded->tempo == v3Snapshot.tempo,
             "v3 TempoSetting (bpm, timeSignature, metronomeEnabled) survives round trip");
     require(loaded->loop == v3Snapshot.loop,

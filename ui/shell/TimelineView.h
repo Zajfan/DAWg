@@ -52,6 +52,8 @@ public:
 
     void cycleSnapMode();
     [[nodiscard]] SnapMode snapMode() const noexcept { return m_snapMode; }
+    void toggleAutomation() noexcept;
+    [[nodiscard]] bool showAutomation() const noexcept { return m_showAutomation; }
 
 private:
     enum class DragMode
@@ -62,11 +64,13 @@ private:
         trimLeft,
         trimRight,
         fadeLeft,
-        fadeRight
+        fadeRight,
+        moveAutomationPoint
     };
 
     void drawRuler(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bounds);
+    void drawAutomationOverlay(juce::Graphics& g, const project::Track& track, int currentY, int laneWidth);
     void drawPlayhead(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawLoopRegion(juce::Graphics& g, juce::Rectangle<int> bounds);
 
@@ -83,6 +87,7 @@ private:
     EditorViewModel m_model;
 
     SnapMode m_snapMode {SnapMode::sixteenth};
+    bool m_showAutomation {false};
     DragMode m_dragMode {DragMode::none};
     std::optional<project::ClipId> m_selectedClipId;
     std::optional<project::ClipId> m_draggedClipId;
@@ -93,9 +98,12 @@ private:
     std::uint64_t m_dragTrimLengthSamples {0};
     std::uint32_t m_dragFadeInSamples {0};
     std::uint32_t m_dragFadeOutSamples {0};
+    project::AutomationLaneId m_dragAutomationLaneId {0};
+    project::AutomationPointId m_dragAutomationPointId {0};
     juce::Point<int> m_dragStartPos;
 
     juce::TextButton m_snapButton {"Snap: 1/16"};
+    juce::TextButton m_autoButton {"Auto: OFF"};
 
     double m_samplesPerPixel {256.0};
     int m_scrollOffsetX {0};

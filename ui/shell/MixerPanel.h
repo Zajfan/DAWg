@@ -40,6 +40,8 @@ private:
     juce::TextButton m_armButton {"REC"};
     juce::TextButton m_eqButton {"EQ"};
     juce::TextButton m_compButton {"COMP"};
+    juce::TextButton m_synthButton {"SYNTH"};
+    juce::TextButton m_limiterButton {"LIMIT"};
 };
 
 class MasterStripComponent final : public juce::Component
