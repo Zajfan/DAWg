@@ -9,6 +9,7 @@
 #include <dawg/engine/TransportState.h>
 
 #include <memory>
+#include <vector>
 
 namespace dawg::engine {
 
@@ -45,6 +46,7 @@ public:
     // Audio-thread observation, or read only while processing is stopped and
     // synchronized with the reader. This is not a concurrent UI snapshot.
     [[nodiscard]] TransportState transportState() const noexcept;
+    [[nodiscard]] std::uint64_t underrunCount() const noexcept;
 
     // Adopts the latest render snapshot, then applies at most 64 queued commands
     // in FIFO order before rendering.
@@ -58,6 +60,7 @@ public:
 private:
     std::unique_ptr<TransportCommandQueue> m_commandQueue;
     RenderSnapshotPublisher m_snapshotPublisher;
+    std::vector<float> m_discardChannel;
     RenderSnapshot m_renderSnapshot {};
     TransportState m_transportState {};
     bool m_prepared {};

@@ -84,6 +84,8 @@ void testProjectAndAudioVerticalSlice()
     const AudioBufferView output {channels.data(), channels.size(), samples[0].size()};
     engine.process(output, {}, {});
     require(engine.transportState().playing, "transport is playing");
+    require(engine.transportState().samplePosition == 64 && engine.underrunCount() == 0,
+            "transport advances by block with zero underruns on empty playback");
     require(engine.renderSnapshotGeneration() == controller.latestRenderSnapshot().generation,
             "audio adopts the project snapshot at the block boundary");
     for (const auto& channel : samples)
