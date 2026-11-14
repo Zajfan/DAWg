@@ -119,6 +119,38 @@ void testSparseChannelsAndBorrowedBounds()
     require(outside == std::array<float, 3> {}, "stopped engine output stays silent");
     require(! engine.isPrepared(), "processing never prepares the engine");
 }
+
+void testInputChannelCaptureForwarding()
+{
+    dawg::engine::AudioEngine engine;
+    require(engine.prepare({48000.0, 8, 2}), "engine prepares for input capture");
+    dawg::engine::RecordRingBuffer recordRing;
+    require(recordRing.prepare(2, 16), "record ring prepares");
+    engine.setRecordBuffer(&recordRing);
+    engine.setRecording(true);
+
+    dawg::platform::juce::JuceAudioCallbackAdapter adapter {engine};
+    constexpr std::array<float, 4> inLeft {0.25f, 0.5f, -0.25f, -0.5f};
+    constexpr std::array<float, 4> inRight {-0.125f, 0.125f, 0.75f, -0.75f};
+    const std::array<const float*, 2> inputChannels {inLeft.data(), inRight.data()};
+
+    std::array<float, 4> outLeft {1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, 4> outRight {1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float*, 2> outputChannels {outLeft.data(), outRight.data()};
+
+    adapter.process(
+        inputChannels.data(), inputChannels.size(),
+        outputChannels.data(), outputChannels.size(),
+        inLeft.size());
+
+    require(recordRing.availableFrames() == 4, "adapter forwards const input channels into RecordRingBuffer");
+    std::array<float, 4> readLeft {};
+    std::array<float, 4> readRight {};
+    std::array<float*, 2> readPlanes {readLeft.data(), readRight.data()};
+    require(recordRing.read(readPlanes, 4) == 4, "read captured frames from RecordRingBuffer");
+    require(readLeft == inLeft && readRight == inRight,
+            "captured frames match hardware input channels bit-for-bit");
+}
 }
 
 int main()
@@ -126,5 +158,6 @@ int main()
     testPreparedEngineSilenceAndForwarding();
     testCallbackRendersPrefilledClipPcm();
     testSparseChannelsAndBorrowedBounds();
-    std::puts("PASS: JUCE-free audio callback adapter (3 cases)");
+    testInputChannelCaptureForwarding();
+    std::puts("PASS: JUCE-free audio callback adapter (4 cases)");
 }

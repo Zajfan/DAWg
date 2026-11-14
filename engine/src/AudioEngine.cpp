@@ -134,10 +134,10 @@ void AudioEngine::reset() noexcept
 void AudioEngine::process(const AudioBufferView output, const MidiBufferView midi,
                           const TransportSnapshot& transport) noexcept
 {
-    process({}, output, midi, transport);
+    process(AudioInputBufferView {}, output, midi, transport);
 }
 
-void AudioEngine::process(const AudioBufferView input, const AudioBufferView output,
+void AudioEngine::process(const AudioInputBufferView input, const AudioBufferView output,
                           const MidiBufferView, const TransportSnapshot&) noexcept
 {
     if (m_prepared && m_recording.load(std::memory_order_acquire))
@@ -145,8 +145,7 @@ void AudioEngine::process(const AudioBufferView input, const AudioBufferView out
         if (auto* recBuf = m_recordBuffer.load(std::memory_order_acquire);
             recBuf != nullptr && input.channels != nullptr && input.frameCount > 0)
         {
-            const std::span<const float* const> inPlanes {
-                const_cast<const float* const*>(input.channels), input.channelCount};
+            const std::span<const float* const> inPlanes {input.channels, input.channelCount};
             static_cast<void>(recBuf->write(inPlanes, input.frameCount));
         }
     }

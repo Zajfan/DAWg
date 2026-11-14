@@ -18,4 +18,17 @@ void JuceAudioCallbackAdapter::process(float* const* outputChannels,
     m_engine.process({outputChannels, channelCount, frameCount}, {}, {});
 }
 
+void JuceAudioCallbackAdapter::process(const float* const* inputChannels,
+                                      const std::size_t inputChannelCount,
+                                      float* const* outputChannels,
+                                      const std::size_t outputChannelCount,
+                                      const std::size_t frameCount) noexcept
+{
+    m_engine.process(
+        dawg::engine::AudioInputBufferView {inputChannels, inputChannelCount, frameCount},
+        dawg::engine::AudioBufferView {outputChannels, outputChannelCount, frameCount},
+        {},
+        {});
+}
+
 } // namespace dawg::platform::juce

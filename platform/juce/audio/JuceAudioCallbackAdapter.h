@@ -14,6 +14,9 @@ public:
     explicit JuceAudioCallbackAdapter(dawg::engine::AudioEngine& engine) noexcept;
     void process(float* const* outputChannels, std::size_t channelCount,
                  std::size_t frameCount) noexcept;
+    void process(const float* const* inputChannels, std::size_t inputChannelCount,
+                 float* const* outputChannels, std::size_t outputChannelCount,
+                 std::size_t frameCount) noexcept;
 
 private:
     dawg::engine::AudioEngine& m_engine;

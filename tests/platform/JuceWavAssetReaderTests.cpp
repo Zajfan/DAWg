@@ -1,4 +1,5 @@
 #include "media/JuceWavAssetReader.h"
+#include "media/JuceWavAssetWriter.h"
 
 #include <array>
 #include <chrono>
@@ -172,6 +173,33 @@ int main()
     require(!emptyWavResult.has_value()
                 && emptyWavResult.error().code == MediaError::Code::invalidMetadata,
             "zero-length WAV returns invalidMetadata");
+
+    // Verify JuceWavAssetWriterFactory writes a stereo 32-bit float WAV that JuceWavAssetReaderFactory reads back bit-for-bit
+    dawg::platform::juce::JuceWavAssetWriterFactory writerFactory;
+    const auto recordedWavPath = dir.root / "recorded-take.wav";
+    auto writer = writerFactory.create(recordedWavPath.string(), 48000, 2);
+    require(writer.has_value() && *writer != nullptr, "JuceWavAssetWriterFactory creates WAV writer");
+
+    constexpr std::array<float, 6> recLeft {0.1f, -0.2f, 0.3f, -0.4f, 0.5f, -0.6f};
+    constexpr std::array<float, 6> recRight {-0.1f, 0.2f, -0.3f, 0.4f, -0.5f, 0.6f};
+    const std::array<const float*, 2> recPlanes {recLeft.data(), recRight.data()};
+    require((*writer)->write(recPlanes, recLeft.size()), "writer writes 6 stereo frames");
+    require((*writer)->finalize(), "writer finalizes WAV file");
+    writer->reset();
+
+    auto reopened = factory.open(recordedWavPath.string());
+    require(reopened.has_value() && *reopened != nullptr, "reader opens WAV written by JuceWavAssetWriter");
+    require((*reopened)->metadata().sampleRate == 48000
+                && (*reopened)->metadata().channelCount == 2
+                && (*reopened)->metadata().frameCount == 6,
+            "reopened WAV metadata matches writer parameters");
+
+    std::array<float, 6> readBackL {};
+    std::array<float, 6> readBackR {};
+    std::array<float*, 2> readBackPlanes {readBackL.data(), readBackR.data()};
+    require((*reopened)->read(0, readBackPlanes, 6), "reader decodes all 6 written stereo frames");
+    require(readBackL == recLeft && readBackR == recRight,
+            "32-bit float WAV round-trip through JuceWavAssetWriter + JuceWavAssetReader is bit-exact");
 
     return EXIT_SUCCESS;
 }

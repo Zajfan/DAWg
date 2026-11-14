@@ -2,6 +2,7 @@ add_library(dawg_platform_juce STATIC
     audio/JuceAudioDeviceBridge.cpp
     audio/JuceAudioCallbackAdapter.cpp
     media/JuceWavAssetReader.cpp
+    media/JuceWavAssetWriter.cpp
 )
 target_include_directories(dawg_platform_juce PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(dawg_platform_juce PUBLIC cxx_std_20)
@@ -19,6 +20,7 @@ set_source_files_properties(
     audio/JuceAudioDeviceBridge.cpp
     audio/JuceAudioCallbackAdapter.cpp
     media/JuceWavAssetReader.cpp
+    media/JuceWavAssetWriter.cpp
     PROPERTIES COMPILE_OPTIONS
         "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>"
 )

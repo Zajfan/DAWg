@@ -70,7 +70,7 @@ public:
     // channels, and leaves the supplied MIDI and TransportSnapshot untouched.
     void process(AudioBufferView output, MidiBufferView midi,
                  const TransportSnapshot& transport) noexcept;
-    void process(AudioBufferView input, AudioBufferView output, MidiBufferView midi,
+    void process(AudioInputBufferView input, AudioBufferView output, MidiBufferView midi,
                  const TransportSnapshot& transport) noexcept;
     [[nodiscard]] bool isPrepared() const noexcept;
 

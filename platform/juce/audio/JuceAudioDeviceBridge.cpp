@@ -17,7 +17,9 @@ JuceAudioDeviceBridge::~JuceAudioDeviceBridge()
 ::juce::Result JuceAudioDeviceBridge::initialise()
 {
     shutdown();
-    const auto error = m_deviceManager.initialiseWithDefaultDevices(0, 2);
+    auto error = m_deviceManager.initialiseWithDefaultDevices(2, 2);
+    if (error.isNotEmpty())
+        error = m_deviceManager.initialiseWithDefaultDevices(0, 2);
     if (error.isNotEmpty())
         return ::juce::Result::fail(error);
 
@@ -69,15 +71,18 @@ void JuceAudioDeviceBridge::audioDeviceAboutToStart(::juce::AudioIODevice* devic
 }
 
 void JuceAudioDeviceBridge::audioDeviceIOCallbackWithContext(
-    const float* const* /*inputChannelData*/, int /*numInputChannels*/,
+    const float* const* inputChannelData, int numInputChannels,
     float* const* outputChannelData, int numOutputChannels, int numSamples,
     const ::juce::AudioIODeviceCallbackContext& /*context*/)
 {
     if (numOutputChannels <= 0 || numSamples <= 0)
         return;
 
-    m_callbackAdapter.process(outputChannelData, static_cast<std::size_t>(numOutputChannels),
-                              static_cast<std::size_t>(numSamples));
+    const auto inChannels = numInputChannels > 0 ? static_cast<std::size_t>(numInputChannels) : 0u;
+    m_callbackAdapter.process(
+        inputChannelData, inChannels,
+        outputChannelData, static_cast<std::size_t>(numOutputChannels),
+        static_cast<std::size_t>(numSamples));
 }
 
 void JuceAudioDeviceBridge::audioDeviceStopped()
