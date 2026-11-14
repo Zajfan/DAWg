@@ -57,6 +57,14 @@ private:
     void drawGrid(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawNotes(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawLasso(juce::Graphics& g, juce::Rectangle<int> bounds);
+    enum class ExpressionMode : std::uint8_t
+    {
+        velocity,
+        mpePitch,
+        mpePressure,
+        mpeTimbre
+    };
+
     void drawVelocityLane(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawPlayhead(juce::Graphics& g, juce::Rectangle<int> bounds);
 
@@ -92,6 +100,12 @@ private:
     juce::ComboBox m_gridCombo;
     juce::ComboBox m_swingCombo;
     juce::TextButton m_quantizeButton {"Quantize [Q]"};
+
+    ExpressionMode m_expressionMode {ExpressionMode::velocity};
+    juce::TextButton m_btnVelocity {"Vel"};
+    juce::TextButton m_btnPitch {"MPE Pitch"};
+    juce::TextButton m_btnPressure {"Pressure"};
+    juce::TextButton m_btnTimbre {"Timbre CC74"};
 
     int m_toolbarHeight {28};
     int m_keyWidth {50};

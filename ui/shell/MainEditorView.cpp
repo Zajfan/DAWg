@@ -33,6 +33,8 @@ enum MenuId
     // View
     cmdToggleMixer = 30,
     cmdTogglePianoRoll = 31,
+    cmdToggleChannelRack = 34,
+    cmdToggleSessionView = 35,
     cmdToggleAutomation = 32,
     cmdToggleBrowser = 33,
 
@@ -85,12 +87,15 @@ MainEditorView::MainEditorView(EditorViewModel model,
         .undo = m_transportCallbacks.undo,
         .redo = m_transportCallbacks.redo
     }, waveformCache)
+    , m_sessionMatrixView(m_commandHandler, m_transportCallbacks.audition)
     , m_mixerPanel(m_commandHandler, m_transportCallbacks.setMasterLimiter)
     , m_pianoRollView(m_commandHandler)
+    , m_channelRackView(m_commandHandler, m_transportCallbacks.audition)
 {
     addAndMakeVisible(m_menuBar);
     addAndMakeVisible(m_transportBar);
     addAndMakeVisible(m_timelineView);
+    addChildComponent(m_sessionMatrixView); // hidden initially
 
     // Dock switcher buttons
     m_tabMixerButton.setClickingTogglesState(false);
@@ -101,12 +106,17 @@ MainEditorView::MainEditorView(EditorViewModel model,
     m_tabPianoRollButton.onClick = [this] { setDockMode(BottomDockMode::pianoRoll); };
     addAndMakeVisible(m_tabPianoRollButton);
 
+    m_tabChannelRackButton.setClickingTogglesState(false);
+    m_tabChannelRackButton.onClick = [this] { setDockMode(BottomDockMode::channelRack); };
+    addAndMakeVisible(m_tabChannelRackButton);
+
     m_tabBrowserButton.setClickingTogglesState(false);
     m_tabBrowserButton.onClick = [this] { togglePluginBrowser(); };
     addAndMakeVisible(m_tabBrowserButton);
 
     addAndMakeVisible(m_mixerPanel);
-    addChildComponent(m_pianoRollView); // hidden initially
+    addChildComponent(m_pianoRollView);
+    addChildComponent(m_channelRackView);
 
     m_pluginBrowser = std::make_unique<PluginBrowserPanel>(
         [this](const plugins::PluginDescriptor& plugin, bool createNewTrack) {
@@ -220,14 +230,33 @@ void MainEditorView::setDockMode(BottomDockMode mode)
 {
     m_dockMode = mode;
     const bool isMixer = (m_dockMode == BottomDockMode::mixer);
+    const bool isPianoRoll = (m_dockMode == BottomDockMode::pianoRoll);
+    const bool isChannelRack = (m_dockMode == BottomDockMode::channelRack);
 
     m_mixerPanel.setVisible(isMixer);
-    m_pianoRollView.setVisible(! isMixer);
+    m_pianoRollView.setVisible(isPianoRoll);
+    m_channelRackView.setVisible(isChannelRack);
 
     m_tabMixerButton.setColour(juce::TextButton::buttonColourId,
                                isMixer ? juce::Colour::fromRGB(45, 95, 145) : juce::Colour::fromRGB(28, 30, 36));
     m_tabPianoRollButton.setColour(juce::TextButton::buttonColourId,
-                                   (! isMixer) ? juce::Colour::fromRGB(120, 60, 160) : juce::Colour::fromRGB(28, 30, 36));
+                                   isPianoRoll ? juce::Colour::fromRGB(120, 60, 160) : juce::Colour::fromRGB(28, 30, 36));
+    m_tabChannelRackButton.setColour(juce::TextButton::buttonColourId,
+                                     isChannelRack ? juce::Colour::fromRGB(190, 80, 50) : juce::Colour::fromRGB(28, 30, 36));
+    resized();
+}
+
+void MainEditorView::toggleCenterViewMode()
+{
+    setCenterViewMode(m_centerViewMode == CenterViewMode::arrangement ? CenterViewMode::sessionView : CenterViewMode::arrangement);
+}
+
+void MainEditorView::setCenterViewMode(CenterViewMode mode)
+{
+    m_centerViewMode = mode;
+    const bool isArrangement = (m_centerViewMode == CenterViewMode::arrangement);
+    m_timelineView.setVisible(isArrangement);
+    m_sessionMatrixView.setVisible(! isArrangement);
     resized();
 }
 
@@ -236,8 +265,10 @@ void MainEditorView::setViewModel(EditorViewModel model)
     m_model = std::move(model);
     m_transportBar.setViewModel(m_model);
     m_timelineView.setViewModel(m_model);
+    m_sessionMatrixView.setViewModel(m_model);
     m_mixerPanel.setViewModel(m_model);
     m_pianoRollView.setViewModel(m_model);
+    m_channelRackView.setViewModel(m_model);
 }
 
 void MainEditorView::setSnapshot(project::ProjectSnapshot snapshot)
@@ -245,8 +276,10 @@ void MainEditorView::setSnapshot(project::ProjectSnapshot snapshot)
     m_model.project = std::move(snapshot);
     m_transportBar.setViewModel(m_model);
     m_timelineView.setViewModel(m_model);
+    m_sessionMatrixView.setViewModel(m_model);
     m_mixerPanel.setViewModel(m_model);
     m_pianoRollView.setViewModel(m_model);
+    m_channelRackView.setViewModel(m_model);
 }
 
 void MainEditorView::setWaveformCache(media::WaveformCache* cache)
@@ -301,7 +334,9 @@ juce::PopupMenu MainEditorView::getMenuForIndex(int menuIndex, const juce::Strin
     case 3: // View
         menu.addItem(cmdToggleMixer, "Show Console Mixer  (M)", true, m_dockMode == BottomDockMode::mixer);
         menu.addItem(cmdTogglePianoRoll, "Show Piano Roll  (P)", true, m_dockMode == BottomDockMode::pianoRoll);
+        menu.addItem(cmdToggleChannelRack, "Show Channel Rack  (R)", true, m_dockMode == BottomDockMode::channelRack);
         menu.addSeparator();
+        menu.addItem(cmdToggleSessionView, "Toggle Session / Arrangement  (Tab)", true, m_centerViewMode == CenterViewMode::sessionView);
         menu.addItem(cmdToggleAutomation, "Toggle Automation Lanes  (A)", true, m_timelineView.showAutomation());
         menu.addItem(cmdToggleBrowser, "Toggle Plugin Browser  (B)", true, m_browserVisible);
         break;
@@ -386,6 +421,12 @@ void MainEditorView::menuItemSelected(int menuItemID, int)
     case cmdTogglePianoRoll:
         setDockMode(BottomDockMode::pianoRoll);
         break;
+    case cmdToggleChannelRack:
+        setDockMode(BottomDockMode::channelRack);
+        break;
+    case cmdToggleSessionView:
+        toggleCenterViewMode();
+        break;
     case cmdToggleAutomation:
         m_timelineView.toggleAutomation();
         break;
@@ -424,6 +465,11 @@ void MainEditorView::menuItemSelected(int menuItemID, int)
 bool MainEditorView::keyPressed(const juce::KeyPress& key)
 {
     // Global hotkeys
+    if (key.getKeyCode() == juce::KeyPress::tabKey)
+    {
+        toggleCenterViewMode();
+        return true;
+    }
     if (key.getKeyCode() == 'M' || key.getKeyCode() == 'm')
     {
         setDockMode(BottomDockMode::mixer);
@@ -432,6 +478,11 @@ bool MainEditorView::keyPressed(const juce::KeyPress& key)
     if (key.getKeyCode() == 'P' || key.getKeyCode() == 'p')
     {
         setDockMode(BottomDockMode::pianoRoll);
+        return true;
+    }
+    if (key.getKeyCode() == 'R' || key.getKeyCode() == 'r')
+    {
+        setDockMode(BottomDockMode::channelRack);
         return true;
     }
     if (key.getKeyCode() == 'A' || key.getKeyCode() == 'a')
@@ -507,12 +558,14 @@ void MainEditorView::resized()
     auto bottomDockArea = area.removeFromBottom(dockContentHeight + 24);
 
     auto tabHeader = bottomDockArea.removeFromTop(24);
-    m_tabMixerButton.setBounds(tabHeader.removeFromLeft(140).reduced(2, 2));
-    m_tabPianoRollButton.setBounds(tabHeader.removeFromLeft(130).reduced(2, 2));
-    m_tabBrowserButton.setBounds(tabHeader.removeFromLeft(110).reduced(2, 2));
+    m_tabMixerButton.setBounds(tabHeader.removeFromLeft(125).reduced(2, 2));
+    m_tabPianoRollButton.setBounds(tabHeader.removeFromLeft(115).reduced(2, 2));
+    m_tabChannelRackButton.setBounds(tabHeader.removeFromLeft(135).reduced(2, 2));
+    m_tabBrowserButton.setBounds(tabHeader.removeFromLeft(105).reduced(2, 2));
 
     m_mixerPanel.setBounds(bottomDockArea);
     m_pianoRollView.setBounds(bottomDockArea);
+    m_channelRackView.setBounds(bottomDockArea);
 
     // 4. Right Sidebar Plugin / Sample Browser
     if (m_browserVisible)
@@ -528,8 +581,9 @@ void MainEditorView::resized()
             m_sampleBrowser->setBounds(sidebarArea);
     }
 
-    // 5. Center Multi-Track Timeline View
+    // 5. Center View: Arrangement Timeline or Session Matrix Grid
     m_timelineView.setBounds(area);
+    m_sessionMatrixView.setBounds(area);
 }
 
 } // namespace dawg::ui

@@ -43,7 +43,7 @@ void TnhcDelayNode::reset() noexcept
 
 void TnhcDelayNode::setBpm(double bpm) noexcept
 {
-    m_bpm = std::clamp(bpm, 20.0, 300.0);
+    m_bpm = std::clamp(bpm, 10.0, 999.0);
 }
 
 void TnhcDelayNode::setDelayTimeMsLeft(float ms) noexcept

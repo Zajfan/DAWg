@@ -15,10 +15,10 @@ TransportBar::TransportBar(Callbacks callbacks)
     addAndMakeVisible(m_stopButton);
     addAndMakeVisible(m_recordButton);
 
-    m_bpmSlider.setRange(20.0, 300.0, 0.1);
+    m_bpmSlider.setRange(10.0, 999.0, 0.1);
     m_bpmSlider.setValue(120.0, juce::dontSendNotification);
     m_bpmSlider.setSliderStyle(juce::Slider::LinearBar);
-    m_bpmSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 60, 24);
+    m_bpmSlider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 68, 24);
     addAndMakeVisible(m_bpmSlider);
 
     m_bpmLabel.setJustificationType(juce::Justification::centredRight);

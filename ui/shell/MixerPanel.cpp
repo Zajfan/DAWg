@@ -319,6 +319,139 @@ void MasterStripComponent::resized()
 }
 
 // ============================================================================
+// ModulatorRackComponent
+// ============================================================================
+
+ModulatorRackComponent::ModulatorRackComponent()
+{
+    const std::array<std::pair<std::string, juce::Colour>, 8> config {{
+        {"Cutoff", juce::Colour::fromRGB(0, 229, 255)},
+        {"Res",    juce::Colour::fromRGB(255, 145, 0)},
+        {"Drive",  juce::Colour::fromRGB(255, 82, 82)},
+        {"Space",  juce::Colour::fromRGB(179, 136, 255)},
+        {"Decay",  juce::Colour::fromRGB(105, 240, 174)},
+        {"Tone",   juce::Colour::fromRGB(255, 215, 64)},
+        {"Width",  juce::Colour::fromRGB(68, 138, 255)},
+        {"Morph",  juce::Colour::fromRGB(255, 64, 129)}
+    }};
+
+    for (std::size_t i = 0; i < 8; ++i)
+    {
+        auto& m = m_macros[i];
+        m.name = config[i].first;
+        m.color = config[i].second;
+
+        m.slider.setSliderStyle(juce::Slider::RotaryVerticalDrag);
+        m.slider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+        m.slider.setRange(0.0, 1.0, 0.01);
+        m.slider.setValue(0.5, juce::dontSendNotification);
+        addAndMakeVisible(m.slider);
+
+        m.label.setText(m.name, juce::dontSendNotification);
+        m.label.setFont(juce::FontOptions(9.5f).withStyle("Bold"));
+        m.label.setJustificationType(juce::Justification::centred);
+        m.label.setColour(juce::Label::textColourId, juce::Colour::fromRGB(160, 165, 175));
+        addAndMakeVisible(m.label);
+    }
+
+    m_lfoShapeCombo.addItem("LFO: Sine", 1);
+    m_lfoShapeCombo.addItem("LFO: Triangle", 2);
+    m_lfoShapeCombo.addItem("LFO: Saw", 3);
+    m_lfoShapeCombo.addItem("LFO: Square", 4);
+    m_lfoShapeCombo.addItem("LFO: S&H", 5);
+    m_lfoShapeCombo.setSelectedId(1, juce::dontSendNotification);
+    addAndMakeVisible(m_lfoShapeCombo);
+
+    m_lfoRateCombo.addItem("1/4", 1);
+    m_lfoRateCombo.addItem("1/8", 2);
+    m_lfoRateCombo.addItem("1/16", 3);
+    m_lfoRateCombo.setSelectedId(2, juce::dontSendNotification);
+    addAndMakeVisible(m_lfoRateCombo);
+
+    startTimerHz(25);
+}
+
+ModulatorRackComponent::~ModulatorRackComponent()
+{
+    stopTimer();
+}
+
+void ModulatorRackComponent::timerCallback()
+{
+    m_lfoPhase += 0.08f;
+    if (m_lfoPhase > juce::MathConstants<float>::twoPi)
+        m_lfoPhase -= juce::MathConstants<float>::twoPi;
+    repaint();
+}
+
+void ModulatorRackComponent::paint(juce::Graphics& g)
+{
+    g.fillAll(juce::Colour::fromRGB(22, 23, 27));
+    g.setColour(juce::Colour::fromRGB(45, 48, 56));
+    g.drawRect(getLocalBounds(), 1);
+
+    auto bounds = getLocalBounds();
+    auto titleArea = bounds.removeFromTop(20);
+    g.setColour(juce::Colour::fromRGB(30, 33, 38));
+    g.fillRect(titleArea);
+    g.setColour(juce::Colour::fromRGB(200, 205, 215));
+    g.setFont(juce::FontOptions(10.0f).withStyle("Bold"));
+    g.drawText("MACROS & MODULATORS", titleArea, juce::Justification::centred);
+
+    // Draw animated LFO visualizer waveform at the bottom
+    const auto lfoBox = bounds.removeFromBottom(34).reduced(6, 2);
+    g.setColour(juce::Colour::fromRGB(16, 17, 20));
+    g.fillRoundedRectangle(lfoBox.toFloat(), 3.0f);
+    g.setColour(juce::Colour::fromRGB(40, 44, 52));
+    g.drawRoundedRectangle(lfoBox.toFloat(), 3.0f, 1.0f);
+
+    juce::Path p;
+    const float midY = static_cast<float>(lfoBox.getCentreY());
+    const float amp = static_cast<float>(lfoBox.getHeight()) * 0.38f;
+    bool first = true;
+    for (int x = lfoBox.getX(); x < lfoBox.getRight(); ++x)
+    {
+        const float t = static_cast<float>(x - lfoBox.getX()) / static_cast<float>(lfoBox.getWidth());
+        const float y = midY + std::sin(t * juce::MathConstants<float>::twoPi * 2.0f + m_lfoPhase) * amp;
+        if (first) { p.startNewSubPath(static_cast<float>(x), y); first = false; }
+        else p.lineTo(static_cast<float>(x), y);
+    }
+    g.setColour(juce::Colour::fromRGB(0, 229, 255));
+    g.strokePath(p, juce::PathStrokeType(1.5f));
+
+    // Animated traveling phase dot
+    const float dotX = static_cast<float>(lfoBox.getX()) + (m_lfoPhase / juce::MathConstants<float>::twoPi) * static_cast<float>(lfoBox.getWidth());
+    const float dotY = midY + std::sin((dotX - static_cast<float>(lfoBox.getX())) / static_cast<float>(lfoBox.getWidth()) * juce::MathConstants<float>::twoPi * 2.0f + m_lfoPhase) * amp;
+    g.setColour(juce::Colour::fromRGB(255, 235, 100));
+    g.fillEllipse(dotX - 2.5f, dotY - 2.5f, 5.0f, 5.0f);
+}
+
+void ModulatorRackComponent::resized()
+{
+    auto area = getLocalBounds();
+    area.removeFromTop(20); // title
+    auto lfoArea = area.removeFromBottom(58);
+
+    // LFO controls row
+    auto lfoControls = lfoArea.removeFromTop(22).reduced(4, 1);
+    m_lfoShapeCombo.setBounds(lfoControls.removeFromLeft(lfoControls.getWidth() - 60));
+    m_lfoRateCombo.setBounds(lfoControls.withTrimmedLeft(4));
+
+    // 8 macros in 2 rows of 4
+    const int colW = area.getWidth() / 4;
+    const int rowH = area.getHeight() / 2;
+
+    for (std::size_t i = 0; i < 8; ++i)
+    {
+        const int r = static_cast<int>(i / 4);
+        const int c = static_cast<int>(i % 4);
+        auto cell = juce::Rectangle<int>(c * colW, area.getY() + r * rowH, colW, rowH).reduced(2, 1);
+        m_macros[i].label.setBounds(cell.removeFromBottom(12));
+        m_macros[i].slider.setBounds(cell);
+    }
+}
+
+// ============================================================================
 // MixerPanel
 // ============================================================================
 
@@ -330,6 +463,20 @@ MixerPanel::MixerPanel(CommandHandler handler, LimiterCallback limiterCb)
     m_viewport.setScrollBarsShown(false, true);
     addAndMakeVisible(m_viewport);
     addAndMakeVisible(m_masterStrip);
+
+    m_toggleModulatorsBtn.onClick = [this] { toggleModulatorRack(); };
+    m_toggleModulatorsBtn.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(38, 42, 50));
+    addAndMakeVisible(m_toggleModulatorsBtn);
+    addAndMakeVisible(m_modulatorRack);
+}
+
+void MixerPanel::toggleModulatorRack()
+{
+    m_showModulators = ! m_showModulators;
+    m_modulatorRack.setVisible(m_showModulators);
+    m_toggleModulatorsBtn.setColour(juce::TextButton::buttonColourId,
+                                   m_showModulators ? juce::Colour::fromRGB(45, 95, 140) : juce::Colour::fromRGB(38, 42, 50));
+    resized();
 }
 
 void MixerPanel::setViewModel(const EditorViewModel& model)
@@ -366,7 +513,15 @@ void MixerPanel::resized()
 {
     auto area = getLocalBounds();
     constexpr int masterWidth = 84;
-    m_masterStrip.setBounds(area.removeFromRight(masterWidth));
+    auto masterArea = area.removeFromRight(masterWidth);
+    m_toggleModulatorsBtn.setBounds(masterArea.removeFromTop(20).reduced(2, 1));
+    m_masterStrip.setBounds(masterArea);
+
+    if (m_showModulators)
+    {
+        constexpr int modWidth = 220;
+        m_modulatorRack.setBounds(area.removeFromRight(modWidth));
+    }
 
     m_viewport.setBounds(area);
 

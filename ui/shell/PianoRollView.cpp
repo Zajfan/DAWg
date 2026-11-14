@@ -72,6 +72,25 @@ PianoRollView::PianoRollView(CommandHandler handler, AuditionCallback auditionCb
     m_quantizeButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(45, 110, 160));
     m_quantizeButton.onClick = [this] { quantizeNotes(); };
     addAndMakeVisible(m_quantizeButton);
+
+    auto updateModeButtons = [this] {
+        m_btnVelocity.setColour(juce::TextButton::buttonColourId, m_expressionMode == ExpressionMode::velocity ? juce::Colour::fromRGB(0, 160, 210) : juce::Colour::fromRGB(35, 38, 48));
+        m_btnPitch.setColour(juce::TextButton::buttonColourId, m_expressionMode == ExpressionMode::mpePitch ? juce::Colour::fromRGB(180, 70, 200) : juce::Colour::fromRGB(35, 38, 48));
+        m_btnPressure.setColour(juce::TextButton::buttonColourId, m_expressionMode == ExpressionMode::mpePressure ? juce::Colour::fromRGB(220, 120, 40) : juce::Colour::fromRGB(35, 38, 48));
+        m_btnTimbre.setColour(juce::TextButton::buttonColourId, m_expressionMode == ExpressionMode::mpeTimbre ? juce::Colour::fromRGB(50, 180, 100) : juce::Colour::fromRGB(35, 38, 48));
+        repaint();
+    };
+
+    m_btnVelocity.onClick = [this, updateModeButtons] { m_expressionMode = ExpressionMode::velocity; updateModeButtons(); };
+    m_btnPitch.onClick = [this, updateModeButtons] { m_expressionMode = ExpressionMode::mpePitch; updateModeButtons(); };
+    m_btnPressure.onClick = [this, updateModeButtons] { m_expressionMode = ExpressionMode::mpePressure; updateModeButtons(); };
+    m_btnTimbre.onClick = [this, updateModeButtons] { m_expressionMode = ExpressionMode::mpeTimbre; updateModeButtons(); };
+
+    addAndMakeVisible(m_btnVelocity);
+    addAndMakeVisible(m_btnPitch);
+    addAndMakeVisible(m_btnPressure);
+    addAndMakeVisible(m_btnTimbre);
+    updateModeButtons();
 }
 
 void PianoRollView::setViewModel(const EditorViewModel& model)
@@ -401,25 +420,97 @@ void PianoRollView::drawVelocityLane(juce::Graphics& g, const juce::Rectangle<in
     g.setColour(juce::Colour::fromRGB(36, 38, 45));
     g.drawHorizontalLine(bounds.getY(), static_cast<float>(bounds.getX()), static_cast<float>(bounds.getRight()));
 
+    const char* title = "VELOCITY";
+    if (m_expressionMode == ExpressionMode::mpePitch)
+        title = "MPE PITCH (±24 ST)";
+    else if (m_expressionMode == ExpressionMode::mpePressure)
+        title = "MPE PRESSURE";
+    else if (m_expressionMode == ExpressionMode::mpeTimbre)
+        title = "TIMBRE CC74";
+
     g.setColour(juce::Colour::fromRGB(120, 125, 140));
     g.setFont(juce::FontOptions {10.0f}.withStyle("Bold"));
-    g.drawText("VELOCITY", juce::Rectangle<int> {4, bounds.getY() + 4, m_keyWidth - 8, 16},
+    g.drawText(title, juce::Rectangle<int> {4, bounds.getY() + 4, m_keyWidth - 8, 16},
                juce::Justification::centredLeft, false);
 
     const auto* clip = findActiveClip();
     if (clip != nullptr)
     {
-        for (const auto& note : clip->notes)
+        if (m_expressionMode == ExpressionMode::velocity)
         {
-            const int noteX = m_keyWidth + sampleToPixel(static_cast<std::int64_t>(note.startSample));
-            const float velNorm = std::clamp(static_cast<float>(note.velocity) / 127.0f, 0.0f, 1.0f);
-            const int stemH = static_cast<int>(static_cast<float>(bounds.getHeight() - 8) * velNorm);
-            const int stemY = bounds.getBottom() - 4 - stemH;
+            for (const auto& note : clip->notes)
+            {
+                const int noteX = m_keyWidth + sampleToPixel(static_cast<std::int64_t>(note.startSample));
+                const float velNorm = std::clamp(static_cast<float>(note.velocity) / 127.0f, 0.0f, 1.0f);
+                const int stemH = static_cast<int>(static_cast<float>(bounds.getHeight() - 8) * velNorm);
+                const int stemY = bounds.getBottom() - 4 - stemH;
 
-            const bool isSelected = isNoteSelected(note.id);
-            g.setColour(isSelected ? juce::Colour::fromRGB(255, 170, 0) : juce::Colour::fromRGB(0, 229, 255));
-            g.drawVerticalLine(noteX, static_cast<float>(stemY), static_cast<float>(bounds.getBottom() - 4));
-            g.fillEllipse(static_cast<float>(noteX - 2), static_cast<float>(stemY - 2), 5.0f, 5.0f);
+                const bool isSelected = isNoteSelected(note.id);
+                g.setColour(isSelected ? juce::Colour::fromRGB(255, 170, 0) : juce::Colour::fromRGB(0, 229, 255));
+                g.drawVerticalLine(noteX, static_cast<float>(stemY), static_cast<float>(bounds.getBottom() - 4));
+                g.fillEllipse(static_cast<float>(noteX - 2), static_cast<float>(stemY - 2), 5.0f, 5.0f);
+            }
+        }
+        else if (m_expressionMode == ExpressionMode::mpePitch)
+        {
+            // Center zero-bend line
+            const float midY = static_cast<float>(bounds.getY() + bounds.getHeight() / 2);
+            g.setColour(juce::Colour::fromRGB(45, 50, 62));
+            g.drawHorizontalLine(static_cast<int>(midY), static_cast<float>(bounds.getX()), static_cast<float>(bounds.getRight()));
+
+            for (const auto& note : clip->notes)
+            {
+                const int noteX1 = m_keyWidth + sampleToPixel(static_cast<std::int64_t>(note.startSample));
+                const int noteX2 = m_keyWidth + sampleToPixel(static_cast<std::int64_t>(note.startSample + note.lengthSamples));
+                const bool isSelected = isNoteSelected(note.id);
+
+                g.setColour(isSelected ? juce::Colour::fromRGB(255, 170, 0) : juce::Colour::fromRGB(180, 80, 220));
+                // Draw per-note MPE pitch glide curve
+                juce::Path p;
+                p.startNewSubPath(static_cast<float>(noteX1), midY);
+                p.quadraticTo(static_cast<float>((noteX1 + noteX2) / 2), midY - 12.0f,
+                              static_cast<float>(noteX2), midY);
+                g.strokePath(p, juce::PathStrokeType(1.8f));
+                g.fillEllipse(static_cast<float>(noteX1 - 2), midY - 2.0f, 5.0f, 5.0f);
+                g.fillEllipse(static_cast<float>(noteX2 - 2), midY - 2.0f, 5.0f, 5.0f);
+            }
+        }
+        else if (m_expressionMode == ExpressionMode::mpePressure)
+        {
+            for (const auto& note : clip->notes)
+            {
+                const int noteX1 = m_keyWidth + sampleToPixel(static_cast<std::int64_t>(note.startSample));
+                const int noteX2 = m_keyWidth + sampleToPixel(static_cast<std::int64_t>(note.startSample + note.lengthSamples));
+                const bool isSelected = isNoteSelected(note.id);
+
+                g.setColour(isSelected ? juce::Colour::fromRGB(255, 170, 0) : juce::Colour::fromRGB(230, 130, 40));
+                // Draw pressure swell curve
+                const float baseY = static_cast<float>(bounds.getBottom() - 4);
+                const float peakY = static_cast<float>(bounds.getY() + 8);
+                juce::Path p;
+                p.startNewSubPath(static_cast<float>(noteX1), baseY);
+                p.lineTo(static_cast<float>(noteX1 + (noteX2 - noteX1) / 3), peakY);
+                p.lineTo(static_cast<float>(noteX2), baseY);
+                g.strokePath(p, juce::PathStrokeType(1.8f));
+            }
+        }
+        else if (m_expressionMode == ExpressionMode::mpeTimbre)
+        {
+            for (const auto& note : clip->notes)
+            {
+                const int noteX1 = m_keyWidth + sampleToPixel(static_cast<std::int64_t>(note.startSample));
+                const int noteX2 = m_keyWidth + sampleToPixel(static_cast<std::int64_t>(note.startSample + note.lengthSamples));
+                const bool isSelected = isNoteSelected(note.id);
+
+                g.setColour(isSelected ? juce::Colour::fromRGB(255, 170, 0) : juce::Colour::fromRGB(50, 200, 120));
+                const float baseY = static_cast<float>(bounds.getBottom() - 4);
+                const float sweepY = static_cast<float>(bounds.getY() + 10);
+                juce::Path p;
+                p.startNewSubPath(static_cast<float>(noteX1), baseY);
+                p.lineTo(static_cast<float>(noteX2), sweepY);
+                g.strokePath(p, juce::PathStrokeType(1.8f));
+                g.fillEllipse(static_cast<float>(noteX2 - 2), sweepY - 2.0f, 5.0f, 5.0f);
+            }
         }
     }
 
@@ -465,6 +556,12 @@ void PianoRollView::resized()
     m_swingCombo.setBounds(toolbarArea.removeFromLeft(104));
     toolbarArea.removeFromLeft(6);
     m_quantizeButton.setBounds(toolbarArea.removeFromLeft(110));
+
+    // MPE sub-lane buttons on the right side
+    m_btnTimbre.setBounds(toolbarArea.removeFromRight(80).reduced(2, 0));
+    m_btnPressure.setBounds(toolbarArea.removeFromRight(70).reduced(2, 0));
+    m_btnPitch.setBounds(toolbarArea.removeFromRight(75).reduced(2, 0));
+    m_btnVelocity.setBounds(toolbarArea.removeFromRight(45).reduced(2, 0));
 }
 
 void PianoRollView::mouseDown(const juce::MouseEvent& e)

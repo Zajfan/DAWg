@@ -71,6 +71,32 @@ private:
     bool m_limiterActive {false};
 };
 
+class ModulatorRackComponent final : public juce::Component, private juce::Timer
+{
+public:
+    ModulatorRackComponent();
+    ~ModulatorRackComponent() override;
+
+    void paint(juce::Graphics& g) override;
+    void resized() override;
+
+private:
+    void timerCallback() override;
+
+    struct MacroKnob
+    {
+        std::string name;
+        juce::Slider slider;
+        juce::Label label;
+        juce::Colour color;
+    };
+
+    std::array<MacroKnob, 8> m_macros;
+    juce::ComboBox m_lfoShapeCombo;
+    juce::ComboBox m_lfoRateCombo;
+    float m_lfoPhase {0.0f};
+};
+
 class MixerPanel final : public juce::Component
 {
 public:
@@ -82,6 +108,8 @@ public:
     void setViewModel(const EditorViewModel& model);
     void paint(juce::Graphics& g) override;
     void resized() override;
+    void toggleModulatorRack();
+    [[nodiscard]] bool isModulatorRackVisible() const noexcept { return m_showModulators; }
 
 private:
     CommandHandler m_handler;
@@ -89,6 +117,9 @@ private:
     juce::Component m_tracksContainer;
     std::vector<std::unique_ptr<ChannelStripComponent>> m_strips;
     MasterStripComponent m_masterStrip;
+    ModulatorRackComponent m_modulatorRack;
+    juce::TextButton m_toggleModulatorsBtn {"Macros & LFO"};
+    bool m_showModulators {true};
 };
 
 } // namespace dawg::ui

@@ -1,10 +1,12 @@
 #pragma once
 
+#include "ChannelRackView.h"
 #include "EditorViewModel.h"
 #include "MixerPanel.h"
 #include "PianoRollView.h"
 #include "PluginBrowserPanel.h"
 #include "SampleBrowserPanel.h"
+#include "SessionMatrixView.h"
 #include "TimelineView.h"
 #include "TransportBar.h"
 
@@ -57,7 +59,14 @@ public:
     enum class BottomDockMode : std::uint8_t
     {
         mixer,
-        pianoRoll
+        pianoRoll,
+        channelRack
+    };
+
+    enum class CenterViewMode : std::uint8_t
+    {
+        arrangement,
+        sessionView
     };
 
     enum class SidebarTab : std::uint8_t
@@ -78,6 +87,9 @@ public:
     void setWaveformCache(media::WaveformCache* cache);
     void setDockMode(BottomDockMode mode);
     [[nodiscard]] BottomDockMode dockMode() const noexcept { return m_dockMode; }
+    void toggleCenterViewMode();
+    void setCenterViewMode(CenterViewMode mode);
+    [[nodiscard]] CenterViewMode centerViewMode() const noexcept { return m_centerViewMode; }
     void togglePluginBrowser();
     [[nodiscard]] bool isPluginBrowserVisible() const noexcept { return m_browserVisible; }
     void setSidebarTab(SidebarTab tab);
@@ -100,15 +112,19 @@ private:
 
     juce::MenuBarComponent m_menuBar;
     TransportBar m_transportBar;
+    CenterViewMode m_centerViewMode {CenterViewMode::arrangement};
     TimelineView m_timelineView;
+    SessionMatrixView m_sessionMatrixView;
 
     // Bottom Dock
     BottomDockMode m_dockMode {BottomDockMode::mixer};
     juce::TextButton m_tabMixerButton {"Mixer Console [M]"};
     juce::TextButton m_tabPianoRollButton {"Piano Roll [P]"};
+    juce::TextButton m_tabChannelRackButton {"Channel Rack [R]"};
     juce::TextButton m_tabBrowserButton {"Browser [B]"};
     MixerPanel m_mixerPanel;
     PianoRollView m_pianoRollView;
+    ChannelRackView m_channelRackView;
     std::unique_ptr<PluginBrowserPanel> m_pluginBrowser;
     std::unique_ptr<SampleBrowserPanel> m_sampleBrowser;
     juce::TextButton m_sidebarTabPluginsButton {"Plugins"};

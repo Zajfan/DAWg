@@ -25,6 +25,10 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/ClapParameterEditorDialog.h
     ../../ui/shell/SampleBrowserPanel.cpp
     ../../ui/shell/SampleBrowserPanel.h
+    ../../ui/shell/ChannelRackView.cpp
+    ../../ui/shell/ChannelRackView.h
+    ../../ui/shell/SessionMatrixView.cpp
+    ../../ui/shell/SessionMatrixView.h
 )
 target_include_directories(DAWg PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ../../ui/shell)
 target_link_libraries(DAWg PRIVATE dawg_platform_juce dawg_services_commands dawg_services_media dawg_services_persistence dawg_services_plugins)
