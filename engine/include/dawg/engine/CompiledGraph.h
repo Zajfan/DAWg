@@ -1,5 +1,6 @@
 #pragma once
 
+#include <dawg/engine/LoopRegion.h>
 #include <dawg/engine/PlaybackRingBuffer.h>
 
 #include <cstdint>
@@ -36,6 +37,7 @@ struct CompiledTrack
 struct CompiledGraph
 {
     std::uint64_t generation {};
+    LoopRegion loop {};
     std::vector<CompiledTrack> tracks;
     std::vector<CompiledClip> clips;
 

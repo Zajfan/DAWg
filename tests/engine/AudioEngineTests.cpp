@@ -2,10 +2,13 @@
 #include <dawg/engine/ChannelStrip.h>
 #include <dawg/engine/CompiledGraph.h>
 #include <dawg/engine/GraphHandoff.h>
+#include <dawg/engine/LoopRegion.h>
 #include <dawg/engine/MeterTelemetry.h>
+#include <dawg/engine/Metronome.h>
 #include <dawg/engine/PlaybackDescription.h>
 #include <dawg/engine/PlaybackRingBuffer.h>
 #include <dawg/engine/SubBlockSplitter.h>
+#include <dawg/engine/TempoMap.h>
 
 #include <array>
 #include <atomic>
@@ -636,6 +639,128 @@ void testMultiTrackChannelStripFadeRampsSubBlockSplitterAndMetering()
                 && std::fabs(meters.rmsRight - 0.25f) < 1e-5f,
             "lock-free meter telemetry reports exact master peak and RMS");
 }
+
+void testTempoMapSubBlockLoopWrappingAndMetronome()
+{
+    using dawg::engine::LoopRegion;
+    using dawg::engine::Metronome;
+    using dawg::engine::TempoEvent;
+    using dawg::engine::TempoMap;
+    using dawg::engine::TimeSignatureEvent;
+
+    // 1. TempoMap conversions across tempo and time signature changes
+    TempoMap tempoMap;
+    // 0..4 beats (0..3840 ticks) at 120 BPM (0.5s/beat = 24000 samples/beat at 48kHz -> 96000 samples)
+    // From tick 3840 (bar 2) onward: 240 BPM (0.25s/beat = 12000 samples/beat at 48kHz) in 3/4 time
+    const std::array<TempoEvent, 2> tempos {{
+        {.tick = 0, .bpm = 120.0},
+        {.tick = 3840, .bpm = 240.0}
+    }};
+    const std::array<TimeSignatureEvent, 2> signatures {{
+        {.tick = 0, .numerator = 4, .denominator = 4},
+        {.tick = 3840, .numerator = 3, .denominator = 4}
+    }};
+    require(tempoMap.setEvents(tempos, signatures), "TempoMap accepts sorted tempo/signature events");
+
+    require(tempoMap.tickToSample(960.0, 48000.0) == 24000, "1 beat at 120 BPM is 24000 samples");
+    require(tempoMap.tickToSample(3840.0, 48000.0) == 96000, "bar 2 downbeat is at 96000 samples");
+    require(tempoMap.tickToSample(4800.0, 48000.0) == 108000, "1 beat at 240 BPM adds 12000 samples");
+    require(std::fabs(tempoMap.sampleToTick(108000, 48000.0) - 4800.0) < 1e-3,
+            "sampleToTick inverts tickToSample across tempo change");
+
+    const auto bbtBar1Beat3 = tempoMap.sampleToBarBeatTick(48000, 48000.0);
+    require(bbtBar1Beat3.bar == 1 && bbtBar1Beat3.beat == 3 && bbtBar1Beat3.tick == 0,
+            "48000 samples is bar 1 beat 3 tick 0");
+    const auto bbtBar2Beat2 = tempoMap.sampleToBarBeatTick(108000, 48000.0);
+    require(bbtBar2Beat2.bar == 2 && bbtBar2Beat2.beat == 2 && bbtBar2Beat2.tick == 0,
+            "108000 samples is bar 2 beat 2 tick 0 in 3/4 time");
+
+    // 2. Sub-block loop wrapping mid-callback
+    AudioEngine engine;
+    require(engine.prepare({48000.0, 8, 2}), "prepare engine for loop wrap test");
+
+    PlaybackRingBuffer ring;
+    require(ring.prepare(1, 16), "prepare ring for loop wrap");
+    constexpr std::array<float, 4> ramp {0.1f, 0.2f, 0.3f, 0.4f};
+    const std::array<const float*, 1> rampPlanes {ramp.data()};
+    require(ring.write(0, rampPlanes, ramp.size()) == ramp.size(), "prefill loop ramp");
+
+    auto graph = std::make_unique<CompiledGraph>();
+    graph->generation = 200;
+    graph->loop = LoopRegion {.enabled = true, .startSample = 0, .endSample = 4};
+    graph->clips.push_back(CompiledClip {
+        .clipId = 1,
+        .assetId = 1,
+        .buffer = &ring,
+        .startSample = 0,
+        .lengthSamples = 4,
+        .sourceOffset = 0,
+        .channelCount = 1,
+        .gainLinear = 1.0f,
+        .fadeInSamples = 0,
+        .fadeOutSamples = 0
+    });
+    graph->tracks.push_back(CompiledTrack {
+        .trackId = 1,
+        .muted = false,
+        .solo = false,
+        .phaseInvert = false,
+        .gainLinear = 1.0f,
+        .pan = 0.0f,
+        .clipOffset = 0,
+        .clipCount = 1
+    });
+
+    engine.publishCompiledGraph(std::move(graph));
+    require(engine.enqueueCommand({EngineCommandType::seekSamples, 2}), "seek to sample 2");
+    require(engine.enqueueCommand({EngineCommandType::play, 0}), "start playback");
+
+    std::array<float, 8> left {};
+    std::array<float, 8> right {};
+    std::array<float*, 2> out {left.data(), right.data()};
+
+    {
+        ScopedAllocationGuard guard;
+        engine.process({out.data(), out.size(), left.size()}, {}, {});
+    }
+    require(g_allocationCount.load(std::memory_order_acquire) == 0,
+            "loop-wrapped callback performs zero RT allocations");
+
+    // Starting at sample 2 with loop [0, 4) over an 8-sample block:
+    // Frames 0..1 play samples 2..3 (0.3, 0.4)
+    // Frames 2..5 wrap and play samples 0..3 (0.1, 0.2, 0.3, 0.4)
+    // Frames 6..7 wrap again and play samples 0..1 (0.1, 0.2)
+    // Final transport samplePosition must be 2!
+    constexpr std::array<float, 8> expectedWrapped {
+        0.3f, 0.4f, 0.1f, 0.2f, 0.3f, 0.4f, 0.1f, 0.2f
+    };
+    for (std::size_t i = 0; i < expectedWrapped.size(); ++i)
+    {
+        require(std::fabs(left[i] - expectedWrapped[i]) < 1e-6f,
+                "mid-block loop wrap renders exact seamless samples across loop boundary");
+    }
+    require(engine.transportState().samplePosition == 2,
+            "transport position wraps modulo loop region");
+
+    // 3. Metronome click synthesis at beat boundary with zero RT allocations
+    Metronome metronome;
+    metronome.setEnabled(true);
+    metronome.setGain(0.5f);
+    std::fill(left.begin(), left.end(), 0.0f);
+    std::fill(right.begin(), right.end(), 0.0f);
+    {
+        ScopedAllocationGuard guard;
+        metronome.renderSlice(
+            {out.data(), out.size(), left.size()},
+            0, left.size(), 0, 48000.0, tempoMap);
+    }
+    require(g_allocationCount.load(std::memory_order_acquire) == 0,
+            "Metronome::renderSlice performs zero RT allocations");
+    float clickEnergy = 0.0f;
+    for (const float s : left)
+        clickEnergy += std::fabs(s);
+    require(clickEnergy > 0.01f, "Metronome synthesizes audible downbeat click at sample 0");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -734,4 +859,5 @@ int main()
     testZeroAllocationOnAudioCallbackPath();
     testGraphHandoffAndZeroAllocationCompiledGraphAdoption();
     testMultiTrackChannelStripFadeRampsSubBlockSplitterAndMetering();
+    testTempoMapSubBlockLoopWrappingAndMetronome();
 }

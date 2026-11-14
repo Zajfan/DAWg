@@ -229,96 +229,140 @@ void AudioEngine::process(const AudioBufferView output, const MidiBufferView,
             }
         }
 
-        for (const auto& track : compiledGraph->tracks)
-        {
-            if (! isTrackAudible(track, anyTrackSoloed))
-                continue;
-
-            const float trackPolarity = track.phaseInvert ? -1.0f : 1.0f;
-            const float trackScale = track.gainLinear * trackPolarity;
-            const auto panGains = equalPowerPanGains(track.pan);
-            const float trackLeftGain = trackScale * panGains.left;
-            const float trackRightGain = trackScale * panGains.right;
-
-            const auto endClip = std::min<std::size_t>(
-                compiledGraph->clips.size(),
-                static_cast<std::size_t>(track.clipOffset) + track.clipCount);
-            for (std::size_t idx = track.clipOffset; idx < endClip; ++idx)
+        const auto renderCompiledSlice = [&](const std::uint64_t sliceStartSample,
+                                             const std::size_t destOffset,
+                                             const std::size_t sliceFrames) noexcept {
+            const auto sliceEndSample = saturatingAdd(sliceStartSample, sliceFrames);
+            for (const auto& track : compiledGraph->tracks)
             {
-                const auto& clip = compiledGraph->clips[idx];
-                if (clip.lengthSamples == 0 || clip.channelCount == 0)
+                if (! isTrackAudible(track, anyTrackSoloed))
                     continue;
 
-                const auto clipStart = clip.startSample;
-                const auto clipEnd = saturatingAdd(clipStart, clip.lengthSamples);
-                const auto overlapStart = std::max(blockStart, clipStart);
-                const auto overlapEnd = std::min(blockEnd, clipEnd);
-                if (overlapStart >= overlapEnd)
-                    continue;
+                const float trackPolarity = track.phaseInvert ? -1.0f : 1.0f;
+                const float trackScale = track.gainLinear * trackPolarity;
+                const auto panGains = equalPowerPanGains(track.pan);
+                const float trackLeftGain = trackScale * panGains.left;
+                const float trackRightGain = trackScale * panGains.right;
 
-                const auto overlapFrames = static_cast<std::size_t>(overlapEnd - overlapStart);
-                const auto blockOffset = static_cast<std::size_t>(overlapStart - blockStart);
-                const auto clipOffset = overlapStart - clipStart;
-                const auto sourceFrame = saturatingAdd(clip.sourceOffset, clipOffset);
-
-                if (clip.buffer == nullptr || overlapFrames > scratchCapacity)
+                const auto endClip = std::min<std::size_t>(
+                    compiledGraph->clips.size(),
+                    static_cast<std::size_t>(track.clipOffset) + track.clipCount);
+                for (std::size_t idx = track.clipOffset; idx < endClip; ++idx)
                 {
-                    ++m_transportState.underrunCount;
-                    continue;
-                }
+                    const auto& clip = compiledGraph->clips[idx];
+                    if (clip.lengthSamples == 0 || clip.channelCount == 0)
+                        continue;
 
-                clip.buffer->requestSourceFrame(sourceFrame);
-                std::size_t framesRead = 0;
-                if (clip.channelCount == 1)
-                {
-                    std::array<float*, 1> dest {m_scratchLeft.data()};
-                    framesRead = clip.buffer->read(sourceFrame, dest, overlapFrames);
-                    for (std::size_t f = 0; f < framesRead; ++f)
+                    const auto clipStart = clip.startSample;
+                    const auto clipEnd = saturatingAdd(clipStart, clip.lengthSamples);
+                    const auto overlapStart = std::max(sliceStartSample, clipStart);
+                    const auto overlapEnd = std::min(sliceEndSample, clipEnd);
+                    if (overlapStart >= overlapEnd)
+                        continue;
+
+                    const auto overlapFrames = static_cast<std::size_t>(overlapEnd - overlapStart);
+                    const auto blockOffset =
+                        destOffset + static_cast<std::size_t>(overlapStart - sliceStartSample);
+                    const auto clipOffset = overlapStart - clipStart;
+                    const auto sourceFrame = saturatingAdd(clip.sourceOffset, clipOffset);
+
+                    if (clip.buffer == nullptr || overlapFrames > scratchCapacity)
                     {
-                        const float env = clipEnvelopeGain(
-                            clipOffset + f, clip.lengthSamples,
-                            clip.fadeInSamples, clip.fadeOutSamples);
-                        const float s = m_scratchLeft[f] * clip.gainLinear * env;
-                        if (output.channelCount == 1 && output.channels[0] != nullptr)
+                        ++m_transportState.underrunCount;
+                        continue;
+                    }
+
+                    clip.buffer->requestSourceFrame(sourceFrame);
+                    std::size_t framesRead = 0;
+                    if (clip.channelCount == 1)
+                    {
+                        std::array<float*, 1> dest {m_scratchLeft.data()};
+                        framesRead = clip.buffer->read(sourceFrame, dest, overlapFrames);
+                        for (std::size_t f = 0; f < framesRead; ++f)
                         {
-                            output.channels[0][blockOffset + f] += s * trackScale;
-                        }
-                        else
-                        {
-                            if (output.channelCount >= 1 && output.channels[0] != nullptr)
-                                output.channels[0][blockOffset + f] += s * trackLeftGain;
-                            if (output.channelCount >= 2 && output.channels[1] != nullptr)
-                                output.channels[1][blockOffset + f] += s * trackRightGain;
-                            for (std::size_t ch = 2; ch < output.channelCount; ++ch)
+                            const float env = clipEnvelopeGain(
+                                clipOffset + f, clip.lengthSamples,
+                                clip.fadeInSamples, clip.fadeOutSamples);
+                            const float s = m_scratchLeft[f] * clip.gainLinear * env;
+                            if (output.channelCount == 1 && output.channels[0] != nullptr)
                             {
-                                if (output.channels[ch] != nullptr)
-                                    output.channels[ch][blockOffset + f] += s * trackScale;
+                                output.channels[0][blockOffset + f] += s * trackScale;
+                            }
+                            else
+                            {
+                                if (output.channelCount >= 1 && output.channels[0] != nullptr)
+                                    output.channels[0][blockOffset + f] += s * trackLeftGain;
+                                if (output.channelCount >= 2 && output.channels[1] != nullptr)
+                                    output.channels[1][blockOffset + f] += s * trackRightGain;
+                                for (std::size_t ch = 2; ch < output.channelCount; ++ch)
+                                {
+                                    if (output.channels[ch] != nullptr)
+                                        output.channels[ch][blockOffset + f] += s * trackScale;
+                                }
                             }
                         }
                     }
-                }
-                else if (clip.channelCount >= 2)
-                {
-                    std::array<float*, 2> dest {m_scratchLeft.data(), m_scratchRight.data()};
-                    framesRead = clip.buffer->read(sourceFrame, dest, overlapFrames);
-                    for (std::size_t f = 0; f < framesRead; ++f)
+                    else if (clip.channelCount >= 2)
                     {
-                        const float env = clipEnvelopeGain(
-                            clipOffset + f, clip.lengthSamples,
-                            clip.fadeInSamples, clip.fadeOutSamples);
-                        const float cGain = clip.gainLinear * env;
-                        if (output.channelCount >= 1 && output.channels[0] != nullptr)
-                            output.channels[0][blockOffset + f] += m_scratchLeft[f] * cGain * trackLeftGain;
-                        if (output.channelCount >= 2 && output.channels[1] != nullptr)
-                            output.channels[1][blockOffset + f] += m_scratchRight[f] * cGain * trackRightGain;
+                        std::array<float*, 2> dest {m_scratchLeft.data(), m_scratchRight.data()};
+                        framesRead = clip.buffer->read(sourceFrame, dest, overlapFrames);
+                        for (std::size_t f = 0; f < framesRead; ++f)
+                        {
+                            const float env = clipEnvelopeGain(
+                                clipOffset + f, clip.lengthSamples,
+                                clip.fadeInSamples, clip.fadeOutSamples);
+                            const float cGain = clip.gainLinear * env;
+                            if (output.channelCount >= 1 && output.channels[0] != nullptr)
+                                output.channels[0][blockOffset + f] += m_scratchLeft[f] * cGain * trackLeftGain;
+                            if (output.channelCount >= 2 && output.channels[1] != nullptr)
+                                output.channels[1][blockOffset + f] += m_scratchRight[f] * cGain * trackRightGain;
+                        }
                     }
-                }
 
-                if (framesRead < overlapFrames)
-                    ++m_transportState.underrunCount;
+                    if (framesRead < overlapFrames)
+                        ++m_transportState.underrunCount;
+                }
             }
+        };
+
+        if (compiledGraph->loop.isValid())
+        {
+            const auto loopStart = compiledGraph->loop.startSample;
+            const auto loopEnd = compiledGraph->loop.endSample;
+            std::size_t remainingFrames = output.frameCount;
+            std::size_t destOffset = 0;
+            auto currentTimeline = blockStart;
+
+            while (remainingFrames > 0)
+            {
+                if (currentTimeline >= loopStart && currentTimeline < loopEnd)
+                {
+                    const auto untilWrap = static_cast<std::size_t>(
+                        std::min<std::uint64_t>(remainingFrames, loopEnd - currentTimeline));
+                    renderCompiledSlice(currentTimeline, destOffset, untilWrap);
+                    destOffset += untilWrap;
+                    remainingFrames -= untilWrap;
+                    currentTimeline += untilWrap;
+                    if (currentTimeline == loopEnd)
+                        currentTimeline = loopStart;
+                }
+                else
+                {
+                    renderCompiledSlice(currentTimeline, destOffset, remainingFrames);
+                    currentTimeline = saturatingAdd(currentTimeline, remainingFrames);
+                    remainingFrames = 0;
+                }
+            }
+
+            publishMasterMeters();
+            m_transportState.samplePosition = static_cast<std::int64_t>(
+                std::min<std::uint64_t>(
+                    currentTimeline,
+                    static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())));
+            return;
         }
 
+        renderCompiledSlice(blockStart, 0, output.frameCount);
         publishMasterMeters();
         m_transportState.samplePosition = saturatingAdvance(
             m_transportState.samplePosition, output.frameCount);

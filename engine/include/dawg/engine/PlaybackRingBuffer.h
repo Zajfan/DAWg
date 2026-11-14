@@ -27,6 +27,7 @@ private:
     std::vector<float> m_samples;
     std::size_t m_channelCount {};
     std::size_t m_capacityFrames {};
+    std::atomic<std::uint64_t> m_anchorFrame {0};
     std::atomic<std::uint64_t> m_readFrame {0};
     std::atomic<std::uint64_t> m_writeFrame {0};
     std::atomic<std::uint64_t> m_requestedFrame {0};

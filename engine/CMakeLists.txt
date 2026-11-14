@@ -1,8 +1,10 @@
 add_library(dawg_engine_core STATIC
     src/AudioEngine.cpp
     src/GraphHandoff.cpp
+    src/Metronome.cpp
     src/PlaybackRingBuffer.cpp
     src/RenderSnapshotPublisher.cpp
+    src/TempoMap.cpp
     src/TransportCommandQueue.cpp
 )
 target_include_directories(dawg_engine_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

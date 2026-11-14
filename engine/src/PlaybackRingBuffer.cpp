@@ -40,6 +40,7 @@ bool PlaybackRingBuffer::prepare(const std::size_t channelCount,
 void PlaybackRingBuffer::reset() noexcept
 {
     m_anchored.store(false, std::memory_order_release);
+    m_anchorFrame.store(0, std::memory_order_relaxed);
     m_readFrame.store(0, std::memory_order_relaxed);
     m_writeFrame.store(0, std::memory_order_relaxed);
     m_requestedFrame.store(0, std::memory_order_release);
@@ -101,7 +102,10 @@ std::size_t PlaybackRingBuffer::write(const std::uint64_t sourceFrame,
     }
 
     if (! wasAnchored)
+    {
+        m_anchorFrame.store(sourceFrame, std::memory_order_relaxed);
         m_readFrame.store(sourceFrame, std::memory_order_relaxed);
+    }
     m_writeFrame.store(writeFrame + accepted, std::memory_order_release);
     if (! wasAnchored)
         m_anchored.store(true, std::memory_order_release);
@@ -127,8 +131,11 @@ std::size_t PlaybackRingBuffer::read(const std::uint64_t sourceFrame,
         return 0;
 
     const auto writeFrame = m_writeFrame.load(std::memory_order_acquire);
-    const auto readFrame = m_readFrame.load(std::memory_order_relaxed);
-    if (sourceFrame < readFrame || sourceFrame >= writeFrame)
+    const auto anchorFrame = m_anchorFrame.load(std::memory_order_relaxed);
+    const auto earliestRetained = writeFrame > m_capacityFrames
+        ? std::max(anchorFrame, writeFrame - m_capacityFrames)
+        : anchorFrame;
+    if (sourceFrame < earliestRetained || sourceFrame >= writeFrame)
         return 0;
 
     const auto available = static_cast<std::size_t>(writeFrame - sourceFrame);
