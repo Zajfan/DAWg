@@ -32,6 +32,12 @@ public:
     [[nodiscard]] bool removeMidiNote(MidiClipId clipId, NoteId noteId);
     [[nodiscard]] bool moveMidiNote(MidiClipId clipId, NoteId noteId, std::uint64_t newStartSample, std::uint8_t newPitch);
     [[nodiscard]] bool resizeMidiNote(MidiClipId clipId, NoteId noteId, std::uint64_t newLengthSamples);
+    AutomationLaneId addAutomationLane(AutomationLane lane);
+    [[nodiscard]] bool removeAutomationLane(AutomationLaneId laneId);
+    AutomationPointId addAutomationPoint(AutomationLaneId laneId, AutomationPoint point);
+    [[nodiscard]] bool removeAutomationPoint(AutomationLaneId laneId, AutomationPointId pointId);
+    [[nodiscard]] bool moveAutomationPoint(AutomationLaneId laneId, AutomationPointId pointId,
+                                           std::uint64_t newSamplePosition, float newValue, float newTension);
     // Empty names and unknown IDs fail without changing state.
     [[nodiscard]] bool removeTrack(TrackId id);
     [[nodiscard]] bool renameTrack(TrackId id, std::string name);
@@ -52,13 +58,16 @@ public:
 
 private:
     Project(ProjectSnapshot state, TrackId nextTrackId, MediaAssetId nextAssetId,
-            ClipId nextClipId, NoteId nextNoteId = 1);
+            ClipId nextClipId, NoteId nextNoteId = 1, AutomationLaneId nextLaneId = 1,
+            AutomationPointId nextPointId = 1);
 
     ProjectSnapshot m_state;
     TrackId m_nextTrackId {1};
     MediaAssetId m_nextAssetId {1};
     ClipId m_nextClipId {1};
     NoteId m_nextNoteId {1};
+    AutomationLaneId m_nextLaneId {1};
+    AutomationPointId m_nextPointId {1};
 };
 
 } // namespace dawg::project

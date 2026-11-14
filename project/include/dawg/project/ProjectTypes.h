@@ -12,8 +12,47 @@ using MediaAssetId = std::uint64_t;
 using ClipId = std::uint64_t;
 using NoteId = std::uint64_t;
 using MidiClipId = std::uint64_t;
+using AutomationLaneId = std::uint64_t;
+using AutomationPointId = std::uint64_t;
 
 enum class TrackKind : std::uint8_t { audio, instrument };
+
+enum class AutomationTargetKind : std::uint8_t
+{
+    trackVolume,
+    trackPan,
+    trackSend,
+    dspParameter
+};
+
+struct AutomationTarget
+{
+    AutomationTargetKind kind {AutomationTargetKind::trackVolume};
+    TrackId trackId {0};
+    std::uint32_t slotIndex {0};
+    std::uint32_t parameterIndex {0};
+
+    friend bool operator==(const AutomationTarget&, const AutomationTarget&) = default;
+};
+
+struct AutomationPoint
+{
+    AutomationPointId id {0};
+    std::uint64_t samplePosition {0};
+    float value {1.0f};
+    float curveTension {0.0f};
+
+    friend bool operator==(const AutomationPoint&, const AutomationPoint&) = default;
+};
+
+struct AutomationLane
+{
+    AutomationLaneId id {0};
+    AutomationTarget target {};
+    std::vector<AutomationPoint> points;
+
+    friend bool operator==(const AutomationLane&, const AutomationLane&) = default;
+};
 
 enum class AudioAssetPathKind : std::uint8_t { projectRelative, absolute };
 

@@ -87,6 +87,19 @@ std::string serialize(const ProjectSnapshot& snapshot)
             appendInteger(note.lengthSamples);
         }
     }
+    appendInteger(snapshot.automationLanes.size());
+    for (const auto& lane : snapshot.automationLanes)
+    {
+        appendInteger(lane.id);
+        appendInteger(static_cast<std::uint8_t>(lane.target.kind));
+        appendInteger(lane.target.trackId);
+        appendInteger(lane.points.size());
+        for (const auto& pt : lane.points)
+        {
+            appendInteger(pt.id);
+            appendInteger(pt.samplePosition);
+        }
+    }
     return bytes;
 }
 
@@ -562,6 +575,65 @@ void testMidiTracksClipsAndNotes()
     require(project.apply(RemoveMidiClip {clipId}), "remove midi clip");
     require(project.snapshot().midiClips.empty(), "all midi clips removed");
 }
+
+void testAutomationLanesAndPoints()
+{
+    auto project = Project::create("Automation Project", 1);
+    const auto trackId = project.addAudioTrack("Vocal");
+    require(trackId != 0, "addAudioTrack succeeded");
+
+    // Add automation lane
+    const auto laneId = project.addAutomationLane(AutomationLane {
+        .id = 0,
+        .target = AutomationTarget {
+            .kind = AutomationTargetKind::trackVolume,
+            .trackId = trackId,
+            .slotIndex = 0,
+            .parameterIndex = 0
+        },
+        .points = {}
+    });
+    require(laneId != 0, "addAutomationLane succeeded");
+    require(project.snapshot().automationLanes.size() == 1, "one lane in snapshot");
+
+    // Add points
+    const auto pt1 = project.addAutomationPoint(laneId, AutomationPoint {
+        .id = 0,
+        .samplePosition = 0,
+        .value = 0.0f,
+        .curveTension = 0.0f
+    });
+    const auto pt2 = project.addAutomationPoint(laneId, AutomationPoint {
+        .id = 0,
+        .samplePosition = 48000,
+        .value = 1.0f,
+        .curveTension = 0.5f
+    });
+    require(pt1 != 0 && pt2 != 0 && pt1 != pt2, "two points added with distinct IDs");
+    require(project.snapshot().automationLanes[0].points.size() == 2, "two points in lane");
+
+    // Move point
+    require(project.apply(MoveAutomationPoint {laneId, pt2, 96000, 0.8f, -0.2f}), "move point");
+    const auto postMoveSnap = project.snapshot();
+    const auto& updatedPt2 = postMoveSnap.automationLanes[0].points[1];
+    require(updatedPt2.samplePosition == 96000, "samplePosition moved to 96000");
+    require(std::abs(updatedPt2.value - 0.8f) < 1e-4f, "value updated to 0.8");
+    require(std::abs(updatedPt2.curveTension - (-0.2f)) < 1e-4f, "tension updated to -0.2");
+
+    // Snapshot restoration
+    const auto snap = project.snapshot();
+    const auto restored = Project::fromSnapshot(snap);
+    require(restored.has_value(), "fromSnapshot restored automation lane");
+    require(restored->snapshot() == snap, "restored snapshot equals original");
+
+    // Remove point
+    require(project.apply(RemoveAutomationPoint {laneId, pt1}), "remove point");
+    require(project.snapshot().automationLanes[0].points.size() == 1, "one point remains");
+
+    // Remove lane
+    require(project.apply(RemoveAutomationLane {laneId}), "remove lane");
+    require(project.snapshot().automationLanes.empty(), "automation lane removed");
+}
 }
 
 int main()
@@ -579,5 +651,6 @@ int main()
     testProjectTempoAndLoopCommands();
     testExtendedTimelineCommands();
     testMidiTracksClipsAndNotes();
-    std::puts("PASS: 13 project behavior tests");
+    testAutomationLanesAndPoints();
+    std::puts("PASS: 14 project behavior tests");
 }

@@ -1,4 +1,5 @@
 #include <dawg/engine/AudioEngine.h>
+#include <dawg/engine/AutomationCurveEvaluator.h>
 #include <dawg/engine/ChannelStrip.h>
 #include <dawg/engine/CompiledGraph.h>
 #include <dawg/engine/DspGraph.h>
@@ -1339,6 +1340,60 @@ void testClapPluginNodeHostingPdcAndCrashImmunity()
     node.clearCrashed();
     require(node.prepare(48000.0, 512, 2), "re-prepare resets state");
 }
+
+void testAutomationCurveEvaluatorAndBezierTension()
+{
+    using namespace dawg::engine;
+
+    // Empty sequence returns default value
+    require(std::abs(AutomationCurveEvaluator::evaluate({}, 100, 0.75f) - 0.75f) < 1e-4f,
+            "empty points returns defaultValue");
+
+    // Single point returns constant
+    std::array<CurvePoint, 1> single {{ {.samplePosition = 500, .value = 0.6f, .curveTension = 0.0f} }};
+    require(std::abs(AutomationCurveEvaluator::evaluate(single, 0) - 0.6f) < 1e-4f,
+            "single point before returns point value");
+    require(std::abs(AutomationCurveEvaluator::evaluate(single, 1000) - 0.6f) < 1e-4f,
+            "single point after returns point value");
+
+    // Linear ramp
+    std::array<CurvePoint, 2> linear {{
+        {.samplePosition = 0, .value = 0.0f, .curveTension = 0.0f},
+        {.samplePosition = 1000, .value = 1.0f, .curveTension = 0.0f}
+    }};
+    require(std::abs(AutomationCurveEvaluator::evaluate(linear, 0) - 0.0f) < 1e-4f, "linear at 0");
+    require(std::abs(AutomationCurveEvaluator::evaluate(linear, 500) - 0.5f) < 1e-4f, "linear midpoint is 0.5");
+    require(std::abs(AutomationCurveEvaluator::evaluate(linear, 1000) - 1.0f) < 1e-4f, "linear at 1000");
+
+    // Tension curves
+    // Convex curve (tension > 0): starts slow, accelerates later -> midpoint is < 0.5
+    std::array<CurvePoint, 2> convex {{
+        {.samplePosition = 0, .value = 0.0f, .curveTension = 0.8f},
+        {.samplePosition = 1000, .value = 1.0f, .curveTension = 0.0f}
+    }};
+    const float convexMid = AutomationCurveEvaluator::evaluate(convex, 500);
+    require(convexMid < 0.45f, "convex curve midpoint is delayed below linear midpoint");
+
+    // Concave curve (tension < 0): starts fast, decelerates later -> midpoint is > 0.5
+    std::array<CurvePoint, 2> concave {{
+        {.samplePosition = 0, .value = 0.0f, .curveTension = -0.8f},
+        {.samplePosition = 1000, .value = 1.0f, .curveTension = 0.0f}
+    }};
+    const float concaveMid = AutomationCurveEvaluator::evaluate(concave, 500);
+    require(concaveMid > 0.55f, "concave curve midpoint is boosted above linear midpoint");
+
+    // Block evaluation without allocation
+    std::array<float, 64> blockValues {};
+    {
+        ScopedAllocationGuard guard;
+        AutomationCurveEvaluator::evaluateBlock(linear, 200, blockValues);
+    }
+    for (std::size_t i = 0; i < 64; ++i)
+    {
+        const float expected = static_cast<float>(200 + i) / 1000.0f;
+        require(std::abs(blockValues[i] - expected) < 1e-4f, "block evaluation matches sample-accurate ramp");
+    }
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -1444,4 +1499,5 @@ int main()
     testAudioEngineMasterLimiterActivation();
     testTnhcSynthNodePolyphonyAndMidi();
     testClapPluginNodeHostingPdcAndCrashImmunity();
+    testAutomationCurveEvaluatorAndBezierTension();
 }

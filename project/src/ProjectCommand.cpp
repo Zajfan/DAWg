@@ -31,6 +31,16 @@ bool Project::apply(const ProjectCommand& command)
             return moveMidiNote(operation.clipId, operation.noteId, operation.newStartSample, operation.newPitch);
         else if constexpr (std::is_same_v<Operation, ResizeMidiNote>)
             return resizeMidiNote(operation.clipId, operation.noteId, operation.newLengthSamples);
+        else if constexpr (std::is_same_v<Operation, AddAutomationLane>)
+            return addAutomationLane(operation.lane) != 0;
+        else if constexpr (std::is_same_v<Operation, RemoveAutomationLane>)
+            return removeAutomationLane(operation.laneId);
+        else if constexpr (std::is_same_v<Operation, AddAutomationPoint>)
+            return addAutomationPoint(operation.laneId, operation.point) != 0;
+        else if constexpr (std::is_same_v<Operation, RemoveAutomationPoint>)
+            return removeAutomationPoint(operation.laneId, operation.pointId);
+        else if constexpr (std::is_same_v<Operation, MoveAutomationPoint>)
+            return moveAutomationPoint(operation.laneId, operation.pointId, operation.newSamplePosition, operation.newValue, operation.newTension);
         else if constexpr (std::is_same_v<Operation, SetTrackMute>)
             return setTrackMute(operation.id, operation.muted);
         else if constexpr (std::is_same_v<Operation, SetTrackSolo>)

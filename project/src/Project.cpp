@@ -36,15 +36,17 @@ Id nextIdAfter(const Id id)
 } // namespace
 
 Project::Project(ProjectSnapshot state, const TrackId nextTrackId, const MediaAssetId nextAssetId,
-                 const ClipId nextClipId, const NoteId nextNoteId)
+                 const ClipId nextClipId, const NoteId nextNoteId,
+                 const AutomationLaneId nextLaneId, const AutomationPointId nextPointId)
     : m_state {std::move(state)}, m_nextTrackId {nextTrackId}, m_nextAssetId {nextAssetId},
-      m_nextClipId {nextClipId}, m_nextNoteId {nextNoteId}
+      m_nextClipId {nextClipId}, m_nextNoteId {nextNoteId}, m_nextLaneId {nextLaneId},
+      m_nextPointId {nextPointId}
 {
 }
 
 Project Project::create(std::string name, const ProjectId id)
 {
-    return Project {{2, id, std::move(name), {}, {}, {}, {}, TempoSetting {}, LoopSetting {}}, 1, 1, 1, 1};
+    return Project {{2, id, std::move(name), {}, {}, {}, {}, {}, TempoSetting {}, LoopSetting {}}, 1, 1, 1, 1, 1, 1};
 }
 
 std::optional<Project> Project::fromSnapshot(ProjectSnapshot snapshot)
@@ -118,8 +120,30 @@ std::optional<Project> Project::fromSnapshot(ProjectSnapshot snapshot)
         }
     }
 
+    std::unordered_set<AutomationLaneId> laneIds;
+    AutomationLaneId largestLaneId {};
+    AutomationPointId largestPointId {};
+
+    for (const auto& lane : snapshot.automationLanes)
+    {
+        if (lane.id == 0 || ! laneIds.insert(lane.id).second)
+            return std::nullopt;
+        if (lane.target.trackId != 0 && ! ids.contains(lane.target.trackId))
+            return std::nullopt;
+        largestLaneId = std::max(largestLaneId, lane.id);
+
+        std::unordered_set<AutomationPointId> pointIds;
+        for (const auto& pt : lane.points)
+        {
+            if (pt.id == 0 || ! pointIds.insert(pt.id).second)
+                return std::nullopt;
+            largestPointId = std::max(largestPointId, pt.id);
+        }
+    }
+
     return Project {std::move(snapshot), nextIdAfter(largestId), nextIdAfter(largestAssetId),
-                    nextIdAfter(largestClipId), nextIdAfter(largestNoteId)};
+                    nextIdAfter(largestClipId), nextIdAfter(largestNoteId),
+                    nextIdAfter(largestLaneId), nextIdAfter(largestPointId)};
 }
 
 ProjectSnapshot Project::snapshot() const
@@ -579,6 +603,121 @@ bool Project::resizeMidiNote(const MidiClipId clipId, const NoteId noteId, const
     if (noteIt == it->notes.end())
         return false;
     noteIt->lengthSamples = newLengthSamples;
+    return true;
+}
+
+AutomationLaneId Project::addAutomationLane(AutomationLane lane)
+{
+    if (lane.target.trackId != 0)
+    {
+        const auto track = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                        [&lane](const Track& t) { return t.id == lane.target.trackId; });
+        if (track == m_state.tracks.end())
+            return 0;
+    }
+
+    if (lane.id == 0)
+    {
+        if (m_nextLaneId == 0)
+            return 0;
+        lane.id = m_nextLaneId;
+    }
+    else if (std::any_of(m_state.automationLanes.begin(), m_state.automationLanes.end(),
+                         [&lane](const AutomationLane& l) { return l.id == lane.id; }))
+    {
+        return 0;
+    }
+
+    m_state.automationLanes.push_back(std::move(lane));
+    const auto id = m_state.automationLanes.back().id;
+    if (id >= m_nextLaneId)
+        m_nextLaneId = nextIdAfter(id);
+    return id;
+}
+
+bool Project::removeAutomationLane(const AutomationLaneId laneId)
+{
+    if (laneId == 0)
+        return false;
+    const auto it = std::find_if(m_state.automationLanes.begin(), m_state.automationLanes.end(),
+                                 [laneId](const AutomationLane& l) { return l.id == laneId; });
+    if (it == m_state.automationLanes.end())
+        return false;
+    m_state.automationLanes.erase(it);
+    return true;
+}
+
+AutomationPointId Project::addAutomationPoint(const AutomationLaneId laneId, AutomationPoint point)
+{
+    const auto it = std::find_if(m_state.automationLanes.begin(), m_state.automationLanes.end(),
+                                 [laneId](const AutomationLane& l) { return l.id == laneId; });
+    if (it == m_state.automationLanes.end() || ! std::isfinite(point.value) || ! std::isfinite(point.curveTension))
+        return 0;
+
+    point.curveTension = std::clamp(point.curveTension, -1.0f, 1.0f);
+
+    if (point.id == 0)
+    {
+        if (m_nextPointId == 0)
+            return 0;
+        point.id = m_nextPointId;
+    }
+    else if (std::any_of(it->points.begin(), it->points.end(),
+                         [&point](const AutomationPoint& p) { return p.id == point.id; }))
+    {
+        return 0;
+    }
+
+    const auto insertPos = std::upper_bound(it->points.begin(), it->points.end(), point,
+                                            [](const AutomationPoint& a, const AutomationPoint& b) {
+                                                return a.samplePosition < b.samplePosition;
+                                            });
+    it->points.insert(insertPos, point);
+    const auto id = point.id;
+    if (id >= m_nextPointId)
+        m_nextPointId = nextIdAfter(id);
+    return id;
+}
+
+bool Project::removeAutomationPoint(const AutomationLaneId laneId, const AutomationPointId pointId)
+{
+    const auto it = std::find_if(m_state.automationLanes.begin(), m_state.automationLanes.end(),
+                                 [laneId](const AutomationLane& l) { return l.id == laneId; });
+    if (it == m_state.automationLanes.end())
+        return false;
+
+    const auto ptIt = std::find_if(it->points.begin(), it->points.end(),
+                                   [pointId](const AutomationPoint& p) { return p.id == pointId; });
+    if (ptIt == it->points.end())
+        return false;
+    it->points.erase(ptIt);
+    return true;
+}
+
+bool Project::moveAutomationPoint(const AutomationLaneId laneId, const AutomationPointId pointId,
+                                  const std::uint64_t newSamplePosition, const float newValue,
+                                  const float newTension)
+{
+    if (! std::isfinite(newValue) || ! std::isfinite(newTension))
+        return false;
+
+    const auto it = std::find_if(m_state.automationLanes.begin(), m_state.automationLanes.end(),
+                                 [laneId](const AutomationLane& l) { return l.id == laneId; });
+    if (it == m_state.automationLanes.end())
+        return false;
+
+    const auto ptIt = std::find_if(it->points.begin(), it->points.end(),
+                                   [pointId](const AutomationPoint& p) { return p.id == pointId; });
+    if (ptIt == it->points.end())
+        return false;
+
+    ptIt->samplePosition = newSamplePosition;
+    ptIt->value = newValue;
+    ptIt->curveTension = std::clamp(newTension, -1.0f, 1.0f);
+
+    std::sort(it->points.begin(), it->points.end(), [](const auto& a, const auto& b) {
+        return a.samplePosition < b.samplePosition;
+    });
     return true;
 }
 

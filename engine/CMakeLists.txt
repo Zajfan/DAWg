@@ -2,6 +2,7 @@ find_package(Threads REQUIRED)
 
 add_library(dawg_engine_core STATIC
     src/AudioEngine.cpp
+    src/AutomationCurveEvaluator.cpp
     src/DspGraph.cpp
     src/GraphHandoff.cpp
     src/Metronome.cpp

@@ -156,6 +156,37 @@ struct ResizeMidiNote
     std::uint64_t newLengthSamples {};
 };
 
+struct AddAutomationLane
+{
+    AutomationLane lane;
+};
+
+struct RemoveAutomationLane
+{
+    AutomationLaneId laneId {};
+};
+
+struct AddAutomationPoint
+{
+    AutomationLaneId laneId {};
+    AutomationPoint point {};
+};
+
+struct RemoveAutomationPoint
+{
+    AutomationLaneId laneId {};
+    AutomationPointId pointId {};
+};
+
+struct MoveAutomationPoint
+{
+    AutomationLaneId laneId {};
+    AutomationPointId pointId {};
+    std::uint64_t newSamplePosition {};
+    float newValue {};
+    float newTension {};
+};
+
 using ProjectCommand = std::variant<
     AddAudioTrack,
     AddInstrumentTrack,
@@ -179,6 +210,11 @@ using ProjectCommand = std::variant<
     RemoveMidiNote,
     MoveMidiNote,
     ResizeMidiNote,
+    AddAutomationLane,
+    RemoveAutomationLane,
+    AddAutomationPoint,
+    RemoveAutomationPoint,
+    MoveAutomationPoint,
     SetProjectTempo,
     SetProjectLoop>;
 
