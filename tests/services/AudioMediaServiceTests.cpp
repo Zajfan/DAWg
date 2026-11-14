@@ -4,6 +4,7 @@
 #include <dawg/media/AudioRecordService.h>
 #include <dawg/media/AudioResampler.h>
 #include <dawg/media/DiskStreamPool.h>
+#include <dawg/media/WaveformCache.h>
 
 #include <array>
 #include <chrono>
@@ -276,6 +277,73 @@ void testAudioResamplerDiskStreamPoolAndRecordService()
                 && writerFactory.channels[0].size() == 4,
             "writer factory received and finalized all recorded stereo samples");
 }
+
+void testWaveformCache()
+{
+    FakeAudioAssetReaderFactory factory;
+    // 128 samples: first 64 samples are 0.25f, except sample 10 is -0.5f and sample 20 is 0.8f.
+    // next 64 samples are 0.1f, except sample 80 is -0.9f and sample 90 is 0.3f.
+    std::vector<float> sampleData(128, 0.0f);
+    for (std::size_t i = 0; i < 64; ++i) sampleData[i] = 0.25f;
+    sampleData[10] = -0.5f;
+    sampleData[20] = 0.8f;
+    for (std::size_t i = 64; i < 128; ++i) sampleData[i] = 0.1f;
+    sampleData[80] = -0.9f;
+    sampleData[90] = 0.3f;
+
+    factory.metadata = AudioAssetMetadata {48000, 1, 128};
+    factory.samples = sampleData;
+
+    WaveformCache cache {factory, 1};
+
+    AudioAsset asset;
+    asset.id = 42;
+    asset.path = "tone.wav";
+    asset.sampleRate = 48000;
+    asset.channelCount = 1;
+    asset.frameCount = 128;
+
+    require(! cache.isReady(asset.id), "cache is initially not ready for asset");
+
+    // Test synchronous generation
+    cache.generateSync(asset);
+    require(cache.isReady(asset.id), "cache is ready after generateSync");
+
+    // Requesting 2 pixels over all 128 samples:
+    // Pixel 0 corresponds to [0, 64) -> min: -0.5f, max: 0.8f
+    // Pixel 1 corresponds to [64, 128) -> min: -0.9f, max: 0.3f
+    const auto peaks2px = cache.getMinMaxPeaks(asset.id, 0, 0, 128, 2);
+    require(peaks2px.size() == 2, "2 pixels requested returns 2 peaks");
+    require(std::abs(peaks2px[0].minVal - (-0.5f)) < 1e-4f, "pixel 0 min matches");
+    require(std::abs(peaks2px[0].maxVal - 0.8f) < 1e-4f, "pixel 0 max matches");
+    require(std::abs(peaks2px[1].minVal - (-0.9f)) < 1e-4f, "pixel 1 min matches");
+    require(std::abs(peaks2px[1].maxVal - 0.3f) < 1e-4f, "pixel 1 max matches");
+
+    // Requesting 1 pixel over all 128 samples -> min: -0.9f, max: 0.8f
+    const auto peaks1px = cache.getMinMaxPeaks(asset.id, 0, 0, 128, 1);
+    require(peaks1px.size() == 1, "1 pixel requested returns 1 peak");
+    require(std::abs(peaks1px[0].minVal - (-0.9f)) < 1e-4f, "aggregated 1px min matches");
+    require(std::abs(peaks1px[0].maxVal - 0.8f) < 1e-4f, "aggregated 1px max matches");
+
+    // Test clear
+    cache.clear();
+    require(! cache.isReady(asset.id), "cache is not ready after clear");
+
+    // Test asynchronous background generation
+    cache.requestThumbnail(asset);
+    require(waitFor([&] { return cache.isReady(asset.id); }),
+            "cache becomes ready asynchronously via worker thread");
+
+    const auto asyncPeaks = cache.getMinMaxPeaks(asset.id, 0, 0, 128, 2);
+    require(asyncPeaks.size() == 2, "async thumbnail peaks ready");
+    require(std::abs(asyncPeaks[0].minVal - (-0.5f)) < 1e-4f, "async pixel 0 min matches");
+    require(std::abs(asyncPeaks[1].minVal - (-0.9f)) < 1e-4f, "async pixel 1 min matches");
+
+    // Edge cases
+    require(cache.getMinMaxPeaks(999, 0, 0, 128, 2).empty(), "unknown asset returns empty");
+    require(cache.getMinMaxPeaks(asset.id, 5, 0, 128, 2).empty(), "invalid channel returns empty");
+    require(cache.getMinMaxPeaks(asset.id, 0, 0, 128, 0).empty(), "0 target pixels returns empty");
+}
 } // namespace
 
 int main()
@@ -284,5 +352,6 @@ int main()
     testSourceOffsetBoundedCapacityAndSeekJump();
     testOpenAndReadFailures();
     testAudioResamplerDiskStreamPoolAndRecordService();
-    std::puts("PASS: 4 media service, resampler, disk pool, and recording tests");
+    testWaveformCache();
+    std::puts("PASS: 5 media service, resampler, disk pool, record, and waveform cache tests");
 }
