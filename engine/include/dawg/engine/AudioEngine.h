@@ -1,10 +1,12 @@
 #pragma once
 
 #include <dawg/engine/AudioBufferView.h>
+#include <dawg/engine/ChannelStrip.h>
 #include <dawg/engine/CompiledGraph.h>
 #include <dawg/engine/EngineCommand.h>
 #include <dawg/engine/EngineConfig.h>
 #include <dawg/engine/GraphHandoff.h>
+#include <dawg/engine/MeterTelemetry.h>
 #include <dawg/engine/MidiEvent.h>
 #include <dawg/engine/RenderSnapshotPublisher.h>
 #include <dawg/engine/TransportSnapshot.h>
@@ -54,6 +56,7 @@ public:
     // synchronized with the reader. This is not a concurrent UI snapshot.
     [[nodiscard]] TransportState transportState() const noexcept;
     [[nodiscard]] std::uint64_t underrunCount() const noexcept;
+    [[nodiscard]] MeterReading meterReading() const noexcept;
 
     // Adopts the latest render snapshot, then applies at most 64 queued commands
     // in FIFO order before rendering.
@@ -68,6 +71,7 @@ private:
     std::unique_ptr<TransportCommandQueue> m_commandQueue;
     RenderSnapshotPublisher m_snapshotPublisher;
     GraphHandoff m_graphHandoff;
+    MeterPublisher m_meterPublisher;
     std::vector<float> m_discardChannel;
     std::vector<float> m_scratchLeft;
     std::vector<float> m_scratchRight;

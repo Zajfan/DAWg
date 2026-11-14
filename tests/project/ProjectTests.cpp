@@ -350,6 +350,32 @@ void testAudioAssetsAndClips()
     for (const auto& snapshot : invalid)
         require(! Project::fromSnapshot(snapshot).has_value(), "invalid media snapshot is rejected");
 }
+
+void testTrackChannelStripCommands()
+{
+    auto project = Project::create("Mix", 1);
+    const auto trackId = project.addAudioTrack("Lead");
+    require(trackId == 1, "track created");
+
+    require(project.apply(SetTrackMute {trackId, true}), "SetTrackMute succeeds");
+    require(project.snapshot().tracks.front().muted, "track is muted");
+
+    require(project.apply(SetTrackSolo {trackId, true}), "SetTrackSolo succeeds");
+    require(project.snapshot().tracks.front().solo, "track is soloed");
+
+    require(project.apply(SetTrackGainPan {trackId, 0.5f, -0.5f, true}),
+            "SetTrackGainPan succeeds");
+    const auto track = project.snapshot().tracks.front();
+    require(track.gainLinear == 0.5f && track.pan == -0.5f && track.phaseInvert,
+            "track stores gainLinear, pan, and phaseInvert");
+
+    require(! project.apply(SetTrackGainPan {999, 0.5f, 0.0f, false}),
+            "SetTrackGainPan rejects unknown track");
+    require(! project.apply(SetTrackGainPan {trackId, -0.1f, 0.0f, false}),
+            "SetTrackGainPan rejects negative linear gain");
+    require(! project.apply(SetTrackGainPan {trackId, 1.0f, -1.5f, false}),
+            "SetTrackGainPan rejects out-of-range pan");
+}
 }
 
 int main()
@@ -363,5 +389,6 @@ int main()
     testSnapshotIdExhaustion();
     testInvalidSnapshots();
     testAudioAssetsAndClips();
-    std::puts("PASS: 9 project behavior tests");
+    testTrackChannelStripCommands();
+    std::puts("PASS: 10 project behavior tests");
 }

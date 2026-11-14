@@ -71,6 +71,11 @@ std::uint64_t AudioEngine::underrunCount() const noexcept
     return m_transportState.underrunCount;
 }
 
+MeterReading AudioEngine::meterReading() const noexcept
+{
+    return m_meterPublisher.read();
+}
+
 bool AudioEngine::prepare(const EngineConfig& config) noexcept
 {
     if (! std::isfinite(config.sampleRate) || config.sampleRate <= 0.0
@@ -108,6 +113,7 @@ void AudioEngine::release() noexcept
 void AudioEngine::reset() noexcept
 {
     m_transportState = {};
+    m_meterPublisher.reset();
 }
 
 void AudioEngine::process(const AudioBufferView output, const MidiBufferView,
@@ -165,7 +171,46 @@ void AudioEngine::process(const AudioBufferView output, const MidiBufferView,
             std::fill_n(output.channels[channel], output.frameCount, 0.0f);
 
     if (! m_prepared || ! m_transportState.playing)
+    {
+        m_meterPublisher.publish({});
         return;
+    }
+
+    const auto publishMasterMeters = [this, &output]() noexcept {
+        MeterReading reading {};
+        if (output.channelCount >= 1 && output.channels[0] != nullptr)
+        {
+            float peak = 0.0f;
+            float sumSq = 0.0f;
+            for (std::size_t i = 0; i < output.frameCount; ++i)
+            {
+                const float s = output.channels[0][i];
+                peak = std::max(peak, std::fabs(s));
+                sumSq += s * s;
+            }
+            reading.peakLeft = peak;
+            reading.rmsLeft = std::sqrt(sumSq / static_cast<float>(output.frameCount));
+        }
+        if (output.channelCount >= 2 && output.channels[1] != nullptr)
+        {
+            float peak = 0.0f;
+            float sumSq = 0.0f;
+            for (std::size_t i = 0; i < output.frameCount; ++i)
+            {
+                const float s = output.channels[1][i];
+                peak = std::max(peak, std::fabs(s));
+                sumSq += s * s;
+            }
+            reading.peakRight = peak;
+            reading.rmsRight = std::sqrt(sumSq / static_cast<float>(output.frameCount));
+        }
+        else
+        {
+            reading.peakRight = reading.peakLeft;
+            reading.rmsRight = reading.rmsLeft;
+        }
+        m_meterPublisher.publish(reading);
+    };
 
     const auto blockStart = static_cast<std::uint64_t>(
         std::max<std::int64_t>(0, m_transportState.samplePosition));
@@ -174,10 +219,26 @@ void AudioEngine::process(const AudioBufferView output, const MidiBufferView,
     if (compiledGraph != nullptr)
     {
         const auto scratchCapacity = std::min(m_scratchLeft.size(), m_scratchRight.size());
+        bool anyTrackSoloed = false;
         for (const auto& track : compiledGraph->tracks)
         {
-            if (track.muted)
+            if (track.solo)
+            {
+                anyTrackSoloed = true;
+                break;
+            }
+        }
+
+        for (const auto& track : compiledGraph->tracks)
+        {
+            if (! isTrackAudible(track, anyTrackSoloed))
                 continue;
+
+            const float trackPolarity = track.phaseInvert ? -1.0f : 1.0f;
+            const float trackScale = track.gainLinear * trackPolarity;
+            const auto panGains = equalPowerPanGains(track.pan);
+            const float trackLeftGain = trackScale * panGains.left;
+            const float trackRightGain = trackScale * panGains.right;
 
             const auto endClip = std::min<std::size_t>(
                 compiledGraph->clips.size(),
@@ -212,30 +273,44 @@ void AudioEngine::process(const AudioBufferView output, const MidiBufferView,
                 {
                     std::array<float*, 1> dest {m_scratchLeft.data()};
                     framesRead = clip.buffer->read(sourceFrame, dest, overlapFrames);
-                    for (std::size_t ch = 0; ch < output.channelCount; ++ch)
+                    for (std::size_t f = 0; f < framesRead; ++f)
                     {
-                        if (output.channels[ch] == nullptr)
-                            continue;
-                        float* outPlane = output.channels[ch] + blockOffset;
-                        for (std::size_t f = 0; f < framesRead; ++f)
-                            outPlane[f] += m_scratchLeft[f];
+                        const float env = clipEnvelopeGain(
+                            clipOffset + f, clip.lengthSamples,
+                            clip.fadeInSamples, clip.fadeOutSamples);
+                        const float s = m_scratchLeft[f] * clip.gainLinear * env;
+                        if (output.channelCount == 1 && output.channels[0] != nullptr)
+                        {
+                            output.channels[0][blockOffset + f] += s * trackScale;
+                        }
+                        else
+                        {
+                            if (output.channelCount >= 1 && output.channels[0] != nullptr)
+                                output.channels[0][blockOffset + f] += s * trackLeftGain;
+                            if (output.channelCount >= 2 && output.channels[1] != nullptr)
+                                output.channels[1][blockOffset + f] += s * trackRightGain;
+                            for (std::size_t ch = 2; ch < output.channelCount; ++ch)
+                            {
+                                if (output.channels[ch] != nullptr)
+                                    output.channels[ch][blockOffset + f] += s * trackScale;
+                            }
+                        }
                     }
                 }
                 else if (clip.channelCount >= 2)
                 {
                     std::array<float*, 2> dest {m_scratchLeft.data(), m_scratchRight.data()};
                     framesRead = clip.buffer->read(sourceFrame, dest, overlapFrames);
-                    if (output.channelCount >= 1 && output.channels[0] != nullptr)
+                    for (std::size_t f = 0; f < framesRead; ++f)
                     {
-                        float* outL = output.channels[0] + blockOffset;
-                        for (std::size_t f = 0; f < framesRead; ++f)
-                            outL[f] += m_scratchLeft[f];
-                    }
-                    if (output.channelCount >= 2 && output.channels[1] != nullptr)
-                    {
-                        float* outR = output.channels[1] + blockOffset;
-                        for (std::size_t f = 0; f < framesRead; ++f)
-                            outR[f] += m_scratchRight[f];
+                        const float env = clipEnvelopeGain(
+                            clipOffset + f, clip.lengthSamples,
+                            clip.fadeInSamples, clip.fadeOutSamples);
+                        const float cGain = clip.gainLinear * env;
+                        if (output.channelCount >= 1 && output.channels[0] != nullptr)
+                            output.channels[0][blockOffset + f] += m_scratchLeft[f] * cGain * trackLeftGain;
+                        if (output.channelCount >= 2 && output.channels[1] != nullptr)
+                            output.channels[1][blockOffset + f] += m_scratchRight[f] * cGain * trackRightGain;
                     }
                 }
 
@@ -244,6 +319,7 @@ void AudioEngine::process(const AudioBufferView output, const MidiBufferView,
             }
         }
 
+        publishMasterMeters();
         m_transportState.samplePosition = saturatingAdvance(
             m_transportState.samplePosition, output.frameCount);
         return;
@@ -331,6 +407,7 @@ void AudioEngine::process(const AudioBufferView output, const MidiBufferView,
         }
     }
 
+    publishMasterMeters();
     m_transportState.samplePosition = saturatingAdvance(
         m_transportState.samplePosition, output.frameCount);
 }

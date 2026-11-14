@@ -1,11 +1,15 @@
 #include <dawg/engine/AudioEngine.h>
+#include <dawg/engine/ChannelStrip.h>
 #include <dawg/engine/CompiledGraph.h>
 #include <dawg/engine/GraphHandoff.h>
+#include <dawg/engine/MeterTelemetry.h>
 #include <dawg/engine/PlaybackDescription.h>
 #include <dawg/engine/PlaybackRingBuffer.h>
+#include <dawg/engine/SubBlockSplitter.h>
 
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -462,6 +466,176 @@ void testGraphHandoffAndZeroAllocationCompiledGraphAdoption()
                 && left[3] == 0.6f && left[4] == 0.8f && left[5] == 0.0f,
             "CompiledGraph clip renders at exact timeline offset");
 }
+
+void testMultiTrackChannelStripFadeRampsSubBlockSplitterAndMetering()
+{
+    using dawg::engine::SmoothedParameter;
+    using dawg::engine::SubBlockSplitter;
+    using dawg::engine::clipEnvelopeGain;
+    using dawg::engine::equalPowerPanGains;
+
+    // 1. SmoothedParameter ramp verification
+    SmoothedParameter smoother {0.0f};
+    smoother.setTarget(1.0f, 4);
+    require(smoother.isSmoothing(), "smoother active when target differs");
+    require(std::fabs(smoother.next() - 0.25f) < 1e-6f, "smooth step 1");
+    require(std::fabs(smoother.next() - 0.50f) < 1e-6f, "smooth step 2");
+    require(std::fabs(smoother.next() - 0.75f) < 1e-6f, "smooth step 3");
+    require(std::fabs(smoother.next() - 1.00f) < 1e-6f, "smooth step 4 reaches target");
+    require(! smoother.isSmoothing(), "smoother finishes after rampSamples");
+
+    // 2. Equal-power stereo pan law
+    const auto center = equalPowerPanGains(0.0f);
+    require(std::fabs(center.left - 1.0f) < 1e-5f && std::fabs(center.right - 1.0f) < 1e-5f,
+            "center pan has unity gain on both channels");
+    const auto hardLeft = equalPowerPanGains(-1.0f);
+    require(hardLeft.left > 1.4f && std::fabs(hardLeft.right) < 1e-5f,
+            "hard left pan silences right channel and preserves constant power");
+    const auto hardRight = equalPowerPanGains(1.0f);
+    require(std::fabs(hardRight.left) < 1e-5f && hardRight.right > 1.4f,
+            "hard right pan silences left channel and preserves constant power");
+
+    // 3. Clip fade-in and fade-out envelope
+    require(std::fabs(clipEnvelopeGain(0, 8, 2, 2) - 0.0f) < 1e-6f, "fade-in starts at 0");
+    require(std::fabs(clipEnvelopeGain(1, 8, 2, 2) - 0.5f) < 1e-6f, "fade-in midpoint is 0.5");
+    require(std::fabs(clipEnvelopeGain(2, 8, 2, 2) - 1.0f) < 1e-6f, "sustain region is 1.0");
+    require(std::fabs(clipEnvelopeGain(6, 8, 2, 2) - 0.5f) < 1e-6f, "fade-out midpoint is 0.5");
+    require(std::fabs(clipEnvelopeGain(7, 8, 2, 2) - 0.0f) < 1e-6f, "fade-out ends at 0");
+
+    // 4. Sub-block event splitter (unsorted + duplicate split points, zero allocations)
+    constexpr std::array<std::size_t, 5> splitPoints {12, 4, 0, 16, 4};
+    std::array<std::pair<std::size_t, std::size_t>, 4> slices {};
+    std::size_t sliceCount = 0;
+    {
+        ScopedAllocationGuard guard;
+        SubBlockSplitter::split(16, splitPoints, [&](const std::size_t offset, const std::size_t frames) {
+            if (sliceCount < slices.size())
+                slices[sliceCount++] = {offset, frames};
+        });
+    }
+    require(g_allocationCount.load(std::memory_order_acquire) == 0,
+            "SubBlockSplitter performs zero heap allocations");
+    require(sliceCount == 3, "SubBlockSplitter produces 3 contiguous sub-blocks");
+    require(slices[0].first == 0 && slices[0].second == 4, "slice 0 is [0, 4)");
+    require(slices[1].first == 4 && slices[1].second == 8, "slice 1 is [4, 12)");
+    require(slices[2].first == 12 && slices[2].second == 4, "slice 2 is [12, 16)");
+
+    // 5. Multi-track summing, solo-in-place, phase invert, clip fade ramps, and metering
+    AudioEngine engine;
+    require(engine.prepare({48000.0, 4, 2}), "engine prepares for multi-track mix");
+
+    PlaybackRingBuffer ring1;
+    PlaybackRingBuffer ring2;
+    PlaybackRingBuffer ring3;
+    require(ring1.prepare(1, 8) && ring2.prepare(1, 8) && ring3.prepare(1, 8), "prepare 3 rings");
+
+    constexpr std::array<float, 4> ones {1.0f, 1.0f, 1.0f, 1.0f};
+    const std::array<const float*, 1> onesPlane {ones.data()};
+    require(ring1.write(0, onesPlane, 4) == 4, "write ring 1");
+    require(ring2.write(0, onesPlane, 4) == 4, "write ring 2");
+    require(ring3.write(0, onesPlane, 4) == 4, "write ring 3");
+
+    auto graph = std::make_unique<CompiledGraph>();
+    graph->generation = 100;
+    // Track 1: soloed, gain 0.5, pan -1.0 (hard left), two overlapping/adjacent clips
+    graph->clips.push_back(CompiledClip {
+        .clipId = 1,
+        .assetId = 1,
+        .buffer = &ring1,
+        .startSample = 0,
+        .lengthSamples = 4,
+        .sourceOffset = 0,
+        .channelCount = 1,
+        .gainLinear = 1.0f,
+        .fadeInSamples = 0,
+        .fadeOutSamples = 0
+    });
+    // Track 2: soloed, phase inverted, gain 0.25, center pan
+    graph->clips.push_back(CompiledClip {
+        .clipId = 2,
+        .assetId = 2,
+        .buffer = &ring2,
+        .startSample = 0,
+        .lengthSamples = 4,
+        .sourceOffset = 0,
+        .channelCount = 1,
+        .gainLinear = 1.0f,
+        .fadeInSamples = 0,
+        .fadeOutSamples = 0
+    });
+    // Track 3: NOT soloed -> must be silenced by Solo-In-Place!
+    graph->clips.push_back(CompiledClip {
+        .clipId = 3,
+        .assetId = 3,
+        .buffer = &ring3,
+        .startSample = 0,
+        .lengthSamples = 4,
+        .sourceOffset = 0,
+        .channelCount = 1,
+        .gainLinear = 10.0f,
+        .fadeInSamples = 0,
+        .fadeOutSamples = 0
+    });
+
+    graph->tracks.push_back(CompiledTrack {
+        .trackId = 1,
+        .muted = false,
+        .solo = true,
+        .phaseInvert = false,
+        .gainLinear = 0.5f,
+        .pan = 0.0f,
+        .clipOffset = 0,
+        .clipCount = 1
+    });
+    graph->tracks.push_back(CompiledTrack {
+        .trackId = 2,
+        .muted = false,
+        .solo = true,
+        .phaseInvert = true,
+        .gainLinear = 0.25f,
+        .pan = 0.0f,
+        .clipOffset = 1,
+        .clipCount = 1
+    });
+    graph->tracks.push_back(CompiledTrack {
+        .trackId = 3,
+        .muted = false,
+        .solo = false,
+        .phaseInvert = false,
+        .gainLinear = 1.0f,
+        .pan = 0.0f,
+        .clipOffset = 2,
+        .clipCount = 1
+    });
+
+    engine.publishCompiledGraph(std::move(graph));
+    require(engine.enqueueCommand({EngineCommandType::play, 0}), "enqueue play");
+
+    std::array<float, 4> left {};
+    std::array<float, 4> right {};
+    std::array<float*, 2> out {left.data(), right.data()};
+
+    {
+        ScopedAllocationGuard guard;
+        engine.process({out.data(), out.size(), left.size()}, {}, {});
+    }
+    require(g_allocationCount.load(std::memory_order_acquire) == 0,
+            "multi-track mix performs zero RT allocations");
+
+    // Track 1 (+0.5) + Track 2 (-0.25) = +0.25 on both channels; Track 3 is muted by solo-in-place
+    for (std::size_t i = 0; i < 4; ++i)
+    {
+        require(std::fabs(left[i] - 0.25f) < 1e-5f && std::fabs(right[i] - 0.25f) < 1e-5f,
+                "multi-track sum applies solo-in-place, gain, and phase invert");
+    }
+
+    const auto meters = engine.meterReading();
+    require(std::fabs(meters.peakLeft - 0.25f) < 1e-5f
+                && std::fabs(meters.peakRight - 0.25f) < 1e-5f
+                && std::fabs(meters.rmsLeft - 0.25f) < 1e-5f
+                && std::fabs(meters.rmsRight - 0.25f) < 1e-5f,
+            "lock-free meter telemetry reports exact master peak and RMS");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -559,4 +733,5 @@ int main()
     testStereoClipAndUnderrunTelemetry();
     testZeroAllocationOnAudioCallbackPath();
     testGraphHandoffAndZeroAllocationCompiledGraphAdoption();
+    testMultiTrackChannelStripFadeRampsSubBlockSplitterAndMetering();
 }

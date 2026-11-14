@@ -1,6 +1,7 @@
 #include <dawg/project/Project.h>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <unordered_set>
 #include <utility>
@@ -177,6 +178,48 @@ bool Project::renameTrack(const TrackId id, std::string name)
         return false;
 
     track->name = std::move(name);
+    return true;
+}
+
+bool Project::setTrackMute(const TrackId id, const bool muted)
+{
+    const auto track = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                   [id](const Track& value) { return value.id == id; });
+    if (track == m_state.tracks.end())
+        return false;
+
+    track->muted = muted;
+    return true;
+}
+
+bool Project::setTrackSolo(const TrackId id, const bool solo)
+{
+    const auto track = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                   [id](const Track& value) { return value.id == id; });
+    if (track == m_state.tracks.end())
+        return false;
+
+    track->solo = solo;
+    return true;
+}
+
+bool Project::setTrackGainPan(const TrackId id, const float gainLinear, const float pan,
+                              const bool phaseInvert)
+{
+    if (! std::isfinite(gainLinear) || gainLinear < 0.0f
+        || ! std::isfinite(pan) || pan < -1.0f || pan > 1.0f)
+    {
+        return false;
+    }
+
+    const auto track = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                   [id](const Track& value) { return value.id == id; });
+    if (track == m_state.tracks.end())
+        return false;
+
+    track->gainLinear = gainLinear;
+    track->pan = pan;
+    track->phaseInvert = phaseInvert;
     return true;
 }
 

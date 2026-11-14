@@ -28,6 +28,9 @@ public:
     // Empty names and unknown IDs fail without changing state.
     [[nodiscard]] bool removeTrack(TrackId id);
     [[nodiscard]] bool renameTrack(TrackId id, std::string name);
+    [[nodiscard]] bool setTrackMute(TrackId id, bool muted);
+    [[nodiscard]] bool setTrackSolo(TrackId id, bool solo);
+    [[nodiscard]] bool setTrackGainPan(TrackId id, float gainLinear, float pan, bool phaseInvert);
     [[nodiscard]] bool apply(const ProjectCommand& command);
 
 private:

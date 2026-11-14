@@ -27,6 +27,33 @@ struct AddAudioClip
     AudioClip clip;
 };
 
-using ProjectCommand = std::variant<AddAudioTrack, RemoveTrack, RenameTrack, AddAudioClip>;
+struct SetTrackMute
+{
+    TrackId id {};
+    bool muted {};
+};
+
+struct SetTrackSolo
+{
+    TrackId id {};
+    bool solo {};
+};
+
+struct SetTrackGainPan
+{
+    TrackId id {};
+    float gainLinear {1.0f};
+    float pan {0.0f};
+    bool phaseInvert {};
+};
+
+using ProjectCommand = std::variant<
+    AddAudioTrack,
+    RemoveTrack,
+    RenameTrack,
+    AddAudioClip,
+    SetTrackMute,
+    SetTrackSolo,
+    SetTrackGainPan>;
 
 } // namespace dawg::project
