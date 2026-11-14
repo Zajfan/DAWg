@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include <dawg/engine/AudioBufferView.h>
@@ -24,6 +25,7 @@ public:
         bool isMasterOutput = false);
 
     [[nodiscard]] bool addEdge(NodeId from, NodeId to);
+    [[nodiscard]] bool addSidechainEdge(NodeId from, NodeId to);
 
     [[nodiscard]] bool compile(
         double sampleRate,
@@ -64,6 +66,7 @@ private:
         bool isMasterOutput {false};
         std::vector<NodeId> outgoing;
         std::vector<IncomingEdge> incoming;
+        std::optional<IncomingEdge> sidechainEdge;
         std::vector<float> bufferStorage;
         std::vector<float*> bufferChannels;
         std::uint32_t arrivalLatency {0};

@@ -190,6 +190,7 @@ set(DAWG_OWN_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/MixerPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/TimelineView.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/PianoRollView.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/DspEditorDialog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/platform/juce/window/WindowRegistry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/platform/juce/window/ManagedWindow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/platform/juce/window/WindowManager.cpp

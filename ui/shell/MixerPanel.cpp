@@ -1,4 +1,5 @@
 #include "MixerPanel.h"
+#include "DspEditorDialog.h"
 
 #include <algorithm>
 #include <cmath>
@@ -35,6 +36,8 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
     addAndMakeVisible(m_eqButton);
     addAndMakeVisible(m_compButton);
     addAndMakeVisible(m_synthButton);
+    addAndMakeVisible(m_revButton);
+    addAndMakeVisible(m_delayButton);
     addAndMakeVisible(m_limiterButton);
 
     m_panKnob.onValueChange = [this] {
@@ -82,16 +85,31 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
     m_eqButton.onClick = [this] {
         if (m_eqButton.getToggleState())
             m_eqButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(60, 160, 220));
+        DspEditorWindow::open(DspEditorKind::parametricEq, m_nameLabel.getText().toStdString());
     };
 
     m_compButton.onClick = [this] {
         if (m_compButton.getToggleState())
             m_compButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(220, 140, 50));
+        DspEditorWindow::open(DspEditorKind::compressor, m_nameLabel.getText().toStdString());
     };
 
     m_synthButton.onClick = [this] {
         if (m_synthButton.getToggleState())
             m_synthButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(180, 80, 230));
+        DspEditorWindow::open(DspEditorKind::synth, m_nameLabel.getText().toStdString());
+    };
+
+    m_revButton.onClick = [this] {
+        if (m_revButton.getToggleState())
+            m_revButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(50, 180, 220));
+        DspEditorWindow::open(DspEditorKind::reverb, m_nameLabel.getText().toStdString());
+    };
+
+    m_delayButton.onClick = [this] {
+        if (m_delayButton.getToggleState())
+            m_delayButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(230, 170, 40));
+        DspEditorWindow::open(DspEditorKind::delay, m_nameLabel.getText().toStdString());
     };
 
     m_limiterButton.onClick = [this] {
@@ -106,6 +124,8 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
     m_eqButton.setClickingTogglesState(true);
     m_compButton.setClickingTogglesState(true);
     m_synthButton.setClickingTogglesState(true);
+    m_revButton.setClickingTogglesState(true);
+    m_delayButton.setClickingTogglesState(true);
     m_limiterButton.setClickingTogglesState(true);
 }
 
@@ -161,15 +181,21 @@ void ChannelStripComponent::resized()
     area.removeFromTop(2);
 
     // DSP Inserts row 1: EQ, COMP
-    auto dspRow1 = area.removeFromTop(18);
+    auto dspRow1 = area.removeFromTop(16);
     m_eqButton.setBounds(dspRow1.removeFromLeft(dspRow1.getWidth() / 2).reduced(1));
     m_compButton.setBounds(dspRow1.reduced(1));
-    area.removeFromTop(2);
+    area.removeFromTop(1);
 
-    // DSP Inserts row 2: SYNTH, LIMIT
-    auto dspRow2 = area.removeFromTop(18);
+    // DSP Inserts row 2: SYNTH, REV
+    auto dspRow2 = area.removeFromTop(16);
     m_synthButton.setBounds(dspRow2.removeFromLeft(dspRow2.getWidth() / 2).reduced(1));
-    m_limiterButton.setBounds(dspRow2.reduced(1));
+    m_revButton.setBounds(dspRow2.reduced(1));
+    area.removeFromTop(1);
+
+    // DSP Inserts row 3: DLY, LIMIT
+    auto dspRow3 = area.removeFromTop(16);
+    m_delayButton.setBounds(dspRow3.removeFromLeft(dspRow3.getWidth() / 2).reduced(1));
+    m_limiterButton.setBounds(dspRow3.reduced(1));
     area.removeFromTop(2);
 
     m_panKnob.setBounds(area.removeFromTop(26).reduced(6, 0));

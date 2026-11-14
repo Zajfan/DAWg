@@ -15,7 +15,7 @@ using MidiClipId = std::uint64_t;
 using AutomationLaneId = std::uint64_t;
 using AutomationPointId = std::uint64_t;
 
-enum class TrackKind : std::uint8_t { audio, instrument };
+enum class TrackKind : std::uint8_t { audio, instrument, auxReturn, submixGroup };
 
 enum class AutomationTargetKind : std::uint8_t
 {
@@ -122,7 +122,9 @@ enum class DspNodeType : std::uint8_t
     dynamicsCompressor,
     brickwallLimiter,
     tnhcSynth,
-    clapPlugin
+    clapPlugin,
+    tnhcReverb,
+    tnhcDelay
 };
 
 struct DspNodeDescriptor
@@ -137,6 +139,26 @@ struct DspNodeDescriptor
     friend bool operator==(const DspNodeDescriptor&, const DspNodeDescriptor&) = default;
 };
 
+struct TrackSend
+{
+    TrackId targetTrackId {0};
+    float levelLinear {1.0f};
+    bool preFader {false};
+
+    friend bool operator==(const TrackSend&, const TrackSend&) = default;
+};
+
+struct Take
+{
+    std::uint32_t id {0};
+    MediaAssetId assetId {0};
+    std::uint64_t sourceOffset {0};
+    std::uint64_t lengthSamples {0};
+    std::string name {};
+
+    friend bool operator==(const Take&, const Take&) = default;
+};
+
 struct Track
 {
     TrackId id {};
@@ -149,6 +171,10 @@ struct Track
     bool recordArmed {};
     TrackKind kind {TrackKind::audio};
     std::vector<DspNodeDescriptor> inserts {};
+    std::vector<TrackSend> sends {};
+    TrackId outputBusTrackId {0};
+    std::vector<Take> takes {};
+    bool takeLanesExpanded {false};
 
     friend bool operator==(const Track&, const Track&) = default;
 };

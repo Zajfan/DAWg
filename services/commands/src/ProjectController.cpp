@@ -19,7 +19,9 @@ ProjectController::ProjectController(project::Project project)
 bool ProjectController::dispatch(project::ProjectCommand command)
 {
     const auto addsTrack = std::holds_alternative<project::AddAudioTrack>(command)
-        || std::holds_alternative<project::AddInstrumentTrack>(command);
+        || std::holds_alternative<project::AddInstrumentTrack>(command)
+        || std::holds_alternative<project::AddAuxReturnTrack>(command)
+        || std::holds_alternative<project::AddSubmixGroupTrack>(command);
     if (m_renderSnapshot.generation == std::numeric_limits<std::uint64_t>::max() ||
         (addsTrack && m_renderSnapshot.trackCount == std::numeric_limits<std::uint32_t>::max()))
         return false;

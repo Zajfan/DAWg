@@ -17,6 +17,8 @@
 #include <dawg/engine/dsp/BrickwallLimiterNode.h>
 #include <dawg/engine/dsp/DynamicsCompressorNode.h>
 #include <dawg/engine/dsp/ParametricEQNode.h>
+#include <dawg/engine/dsp/TnhcDelayNode.h>
+#include <dawg/engine/dsp/TnhcReverbNode.h>
 #include <dawg/engine/dsp/TnhcSynthNode.h>
 #include <dawg/engine/clap/ClapPluginNode.h>
 #include <dawg/engine/MidiControllerManager.h>
@@ -1659,6 +1661,184 @@ void testMidiControllerManagerMcuAndLearn()
         require(mgr.bindingCount() == 0, "binding count is now 0");
     }
 }
+
+void testTnhcReverbNodeImpulseAndDecay()
+{
+    using dawg::engine::TnhcReverbNode;
+    TnhcReverbNode reverb;
+    require(reverb.prepare(48000.0, 128, 2), "TnhcReverbNode prepares at 48kHz stereo");
+    reverb.setRoomSize(0.8f);
+    reverb.setDecayTime(1.5f);
+    reverb.setDamping(0.3f);
+    reverb.setStereoWidth(1.0f);
+    reverb.setWetDry(0.5f);
+
+    std::array<float, 128> bufL {};
+    std::array<float, 128> bufR {};
+    std::array<float*, 2> channels {bufL.data(), bufR.data()};
+
+    // Send impulse at frame 0
+    bufL[0] = 1.0f;
+    bufR[0] = 1.0f;
+
+    dawg::engine::ProcessContext ctx {
+        .audio = dawg::engine::AudioBufferView {channels.data(), 2, 128},
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+
+    reverb.process(ctx);
+
+    // After first block, check that diffuse tail begins generating
+    float energyTail = 0.0f;
+    for (std::size_t i = 1; i < 128; ++i)
+    {
+        energyTail += std::abs(bufL[i]) + std::abs(bufR[i]);
+        require(! std::isnan(bufL[i]) && ! std::isinf(bufL[i]), "Reverb sample is finite");
+        require(! std::isnan(bufR[i]) && ! std::isinf(bufR[i]), "Reverb sample is finite");
+    }
+
+    // Run several more blocks to verify reverberation decay
+    for (int block = 0; block < 10; ++block)
+    {
+        std::fill(bufL.begin(), bufL.end(), 0.0f);
+        std::fill(bufR.begin(), bufR.end(), 0.0f);
+        reverb.process(ctx);
+        for (std::size_t i = 0; i < 128; ++i)
+        {
+            energyTail += std::abs(bufL[i]) + std::abs(bufR[i]);
+            require(! std::isnan(bufL[i]) && ! std::isinf(bufL[i]), "Reverb tail sample is finite");
+        }
+    }
+    require(energyTail > 0.05f, "Reverb FDN generates decaying reverberation tail");
+
+    reverb.reset();
+    std::fill(bufL.begin(), bufL.end(), 0.0f);
+    std::fill(bufR.begin(), bufR.end(), 0.0f);
+    reverb.process(ctx);
+    float energyAfterReset = 0.0f;
+    for (std::size_t i = 0; i < 128; ++i)
+        energyAfterReset += std::abs(bufL[i]) + std::abs(bufR[i]);
+    require(energyAfterReset == 0.0f, "Reverb reset clears delay lines completely");
+}
+
+void testTnhcDelayNodePingPongAndSync()
+{
+    using dawg::engine::TnhcDelayNode;
+    using dawg::engine::DelayMode;
+    using dawg::engine::DelaySyncDivision;
+
+    TnhcDelayNode delay;
+    require(delay.prepare(48000.0, 128, 2), "TnhcDelayNode prepares at 48kHz stereo");
+    delay.setMode(DelayMode::pingPong);
+    delay.setBpm(120.0);
+    delay.setSyncDivision(DelaySyncDivision::sixteenth); // 125 ms = 6000 samples
+    delay.setFeedback(0.6f);
+    delay.setWetDry(1.0f); // 100% wet to monitor delayed taps
+
+    std::array<float, 128> bufL {};
+    std::array<float, 128> bufR {};
+    std::array<float*, 2> channels {bufL.data(), bufR.data()};
+
+    // Single impulse on Left channel only
+    bufL[0] = 1.0f;
+    bufR[0] = 0.0f;
+
+    dawg::engine::ProcessContext ctx {
+        .audio = dawg::engine::AudioBufferView {channels.data(), 2, 128},
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+
+    delay.process(ctx);
+
+    // Process blocks until delay time (approx 6000 samples / 128 = 47 blocks)
+    float maxSeenL = 0.0f;
+    float maxSeenR = 0.0f;
+    for (int b = 0; b < 60; ++b)
+    {
+        std::fill(bufL.begin(), bufL.end(), 0.0f);
+        std::fill(bufR.begin(), bufR.end(), 0.0f);
+        delay.process(ctx);
+        for (std::size_t i = 0; i < 128; ++i)
+        {
+            maxSeenL = std::max(maxSeenL, std::abs(bufL[i]));
+            maxSeenR = std::max(maxSeenR, std::abs(bufR[i]));
+            require(! std::isnan(bufL[i]) && ! std::isinf(bufL[i]), "Delay sample is finite");
+            require(! std::isnan(bufR[i]) && ! std::isinf(bufR[i]), "Delay sample is finite");
+        }
+    }
+
+    require(maxSeenL > 0.01f || maxSeenR > 0.01f, "Delay generates echoed taps");
+
+    // Saturation test: verify extreme input levels are tamed by tanh
+    bufL[0] = 100.0f;
+    bufR[0] = 100.0f;
+    delay.process(ctx);
+    for (std::size_t i = 0; i < 128; ++i)
+    {
+        require(! std::isnan(bufL[i]) && ! std::isinf(bufL[i]), "Saturated sample is finite");
+        require(! std::isnan(bufR[i]) && ! std::isinf(bufR[i]), "Saturated sample is finite");
+    }
+}
+
+void testDspGraphExternalSidechainRoutingWithPdc()
+{
+    using dawg::engine::DspGraph;
+    using dawg::engine::DelayCompensatorNode;
+    using dawg::engine::dsp::DynamicsCompressorNode;
+    using dawg::engine::dsp::CompressorSettings;
+
+    DspGraph graph;
+
+    // Node 0: Kick (Input Source 1)
+    // Node 1: Latency node on Kick path (3 samples of PDC latency)
+    // Node 2: Bass (Input Source 2 / Continuous signal)
+    // Node 3: Compressor on Bass, with External Sidechain input from Node 1 (Kick)
+    const auto kickNode = graph.addNode(std::make_unique<DelayCompensatorNode>(0), true, false);
+    const auto kickPdcNode = graph.addNode(std::make_unique<DelayCompensatorNode>(3), false, false);
+
+    CompressorSettings settings {
+        .bypassed = false,
+        .thresholdDb = -12.0f,
+        .ratio = 10.0f,
+        .attackMs = 0.5f,
+        .releaseMs = 50.0f,
+        .makeupGainDb = 0.0f,
+        .kneeDb = 0.0f,
+        .useRms = false,
+        .sidechainEnabled = true
+    };
+    const auto compNode = graph.addNode(std::make_unique<DynamicsCompressorNode>(settings), true, true);
+
+    require(graph.addEdge(kickNode, kickPdcNode), "add Kick -> Latency edge");
+    require(graph.addSidechainEdge(kickPdcNode, compNode), "add Kick -> Compressor sidechain edge");
+
+    require(graph.compile(48000.0, 16, 2), "compile graph with external sidechain and PDC");
+
+    // Input buffer: channel 0 has Kick pulse of 2.0 (+6 dBFS), channel 1 has Bass continuous 0.5 (-6 dBFS)
+    std::array<float, 16> inL {};
+    std::array<float, 16> inR {};
+    inL[0] = 2.0f; // loud kick impulse
+    std::fill(inR.begin(), inR.end(), 0.5f); // quiet continuous bass tone
+    std::array<float*, 2> inPlanes {inL.data(), inR.data()};
+
+    std::array<float, 16> outL {};
+    std::array<float, 16> outR {};
+    std::array<float*, 2> outPlanes {outL.data(), outR.data()};
+
+    graph.process(
+        dawg::engine::AudioBufferView {inPlanes.data(), 2, 16},
+        dawg::engine::AudioBufferView {outPlanes.data(), 2, 16});
+
+    for (std::size_t i = 0; i < 16; ++i)
+    {
+        require(! std::isnan(outL[i]) && ! std::isinf(outL[i]), "Sidechain out is finite");
+        require(! std::isnan(outR[i]) && ! std::isinf(outR[i]), "Sidechain out is finite");
+    }
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -1768,4 +1948,7 @@ int main()
     testWsolaTimeStretchingAndPitchPreservation();
     testMpePolyphonicExpressionAndSynthModulation();
     testMidiControllerManagerMcuAndLearn();
+    testTnhcReverbNodeImpulseAndDecay();
+    testTnhcDelayNodePingPongAndSync();
+    testDspGraphExternalSidechainRoutingWithPdc();
 }

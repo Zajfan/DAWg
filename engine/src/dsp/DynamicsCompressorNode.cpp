@@ -67,15 +67,21 @@ void DynamicsCompressorNode::process(ProcessContext& context) noexcept
 
     float maxBlockReduction = 0.0f;
 
+    const bool useExternalSidechain = m_settings.sidechainEnabled
+        && context.sidechain.channels != nullptr
+        && context.sidechain.channelCount > 0;
+    float* const* const detectorChannels = useExternalSidechain ? context.sidechain.channels : context.audio.channels;
+    const std::size_t detectorChannelCount = useExternalSidechain ? context.sidechain.channelCount : channelCount;
+
     for (std::size_t i = 0; i < frameCount; ++i)
     {
-        // Sidechain level detector (peak across stereo/channels)
+        // Level detector (peak across stereo/channels of main or external sidechain)
         float peakAbs = 0.0f;
-        for (std::size_t ch = 0; ch < channelCount; ++ch)
+        for (std::size_t ch = 0; ch < detectorChannelCount; ++ch)
         {
-            if (context.audio.channels[ch] != nullptr)
+            if (detectorChannels[ch] != nullptr)
             {
-                peakAbs = std::max(peakAbs, std::abs(context.audio.channels[ch][i]));
+                peakAbs = std::max(peakAbs, std::abs(detectorChannels[ch][i]));
             }
         }
 

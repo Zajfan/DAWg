@@ -187,9 +187,65 @@ struct MoveAutomationPoint
     float newTension {};
 };
 
+struct AddAuxReturnTrack
+{
+    std::string name;
+};
+
+struct AddSubmixGroupTrack
+{
+    std::string name;
+};
+
+struct AddTrackSend
+{
+    TrackId trackId {0};
+    TrackSend send {};
+};
+
+struct RemoveTrackSend
+{
+    TrackId trackId {0};
+    TrackId targetTrackId {0};
+};
+
+struct SetTrackSendLevel
+{
+    TrackId trackId {0};
+    TrackId targetTrackId {0};
+    float levelLinear {1.0f};
+};
+
+struct SetTrackOutputBus
+{
+    TrackId trackId {0};
+    TrackId outputBusTrackId {0};
+};
+
+struct AddTakeToTrack
+{
+    TrackId trackId {0};
+    Take take {};
+};
+
+struct ToggleTakeLanesExpanded
+{
+    TrackId trackId {0};
+};
+
+struct PromoteTakeRegion
+{
+    TrackId trackId {0};
+    std::uint32_t takeId {0};
+    std::uint64_t startSample {0};
+    std::uint64_t lengthSamples {0};
+};
+
 using ProjectCommand = std::variant<
     AddAudioTrack,
     AddInstrumentTrack,
+    AddAuxReturnTrack,
+    AddSubmixGroupTrack,
     RemoveTrack,
     RenameTrack,
     ReorderTracks,
@@ -197,6 +253,13 @@ using ProjectCommand = std::variant<
     SetTrackSolo,
     SetTrackGainPan,
     SetTrackRecordArm,
+    AddTrackSend,
+    RemoveTrackSend,
+    SetTrackSendLevel,
+    SetTrackOutputBus,
+    AddTakeToTrack,
+    ToggleTakeLanesExpanded,
+    PromoteTakeRegion,
     AddAudioClip,
     RemoveClip,
     MoveClip,

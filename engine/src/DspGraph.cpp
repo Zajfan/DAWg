@@ -19,6 +19,7 @@ DspGraph::NodeId DspGraph::addNode(
         .isMasterOutput = isMasterOutput,
         .outgoing = {},
         .incoming = {},
+        .sidechainEdge = std::nullopt,
         .bufferStorage = {},
         .bufferChannels = {},
         .arrivalLatency = 0,
@@ -52,6 +53,31 @@ bool DspGraph::addEdge(NodeId from, NodeId to)
     return true;
 }
 
+bool DspGraph::addSidechainEdge(NodeId from, NodeId to)
+{
+    if (from >= m_nodes.size() || to >= m_nodes.size() || from == to)
+    {
+        return false;
+    }
+
+    auto& source = m_nodes[from];
+    if (std::find(source.outgoing.begin(), source.outgoing.end(), to) != source.outgoing.end())
+    {
+        return false;
+    }
+
+    m_compiled = false;
+    source.outgoing.push_back(to);
+    m_nodes[to].sidechainEdge = IncomingEdge {
+        .fromNode = from,
+        .compensationSamples = 0,
+        .compensator = DelayCompensatorNode {0},
+        .scratchStorage = {},
+        .scratchChannels = {}
+    };
+    return true;
+}
+
 bool DspGraph::compile(
     double sampleRate,
     std::size_t maxBlockSize,
@@ -76,7 +102,7 @@ bool DspGraph::compile(
         {
             return false;
         }
-        inDegree[i] = m_nodes[i].incoming.size();
+        inDegree[i] = m_nodes[i].incoming.size() + (m_nodes[i].sidechainEdge.has_value() ? 1 : 0);
     }
 
     std::queue<NodeId> ready;
@@ -181,6 +207,36 @@ bool DspGraph::compile(
                 }
             }
 
+            if (node.sidechainEdge.has_value())
+            {
+                auto& scEdge = *node.sidechainEdge;
+                const auto sourceLatency = m_nodes[scEdge.fromNode].outputLatency;
+                scEdge.compensationSamples = (node.arrivalLatency > sourceLatency)
+                    ? (node.arrivalLatency - sourceLatency)
+                    : 0;
+                scEdge.compensator = DelayCompensatorNode {scEdge.compensationSamples};
+
+                if (scEdge.compensationSamples > 0)
+                {
+                    if (! scEdge.compensator.prepare(sampleRate, maxBlockSize, channelCount))
+                    {
+                        return false;
+                    }
+                    scEdge.scratchStorage.assign(static_cast<std::size_t>(channelCount) * maxBlockSize, 0.0f);
+                    scEdge.scratchChannels.resize(channelCount);
+                    for (std::uint16_t ch = 0; ch < channelCount; ++ch)
+                    {
+                        scEdge.scratchChannels[ch] =
+                            scEdge.scratchStorage.data() + static_cast<std::size_t>(ch) * maxBlockSize;
+                    }
+                }
+                else
+                {
+                    scEdge.scratchStorage.clear();
+                    scEdge.scratchChannels.clear();
+                }
+            }
+
             maxAnyLatency = std::max(maxAnyLatency, node.outputLatency);
             if (node.isMasterOutput)
             {
@@ -210,6 +266,11 @@ void DspGraph::reset() noexcept
         {
             edge.compensator.reset();
             std::fill(edge.scratchStorage.begin(), edge.scratchStorage.end(), 0.0f);
+        }
+        if (node.sidechainEdge.has_value())
+        {
+            node.sidechainEdge->compensator.reset();
+            std::fill(node.sidechainEdge->scratchStorage.begin(), node.sidechainEdge->scratchStorage.end(), 0.0f);
         }
     }
 }
@@ -277,10 +338,42 @@ void DspGraph::processNode(NodeId nodeId, AudioBufferView input, std::size_t num
         }
     }
 
+    AudioBufferView sidechainView {};
+    if (node.sidechainEdge.has_value())
+    {
+        auto& scEdge = *node.sidechainEdge;
+        const auto& upstream = m_nodes[scEdge.fromNode];
+        if (scEdge.compensationSamples > 0)
+        {
+            for (std::uint16_t ch = 0; ch < m_channelCount; ++ch)
+            {
+                std::copy_n(upstream.bufferChannels[ch], numSamples, scEdge.scratchChannels[ch]);
+            }
+
+            ProcessContext scContext {
+                .audio = AudioBufferView {scEdge.scratchChannels.data(), m_channelCount, numSamples},
+                .midi = {},
+                .sampleRate = m_sampleRate,
+                .sidechain = {}
+            };
+            scEdge.compensator.process(scContext);
+            sidechainView = AudioBufferView {scEdge.scratchChannels.data(), m_channelCount, numSamples};
+        }
+        else
+        {
+            sidechainView = AudioBufferView {
+                const_cast<float**>(upstream.bufferChannels.data()),
+                m_channelCount,
+                numSamples
+            };
+        }
+    }
+
     ProcessContext nodeContext {
         .audio = AudioBufferView {node.bufferChannels.data(), m_channelCount, numSamples},
         .midi = {},
-        .sampleRate = m_sampleRate
+        .sampleRate = m_sampleRate,
+        .sidechain = sidechainView
     };
     node.processor->process(nodeContext);
 }

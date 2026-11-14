@@ -1,6 +1,8 @@
 #include <dawg/project/Project.h>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -634,6 +636,99 @@ void testAutomationLanesAndPoints()
     require(project.apply(RemoveAutomationLane {laneId}), "remove lane");
     require(project.snapshot().automationLanes.empty(), "automation lane removed");
 }
+
+void testAuxSendsSubmixBusesAndSwipeComping()
+{
+    auto project = Project::create("Mix & Comp Project", 1);
+    const auto vocalTrackId = project.addAudioTrack("Lead Vocal");
+    const auto reverbTrackId = project.addAuxReturnTrack("Plate Reverb");
+    const auto drumBusId = project.addSubmixGroupTrack("Drum Bus");
+
+    require(vocalTrackId != 0 && reverbTrackId != 0 && drumBusId != 0, "tracks created successfully");
+    const auto snap1 = project.snapshot();
+    require(snap1.tracks[1].kind == TrackKind::auxReturn, "aux return track kind is auxReturn");
+    require(snap1.tracks[2].kind == TrackKind::submixGroup, "submix bus track kind is submixGroup");
+
+    // Aux Send
+    require(project.apply(AddTrackSend {vocalTrackId, TrackSend {.targetTrackId = reverbTrackId, .levelLinear = 0.5f, .preFader = false}}),
+            "add send from Lead Vocal to Plate Reverb");
+    require(project.snapshot().tracks[0].sends.size() == 1, "one send on vocal track");
+    require(project.snapshot().tracks[0].sends[0].levelLinear == 0.5f, "send level is 0.5");
+
+    require(project.apply(SetTrackSendLevel {vocalTrackId, reverbTrackId, 0.75f}), "update send level to 0.75");
+    require(project.snapshot().tracks[0].sends[0].levelLinear == 0.75f, "send level updated");
+
+    // Submix Bus routing
+    require(project.apply(SetTrackOutputBus {vocalTrackId, drumBusId}), "route vocal track into submix bus");
+    require(project.snapshot().tracks[0].outputBusTrackId == drumBusId, "outputBusTrackId matches submix bus");
+
+    // Vocal Comping & Take Lanes
+    const auto assetId = project.addAudioAsset(AudioAsset {
+        .id = 0,
+        .path = "audio/takes.wav",
+        .pathKind = AudioAssetPathKind::projectRelative,
+        .sampleRate = 48000,
+        .channelCount = 1,
+        .frameCount = 960000
+    });
+    require(assetId != 0, "take asset added");
+
+    // Add Take 1 and Take 2
+    require(project.apply(AddTakeToTrack {
+        vocalTrackId,
+        Take {.id = 1, .assetId = assetId, .sourceOffset = 0, .lengthSamples = 480000, .name = "Take 1"}
+    }), "add Take 1 to vocal track");
+
+    require(project.apply(AddTakeToTrack {
+        vocalTrackId,
+        Take {.id = 2, .assetId = assetId, .sourceOffset = 480000, .lengthSamples = 480000, .name = "Take 2"}
+    }), "add Take 2 to vocal track");
+
+    require(project.snapshot().tracks[0].takes.size() == 2, "two takes on vocal track");
+
+    // Toggle take lanes expanded
+    require(! project.snapshot().tracks[0].takeLanesExpanded, "take lanes collapsed by default");
+    require(project.apply(ToggleTakeLanesExpanded {vocalTrackId}), "toggle take lanes expanded");
+    require(project.snapshot().tracks[0].takeLanesExpanded, "take lanes are now expanded");
+
+    // Initial base clip on track (samples 0 to 200,000)
+    const auto baseClipId = project.addAudioClip(AudioClip {
+        .id = 0,
+        .assetId = assetId,
+        .startSample = 0,
+        .sourceOffset = 0,
+        .lengthSamples = 200000,
+        .trackId = vocalTrackId,
+        .gainLinear = 1.0f,
+        .fadeInSamples = 0,
+        .fadeOutSamples = 0
+    });
+    require(baseClipId != 0, "base clip placed");
+
+    // Swipe comping: promote Take 2 in region [50,000, 100,000)
+    // This should split/trim the base clip into [0, 50,000) and [100,000, 200,000) with crossfades!
+    require(project.apply(PromoteTakeRegion {
+        vocalTrackId,
+        2,      // takeId 2
+        50000,  // startSample
+        50000   // lengthSamples (50,000 to 100,000)
+    }), "promote take 2 region [50k, 100k)");
+
+    const auto compedClips = project.snapshot().clips;
+    require(compedClips.size() == 3, "comping creates 3 clips (left part, promoted take 2, right part)");
+
+    // Verify promoted clip has automatic crossfade handles
+    const auto promoted = std::find_if(compedClips.begin(), compedClips.end(),
+                                       [](const auto& c) { return c.startSample == 50000; });
+    require(promoted != compedClips.end(), "promoted clip found at sample 50,000");
+    require(promoted->lengthSamples == 50000, "promoted clip length is 50,000");
+    require(promoted->fadeInSamples == 256, "automatic equal-power fadeInSamples is 256");
+    require(promoted->fadeOutSamples == 256, "automatic equal-power fadeOutSamples is 256");
+
+    // Remove send
+    require(project.apply(RemoveTrackSend {vocalTrackId, reverbTrackId}), "remove track send");
+    require(project.snapshot().tracks[0].sends.empty(), "send removed");
+}
 }
 
 int main()
@@ -652,5 +747,6 @@ int main()
     testExtendedTimelineCommands();
     testMidiTracksClipsAndNotes();
     testAutomationLanesAndPoints();
-    std::puts("PASS: 14 project behavior tests");
+    testAuxSendsSubmixBusesAndSwipeComping();
+    std::puts("PASS: 15 project behavior tests");
 }

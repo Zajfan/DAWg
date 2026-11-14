@@ -13,6 +13,24 @@ bool Project::apply(const ProjectCommand& command)
             return addAudioTrack(operation.name) != 0;
         else if constexpr (std::is_same_v<Operation, AddInstrumentTrack>)
             return addInstrumentTrack(operation.name) != 0;
+        else if constexpr (std::is_same_v<Operation, AddAuxReturnTrack>)
+            return addAuxReturnTrack(operation.name) != 0;
+        else if constexpr (std::is_same_v<Operation, AddSubmixGroupTrack>)
+            return addSubmixGroupTrack(operation.name) != 0;
+        else if constexpr (std::is_same_v<Operation, AddTrackSend>)
+            return addTrackSend(operation.trackId, operation.send);
+        else if constexpr (std::is_same_v<Operation, RemoveTrackSend>)
+            return removeTrackSend(operation.trackId, operation.targetTrackId);
+        else if constexpr (std::is_same_v<Operation, SetTrackSendLevel>)
+            return setTrackSendLevel(operation.trackId, operation.targetTrackId, operation.levelLinear);
+        else if constexpr (std::is_same_v<Operation, SetTrackOutputBus>)
+            return setTrackOutputBus(operation.trackId, operation.outputBusTrackId);
+        else if constexpr (std::is_same_v<Operation, AddTakeToTrack>)
+            return addTakeToTrack(operation.trackId, operation.take);
+        else if constexpr (std::is_same_v<Operation, ToggleTakeLanesExpanded>)
+            return toggleTakeLanesExpanded(operation.trackId);
+        else if constexpr (std::is_same_v<Operation, PromoteTakeRegion>)
+            return promoteTakeRegion(operation.trackId, operation.takeId, operation.startSample, operation.lengthSamples);
         else if constexpr (std::is_same_v<Operation, RemoveTrack>)
             return removeTrack(operation.id);
         else if constexpr (std::is_same_v<Operation, RenameTrack>)

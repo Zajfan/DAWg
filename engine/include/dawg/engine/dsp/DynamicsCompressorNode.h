@@ -17,6 +17,7 @@ struct CompressorSettings
     float makeupGainDb {0.0f};   // 0 dB to 30 dB
     float kneeDb {3.0f};         // 0 dB (hard) to 12 dB (soft)
     bool useRms {false};
+    bool sidechainEnabled {false};
 
     friend bool operator==(const CompressorSettings&, const CompressorSettings&) = default;
 };
@@ -28,6 +29,8 @@ public:
 
     void setSettings(const CompressorSettings& settings) noexcept;
     [[nodiscard]] const CompressorSettings& settings() const noexcept { return m_settings; }
+    void setSidechainEnabled(bool enabled) noexcept { m_settings.sidechainEnabled = enabled; }
+    [[nodiscard]] bool sidechainEnabled() const noexcept { return m_settings.sidechainEnabled; }
 
     [[nodiscard]] bool prepare(
         double sampleRate,

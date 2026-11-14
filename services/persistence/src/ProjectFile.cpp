@@ -179,9 +179,43 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
             const auto& kind = track.at("kind");
             if (! kind.is_string())
                 return failure(Code::invalidFormat, "Expected string track kind");
-            parsedTrack.kind = (kind.get<std::string>() == "instrument")
-                ? project::TrackKind::instrument
-                : project::TrackKind::audio;
+            const auto kindStr = kind.get<std::string>();
+            if (kindStr == "instrument") parsedTrack.kind = project::TrackKind::instrument;
+            else if (kindStr == "auxReturn") parsedTrack.kind = project::TrackKind::auxReturn;
+            else if (kindStr == "submixGroup") parsedTrack.kind = project::TrackKind::submixGroup;
+            else parsedTrack.kind = project::TrackKind::audio;
+        }
+        if (track.contains("outputBusTrackId"))
+        {
+            parsedTrack.outputBusTrackId = track.at("outputBusTrackId").get<project::TrackId>();
+        }
+        if (track.contains("takeLanesExpanded"))
+        {
+            parsedTrack.takeLanesExpanded = track.at("takeLanesExpanded").get<bool>();
+        }
+        if (track.contains("sends") && track.at("sends").is_array())
+        {
+            for (const auto& sendJson : track.at("sends"))
+            {
+                project::TrackSend send;
+                send.targetTrackId = sendJson.at("targetTrackId").get<project::TrackId>();
+                if (sendJson.contains("levelLinear")) send.levelLinear = sendJson.at("levelLinear").get<float>();
+                if (sendJson.contains("preFader")) send.preFader = sendJson.at("preFader").get<bool>();
+                parsedTrack.sends.push_back(send);
+            }
+        }
+        if (track.contains("takes") && track.at("takes").is_array())
+        {
+            for (const auto& takeJson : track.at("takes"))
+            {
+                project::Take take;
+                take.id = takeJson.at("id").get<std::uint32_t>();
+                take.assetId = takeJson.at("assetId").get<project::MediaAssetId>();
+                take.sourceOffset = takeJson.at("sourceOffset").get<std::uint64_t>();
+                take.lengthSamples = takeJson.at("lengthSamples").get<std::uint64_t>();
+                if (takeJson.contains("name")) take.name = takeJson.at("name").get<std::string>();
+                parsedTrack.takes.push_back(take);
+            }
         }
         if (track.contains("inserts"))
         {
@@ -198,6 +232,8 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
                 else if (typeStr == "brickwallLimiter") desc.type = project::DspNodeType::brickwallLimiter;
                 else if (typeStr == "tnhcSynth") desc.type = project::DspNodeType::tnhcSynth;
                 else if (typeStr == "clapPlugin") desc.type = project::DspNodeType::clapPlugin;
+                else if (typeStr == "tnhcReverb") desc.type = project::DspNodeType::tnhcReverb;
+                else if (typeStr == "tnhcDelay") desc.type = project::DspNodeType::tnhcDelay;
                 desc.bypassed = ins.at("bypassed").get<bool>();
                 desc.name = ins.at("name").get<std::string>();
                 if (ins.contains("pluginId")) desc.pluginId = ins.at("pluginId").get<std::string>();
@@ -458,7 +494,48 @@ std::expected<void, ProjectFileError> saveProject(
                 trackJson["gainLinear"] = track.gainLinear;
                 trackJson["pan"] = track.pan;
                 trackJson["phaseInvert"] = track.phaseInvert;
-                trackJson["kind"] = (track.kind == project::TrackKind::instrument) ? "instrument" : "audio";
+                std::string kindStr = "audio";
+                switch (track.kind)
+                {
+                case project::TrackKind::instrument: kindStr = "instrument"; break;
+                case project::TrackKind::auxReturn: kindStr = "auxReturn"; break;
+                case project::TrackKind::submixGroup: kindStr = "submixGroup"; break;
+                case project::TrackKind::audio: default: kindStr = "audio"; break;
+                }
+                trackJson["kind"] = kindStr;
+                trackJson["outputBusTrackId"] = track.outputBusTrackId;
+                trackJson["takeLanesExpanded"] = track.takeLanesExpanded;
+
+                if (! track.sends.empty())
+                {
+                    Json sendsJson = Json::array();
+                    for (const auto& send : track.sends)
+                    {
+                        sendsJson.push_back({
+                            {"targetTrackId", send.targetTrackId},
+                            {"levelLinear", send.levelLinear},
+                            {"preFader", send.preFader}
+                        });
+                    }
+                    trackJson["sends"] = std::move(sendsJson);
+                }
+
+                if (! track.takes.empty())
+                {
+                    Json takesJson = Json::array();
+                    for (const auto& take : track.takes)
+                    {
+                        takesJson.push_back({
+                            {"id", take.id},
+                            {"assetId", take.assetId},
+                            {"sourceOffset", take.sourceOffset},
+                            {"lengthSamples", take.lengthSamples},
+                            {"name", take.name}
+                        });
+                    }
+                    trackJson["takes"] = std::move(takesJson);
+                }
+
                 if (! track.inserts.empty())
                 {
                     Json inserts = Json::array();
@@ -472,6 +549,8 @@ std::expected<void, ProjectFileError> saveProject(
                         case project::DspNodeType::brickwallLimiter: typeStr = "brickwallLimiter"; break;
                         case project::DspNodeType::tnhcSynth: typeStr = "tnhcSynth"; break;
                         case project::DspNodeType::clapPlugin: typeStr = "clapPlugin"; break;
+                        case project::DspNodeType::tnhcReverb: typeStr = "tnhcReverb"; break;
+                        case project::DspNodeType::tnhcDelay: typeStr = "tnhcDelay"; break;
                         }
                         inserts.push_back({
                             {"slotIndex", ins.slotIndex},

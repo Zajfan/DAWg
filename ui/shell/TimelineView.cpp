@@ -146,7 +146,7 @@ const project::AudioClip* TimelineView::findClipAt(juce::Point<int> pos, int& ou
             }
             return nullptr;
         }
-        currentY += m_trackLaneHeight;
+        currentY += m_trackLaneHeight + (track.takeLanesExpanded ? static_cast<int>(track.takes.size()) * 32 : 0);
     }
     return nullptr;
 }
@@ -265,8 +265,18 @@ void TimelineView::drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bo
 
         g.setColour(juce::Colour::fromRGB(220, 225, 235));
         g.setFont(juce::FontOptions(12.0f, juce::Font::bold));
-        g.drawText(track.name, headerBounds.removeFromLeft(headerBounds.getWidth()).reduced(22, 6),
+        g.drawText(track.name, headerBounds.removeFromLeft(headerBounds.getWidth() - 48).reduced(22, 6),
                    juce::Justification::centredLeft);
+
+        // Takes expand/collapse button
+        juce::Rectangle<int> takesBtnBounds {m_headerWidth - 48, currentY + m_trackLaneHeight - 18, 44, 15};
+        g.setColour(track.takeLanesExpanded ? juce::Colour::fromRGB(45, 95, 140) : juce::Colour::fromRGB(25, 28, 35));
+        g.fillRoundedRectangle(takesBtnBounds.toFloat(), 3.0f);
+        g.setColour(juce::Colour::fromRGB(60, 68, 85));
+        g.drawRoundedRectangle(takesBtnBounds.toFloat(), 3.0f, 1.0f);
+        g.setColour(juce::Colour::fromRGB(180, 200, 225));
+        g.setFont(juce::FontOptions(9.0f));
+        g.drawText(track.takeLanesExpanded ? "Takes ^" : "Takes v", takesBtnBounds, juce::Justification::centred);
 
         g.setColour(juce::Colour::fromRGB(40, 42, 50));
         g.drawHorizontalLine(laneBounds.getBottom() - 1, 0.0f, static_cast<float>(getWidth()));
@@ -354,6 +364,62 @@ void TimelineView::drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bo
         drawAutomationOverlay(g, track, currentY, getWidth() - m_headerWidth);
 
         currentY += m_trackLaneHeight;
+
+        // Draw Take Lanes if expanded
+        if (track.takeLanesExpanded && ! track.takes.empty())
+        {
+            constexpr int kTakeLaneHeight = 32;
+            for (std::size_t tkIdx = 0; tkIdx < track.takes.size(); ++tkIdx)
+            {
+                const auto& take = track.takes[tkIdx];
+                const juce::Rectangle<int> takeLaneBounds {0, currentY, getWidth(), kTakeLaneHeight};
+
+                // Take lane background
+                g.setColour(juce::Colour::fromRGB(18, 20, 25));
+                g.fillRect(takeLaneBounds);
+
+                // Take lane header
+                juce::Rectangle<int> tkHeaderBounds {0, currentY, m_headerWidth, kTakeLaneHeight};
+                g.setColour(juce::Colour::fromRGB(26, 29, 36));
+                g.fillRect(tkHeaderBounds);
+                g.setColour(juce::Colour::fromRGB(160, 180, 205));
+                g.setFont(juce::FontOptions(10.0f));
+                g.drawText(take.name.empty() ? ("Take " + juce::String(take.id)) : take.name,
+                           tkHeaderBounds.reduced(8, 2), juce::Justification::centredLeft);
+
+                // Take audio block
+                const int takePxStart = m_headerWidth + sampleToPixel(0);
+                const int takePxWidth = sampleToPixel(static_cast<std::int64_t>(take.lengthSamples));
+                juce::Rectangle<int> takeBlockBounds {takePxStart, currentY + 2, std::max(20, takePxWidth), kTakeLaneHeight - 4};
+                g.setColour(juce::Colour::fromRGB(35, 55, 75));
+                g.fillRoundedRectangle(takeBlockBounds.toFloat(), 3.0f);
+                g.setColour(juce::Colour::fromRGB(65, 105, 145));
+                g.drawRoundedRectangle(takeBlockBounds.toFloat(), 3.0f, 1.0f);
+
+                g.setColour(juce::Colour::fromRGB(200, 220, 240));
+                g.setFont(juce::FontOptions(9.5f));
+                g.drawText("Swipe to Comp", takeBlockBounds.reduced(6, 0), juce::Justification::centredLeft);
+
+                // Swipe Comping Selection overlay
+                if (m_dragMode == DragMode::swipeComping && m_compTrackId == track.id && m_compTakeId == take.id)
+                {
+                    const auto sStart = std::min(m_compStartSample, m_compEndSample);
+                    const auto sEnd = std::max(m_compStartSample, m_compEndSample);
+                    const int selPxStart = m_headerWidth + sampleToPixel(sStart);
+                    const int selPxEnd = m_headerWidth + sampleToPixel(sEnd);
+                    juce::Rectangle<int> selBounds {selPxStart, currentY + 1, std::max(2, selPxEnd - selPxStart), kTakeLaneHeight - 2};
+                    g.setColour(juce::Colour::fromRGBA(255, 200, 50, 90));
+                    g.fillRect(selBounds);
+                    g.setColour(juce::Colour::fromRGB(255, 220, 80));
+                    g.drawRect(selBounds, 1);
+                }
+
+                g.setColour(juce::Colour::fromRGB(32, 35, 42));
+                g.drawHorizontalLine(takeLaneBounds.getBottom() - 1, 0.0f, static_cast<float>(getWidth()));
+
+                currentY += kTakeLaneHeight;
+            }
+        }
     }
 
     g.setColour(juce::Colour::fromRGB(45, 48, 56));
@@ -549,6 +615,52 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
+    // Header interaction: Takes toggle button
+    if (e.x < m_headerWidth)
+    {
+        int ty = m_rulerHeight;
+        for (const auto& track : m_model.project.tracks)
+        {
+            if (e.y >= ty && e.y < ty + m_trackLaneHeight)
+            {
+                if (e.x >= m_headerWidth - 50 && e.y >= ty + m_trackLaneHeight - 22)
+                {
+                    if (m_callbacks.commandHandler)
+                        m_callbacks.commandHandler(project::ToggleTakeLanesExpanded {track.id});
+                    return;
+                }
+            }
+            ty += m_trackLaneHeight + (track.takeLanesExpanded ? static_cast<int>(track.takes.size()) * 32 : 0);
+        }
+        return;
+    }
+
+    // Take lane interaction: swipe comping
+    {
+        int ty = m_rulerHeight;
+        for (const auto& track : m_model.project.tracks)
+        {
+            if (track.takeLanesExpanded && ! track.takes.empty())
+            {
+                for (std::size_t tkIdx = 0; tkIdx < track.takes.size(); ++tkIdx)
+                {
+                    const int takeTop = ty + m_trackLaneHeight + static_cast<int>(tkIdx) * 32;
+                    if (e.y >= takeTop && e.y < takeTop + 32)
+                    {
+                        m_dragMode = DragMode::swipeComping;
+                        m_compTrackId = track.id;
+                        m_compTakeId = track.takes[tkIdx].id;
+                        m_compStartSample = snapSample(pixelToSample(e.x));
+                        m_compEndSample = m_compStartSample;
+                        m_dragStartPos = e.getPosition();
+                        return;
+                    }
+                }
+            }
+            ty += m_trackLaneHeight + (track.takeLanesExpanded ? static_cast<int>(track.takes.size()) * 32 : 0);
+        }
+    }
+
     // Automation interactions
     if (m_showAutomation && e.x >= m_headerWidth)
     {
@@ -683,6 +795,13 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
         return;
     }
 
+    if (m_dragMode == DragMode::swipeComping)
+    {
+        m_compEndSample = snapSample(pixelToSample(e.x));
+        repaint();
+        return;
+    }
+
     if (m_dragMode == DragMode::moveAutomationPoint)
     {
         const int laneIdx = (e.y - m_rulerHeight) / m_trackLaneHeight;
@@ -767,6 +886,25 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
 
 void TimelineView::mouseUp(const juce::MouseEvent&)
 {
+    if (m_dragMode == DragMode::swipeComping)
+    {
+        const auto sStart = std::min(m_compStartSample, m_compEndSample);
+        const auto sEnd = std::max(m_compStartSample, m_compEndSample);
+        const auto sLen = sEnd - sStart;
+        if (sLen > 0 && m_callbacks.commandHandler && m_compTrackId != 0 && m_compTakeId != 0)
+        {
+            m_callbacks.commandHandler(project::PromoteTakeRegion {
+                m_compTrackId,
+                m_compTakeId,
+                static_cast<std::uint64_t>(std::max<std::int64_t>(0, sStart)),
+                static_cast<std::uint64_t>(sLen)
+            });
+        }
+        m_dragMode = DragMode::none;
+        repaint();
+        return;
+    }
+
     if (m_dragMode == DragMode::moveAutomationPoint)
     {
         m_dragMode = DragMode::none;

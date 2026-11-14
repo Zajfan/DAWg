@@ -24,6 +24,15 @@ public:
     // Returns 0 for an empty name or exhausted IDs, without changing state.
     TrackId addAudioTrack(std::string name);
     TrackId addInstrumentTrack(std::string name);
+    TrackId addAuxReturnTrack(std::string name);
+    TrackId addSubmixGroupTrack(std::string name);
+    [[nodiscard]] bool addTrackSend(TrackId trackId, TrackSend send);
+    [[nodiscard]] bool removeTrackSend(TrackId trackId, TrackId targetTrackId);
+    [[nodiscard]] bool setTrackSendLevel(TrackId trackId, TrackId targetTrackId, float levelLinear);
+    [[nodiscard]] bool setTrackOutputBus(TrackId trackId, TrackId outputBusTrackId);
+    [[nodiscard]] bool addTakeToTrack(TrackId trackId, Take take);
+    [[nodiscard]] bool toggleTakeLanesExpanded(TrackId trackId);
+    [[nodiscard]] bool promoteTakeRegion(TrackId trackId, std::uint32_t takeId, std::uint64_t startSample, std::uint64_t lengthSamples);
     MediaAssetId addAudioAsset(AudioAsset asset);
     ClipId addAudioClip(AudioClip clip);
     MidiClipId addMidiClip(MidiClip clip);

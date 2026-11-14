@@ -18,6 +18,7 @@ struct ProcessContext
     AudioBufferView audio {};
     MidiBufferView midi {};
     double sampleRate {48000.0};
+    AudioBufferView sidechain {};
 };
 
 class ProcessorNode

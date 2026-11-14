@@ -65,7 +65,8 @@ private:
         trimRight,
         fadeLeft,
         fadeRight,
-        moveAutomationPoint
+        moveAutomationPoint,
+        swipeComping
     };
 
     void drawRuler(juce::Graphics& g, juce::Rectangle<int> bounds);
@@ -100,6 +101,10 @@ private:
     std::uint32_t m_dragFadeOutSamples {0};
     project::AutomationLaneId m_dragAutomationLaneId {0};
     project::AutomationPointId m_dragAutomationPointId {0};
+    project::TrackId m_compTrackId {0};
+    std::uint32_t m_compTakeId {0};
+    std::int64_t m_compStartSample {0};
+    std::int64_t m_compEndSample {0};
     juce::Point<int> m_dragStartPos;
 
     juce::TextButton m_snapButton {"Snap: 1/16"};

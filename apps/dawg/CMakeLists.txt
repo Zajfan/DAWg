@@ -13,6 +13,8 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/TimelineView.h
     ../../ui/shell/PianoRollView.cpp
     ../../ui/shell/PianoRollView.h
+    ../../ui/shell/DspEditorDialog.cpp
+    ../../ui/shell/DspEditorDialog.h
 )
 target_include_directories(DAWg PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ../../ui/shell)
 target_link_libraries(DAWg PRIVATE dawg_platform_juce dawg_services_commands dawg_services_media)

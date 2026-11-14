@@ -41,6 +41,8 @@ private:
     juce::TextButton m_eqButton {"EQ"};
     juce::TextButton m_compButton {"COMP"};
     juce::TextButton m_synthButton {"SYNTH"};
+    juce::TextButton m_revButton {"REV"};
+    juce::TextButton m_delayButton {"DLY"};
     juce::TextButton m_limiterButton {"LIMIT"};
 };
 

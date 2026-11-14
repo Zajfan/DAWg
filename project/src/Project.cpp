@@ -184,6 +184,253 @@ TrackId Project::addInstrumentTrack(std::string name)
     return id;
 }
 
+TrackId Project::addAuxReturnTrack(std::string name)
+{
+    if (name.empty() || m_nextTrackId == 0)
+        return 0;
+
+    const auto id = m_nextTrackId;
+    m_state.tracks.push_back({
+        .id = id,
+        .name = std::move(name),
+        .muted = false,
+        .solo = false,
+        .gainLinear = 1.0f,
+        .pan = 0.0f,
+        .phaseInvert = false,
+        .recordArmed = false,
+        .kind = TrackKind::auxReturn
+    });
+    ++m_nextTrackId;
+    return id;
+}
+
+TrackId Project::addSubmixGroupTrack(std::string name)
+{
+    if (name.empty() || m_nextTrackId == 0)
+        return 0;
+
+    const auto id = m_nextTrackId;
+    m_state.tracks.push_back({
+        .id = id,
+        .name = std::move(name),
+        .muted = false,
+        .solo = false,
+        .gainLinear = 1.0f,
+        .pan = 0.0f,
+        .phaseInvert = false,
+        .recordArmed = false,
+        .kind = TrackKind::submixGroup
+    });
+    ++m_nextTrackId;
+    return id;
+}
+
+bool Project::addTrackSend(const TrackId trackId, TrackSend send)
+{
+    if (trackId == 0 || send.targetTrackId == 0 || trackId == send.targetTrackId)
+        return false;
+
+    const auto track = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                    [trackId](const Track& t) { return t.id == trackId; });
+    const auto target = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                     [targetId = send.targetTrackId](const Track& t) { return t.id == targetId; });
+    if (track == m_state.tracks.end() || target == m_state.tracks.end())
+        return false;
+
+    if (std::any_of(track->sends.begin(), track->sends.end(),
+                    [targetId = send.targetTrackId](const TrackSend& s) { return s.targetTrackId == targetId; }))
+    {
+        return false;
+    }
+
+    track->sends.push_back(send);
+    return true;
+}
+
+bool Project::removeTrackSend(const TrackId trackId, const TrackId targetTrackId)
+{
+    const auto track = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                    [trackId](const Track& t) { return t.id == trackId; });
+    if (track == m_state.tracks.end())
+        return false;
+
+    const auto it = std::find_if(track->sends.begin(), track->sends.end(),
+                                 [targetTrackId](const TrackSend& s) { return s.targetTrackId == targetTrackId; });
+    if (it == track->sends.end())
+        return false;
+
+    track->sends.erase(it);
+    return true;
+}
+
+bool Project::setTrackSendLevel(const TrackId trackId, const TrackId targetTrackId, const float levelLinear)
+{
+    if (! std::isfinite(levelLinear) || levelLinear < 0.0f)
+        return false;
+
+    const auto track = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                    [trackId](const Track& t) { return t.id == trackId; });
+    if (track == m_state.tracks.end())
+        return false;
+
+    const auto it = std::find_if(track->sends.begin(), track->sends.end(),
+                                 [targetTrackId](const TrackSend& s) { return s.targetTrackId == targetTrackId; });
+    if (it == track->sends.end())
+        return false;
+
+    it->levelLinear = levelLinear;
+    return true;
+}
+
+bool Project::setTrackOutputBus(const TrackId trackId, const TrackId outputBusTrackId)
+{
+    if (trackId == 0 || trackId == outputBusTrackId)
+        return false;
+
+    const auto track = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                    [trackId](const Track& t) { return t.id == trackId; });
+    if (track == m_state.tracks.end())
+        return false;
+
+    if (outputBusTrackId != 0)
+    {
+        const auto bus = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                      [outputBusTrackId](const Track& t) { return t.id == outputBusTrackId; });
+        if (bus == m_state.tracks.end() || bus->kind != TrackKind::submixGroup)
+            return false;
+    }
+
+    track->outputBusTrackId = outputBusTrackId;
+    return true;
+}
+
+bool Project::addTakeToTrack(const TrackId trackId, Take take)
+{
+    if (trackId == 0 || take.lengthSamples == 0)
+        return false;
+
+    const auto track = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                    [trackId](const Track& t) { return t.id == trackId; });
+    if (track == m_state.tracks.end())
+        return false;
+
+    if (take.id == 0)
+    {
+        take.id = static_cast<std::uint32_t>(track->takes.size() + 1);
+    }
+    track->takes.push_back(std::move(take));
+    return true;
+}
+
+bool Project::toggleTakeLanesExpanded(const TrackId trackId)
+{
+    const auto track = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                    [trackId](const Track& t) { return t.id == trackId; });
+    if (track == m_state.tracks.end())
+        return false;
+
+    track->takeLanesExpanded = ! track->takeLanesExpanded;
+    return true;
+}
+
+bool Project::promoteTakeRegion(const TrackId trackId, const std::uint32_t takeId,
+                                const std::uint64_t startSample, const std::uint64_t lengthSamples)
+{
+    if (trackId == 0 || lengthSamples == 0)
+        return false;
+
+    const auto track = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                    [trackId](const Track& t) { return t.id == trackId; });
+    if (track == m_state.tracks.end())
+        return false;
+
+    const auto takeIt = std::find_if(track->takes.begin(), track->takes.end(),
+                                     [takeId](const Take& tk) { return tk.id == takeId; });
+    if (takeIt == track->takes.end())
+        return false;
+
+    const auto promoteStart = startSample;
+    const auto promoteEnd = startSample + lengthSamples;
+
+    std::vector<AudioClip> preservedClips;
+    for (auto& clip : m_state.clips)
+    {
+        if (clip.trackId != trackId)
+        {
+            preservedClips.push_back(clip);
+            continue;
+        }
+
+        const auto clipStart = clip.startSample;
+        const auto clipEnd = clip.startSample + clip.lengthSamples;
+
+        if (clipEnd <= promoteStart || clipStart >= promoteEnd)
+        {
+            preservedClips.push_back(clip);
+            continue;
+        }
+
+        if (clipStart >= promoteStart && clipEnd <= promoteEnd)
+        {
+            continue;
+        }
+
+        if (clipStart < promoteStart && clipEnd <= promoteEnd)
+        {
+            clip.lengthSamples = promoteStart - clipStart;
+            preservedClips.push_back(clip);
+            continue;
+        }
+
+        if (clipStart >= promoteStart && clipEnd > promoteEnd)
+        {
+            const auto cut = promoteEnd - clipStart;
+            clip.startSample = promoteEnd;
+            clip.sourceOffset += cut;
+            clip.lengthSamples -= cut;
+            preservedClips.push_back(clip);
+            continue;
+        }
+
+        if (clipStart < promoteStart && clipEnd > promoteEnd)
+        {
+            AudioClip rightPart = clip;
+            rightPart.id = m_nextClipId;
+            m_nextClipId = nextIdAfter(m_nextClipId);
+            rightPart.startSample = promoteEnd;
+            rightPart.sourceOffset = clip.sourceOffset + (promoteEnd - clipStart);
+            rightPart.lengthSamples = clipEnd - promoteEnd;
+
+            clip.lengthSamples = promoteStart - clipStart;
+
+            preservedClips.push_back(clip);
+            preservedClips.push_back(rightPart);
+            continue;
+        }
+    }
+
+    m_state.clips = std::move(preservedClips);
+
+    constexpr std::uint32_t kCrossfadeSamples = 256;
+    AudioClip promotedClip {
+        .id = m_nextClipId,
+        .assetId = takeIt->assetId,
+        .startSample = promoteStart,
+        .sourceOffset = takeIt->sourceOffset,
+        .lengthSamples = lengthSamples,
+        .trackId = trackId,
+        .gainLinear = 1.0f,
+        .fadeInSamples = kCrossfadeSamples,
+        .fadeOutSamples = kCrossfadeSamples,
+        .warpingEnabled = false,
+        .warpMarkers = {}
+    };
+    m_nextClipId = nextIdAfter(m_nextClipId);
+    m_state.clips.push_back(std::move(promotedClip));
+    return true;
+}
+
 MediaAssetId Project::addAudioAsset(AudioAsset asset)
 {
     if (! isValidAsset(asset))
