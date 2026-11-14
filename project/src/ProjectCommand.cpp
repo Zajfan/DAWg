@@ -49,6 +49,8 @@ bool Project::apply(const ProjectCommand& command)
             return moveMidiNote(operation.clipId, operation.noteId, operation.newStartSample, operation.newPitch);
         else if constexpr (std::is_same_v<Operation, ResizeMidiNote>)
             return resizeMidiNote(operation.clipId, operation.noteId, operation.newLengthSamples);
+        else if constexpr (std::is_same_v<Operation, SetMidiNoteVelocity>)
+            return setMidiNoteVelocity(operation.clipId, operation.noteId, operation.newVelocity);
         else if constexpr (std::is_same_v<Operation, AddAutomationLane>)
             return addAutomationLane(operation.lane) != 0;
         else if constexpr (std::is_same_v<Operation, RemoveAutomationLane>)
@@ -85,6 +87,12 @@ bool Project::apply(const ProjectCommand& command)
             return setProjectTempo(operation.bpm, operation.timeSigNumerator, operation.timeSigDenominator, operation.metronomeEnabled);
         else if constexpr (std::is_same_v<Operation, SetProjectLoop>)
             return setProjectLoop(operation.enabled, operation.startSample, operation.endSample);
+        else if constexpr (std::is_same_v<Operation, AddTrackInsert>)
+            return addTrackInsert(operation.trackId, operation.descriptor);
+        else if constexpr (std::is_same_v<Operation, RemoveTrackInsert>)
+            return removeTrackInsert(operation.trackId, operation.slotIndex);
+        else if constexpr (std::is_same_v<Operation, SetTrackInsertBypassed>)
+            return setTrackInsertBypassed(operation.trackId, operation.slotIndex, operation.bypassed);
         else
             return false;
     }, command);

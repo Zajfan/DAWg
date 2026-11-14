@@ -1,6 +1,20 @@
 add_subdirectory(persistence)
 add_subdirectory(media)
 
+add_library(dawg_services_plugins STATIC
+    plugins/src/PluginScanner.cpp
+)
+target_include_directories(dawg_services_plugins PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/plugins/include)
+target_compile_features(dawg_services_plugins PUBLIC cxx_std_20)
+target_compile_options(dawg_services_plugins PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4;/WX>
+    $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
+)
+target_link_options(dawg_services_plugins PUBLIC
+    $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
+)
+
 add_library(dawg_services_commands STATIC
     commands/src/GraphCompiler.cpp
     commands/src/ProjectController.cpp
@@ -29,4 +43,14 @@ if(DAWG_BUILD_TESTS)
         $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
     )
     add_test(NAME dawg.project_controller COMMAND dawg_project_controller_tests)
+
+    add_executable(dawg_plugin_scanner_tests ../tests/services/PluginScannerTests.cpp)
+    target_link_libraries(dawg_plugin_scanner_tests PRIVATE dawg_services_plugins)
+    target_compile_features(dawg_plugin_scanner_tests PRIVATE cxx_std_20)
+    target_compile_options(dawg_plugin_scanner_tests PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4;/WX>
+        $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
+    )
+    add_test(NAME dawg.plugin_scanner COMMAND dawg_plugin_scanner_tests)
 endif()

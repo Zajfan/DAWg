@@ -431,6 +431,57 @@ bool Project::promoteTakeRegion(const TrackId trackId, const std::uint32_t takeI
     return true;
 }
 
+bool Project::addTrackInsert(const TrackId trackId, DspNodeDescriptor descriptor)
+{
+    const auto it = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                 [trackId](const Track& t) { return t.id == trackId; });
+    if (it == m_state.tracks.end())
+        return false;
+
+    for (auto& ins : it->inserts)
+    {
+        if (ins.slotIndex == descriptor.slotIndex)
+        {
+            ins = std::move(descriptor);
+            return true;
+        }
+    }
+    it->inserts.push_back(std::move(descriptor));
+    return true;
+}
+
+bool Project::removeTrackInsert(const TrackId trackId, const std::uint32_t slotIndex)
+{
+    const auto it = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                 [trackId](const Track& t) { return t.id == trackId; });
+    if (it == m_state.tracks.end())
+        return false;
+
+    const auto insIt = std::find_if(it->inserts.begin(), it->inserts.end(),
+                                    [slotIndex](const DspNodeDescriptor& d) { return d.slotIndex == slotIndex; });
+    if (insIt == it->inserts.end())
+        return false;
+
+    it->inserts.erase(insIt);
+    return true;
+}
+
+bool Project::setTrackInsertBypassed(const TrackId trackId, const std::uint32_t slotIndex, const bool bypassed)
+{
+    const auto it = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                 [trackId](const Track& t) { return t.id == trackId; });
+    if (it == m_state.tracks.end())
+        return false;
+
+    const auto insIt = std::find_if(it->inserts.begin(), it->inserts.end(),
+                                    [slotIndex](const DspNodeDescriptor& d) { return d.slotIndex == slotIndex; });
+    if (insIt == it->inserts.end())
+        return false;
+
+    insIt->bypassed = bypassed;
+    return true;
+}
+
 MediaAssetId Project::addAudioAsset(AudioAsset asset)
 {
     if (! isValidAsset(asset))
@@ -850,6 +901,23 @@ bool Project::resizeMidiNote(const MidiClipId clipId, const NoteId noteId, const
     if (noteIt == it->notes.end())
         return false;
     noteIt->lengthSamples = newLengthSamples;
+    return true;
+}
+
+bool Project::setMidiNoteVelocity(const MidiClipId clipId, const NoteId noteId, const std::uint8_t newVelocity)
+{
+    if (newVelocity > 127)
+        return false;
+    const auto it = std::find_if(m_state.midiClips.begin(), m_state.midiClips.end(),
+                                 [clipId](const MidiClip& c) { return c.id == clipId; });
+    if (it == m_state.midiClips.end())
+        return false;
+
+    const auto noteIt = std::find_if(it->notes.begin(), it->notes.end(),
+                                     [noteId](const MidiNote& n) { return n.id == noteId; });
+    if (noteIt == it->notes.end())
+        return false;
+    noteIt->velocity = newVelocity;
     return true;
 }
 

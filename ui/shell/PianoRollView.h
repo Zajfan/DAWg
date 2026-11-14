@@ -32,18 +32,29 @@ public:
     bool keyPressed(const juce::KeyPress& key) override;
 
 private:
+    enum class QuantizeGrid : std::uint8_t
+    {
+        quarter,
+        eighth,
+        sixteenth,
+        thirtySecond,
+        eighthTriplet,
+        sixteenthTriplet
+    };
+
     enum class DragMode
     {
         none,
         moveNote,
         resizeNote,
-        drawNote,
+        selectLasso,
         adjustVelocity
     };
 
     void drawPianoKeys(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawGrid(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawNotes(juce::Graphics& g, juce::Rectangle<int> bounds);
+    void drawLasso(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawVelocityLane(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawPlayhead(juce::Graphics& g, juce::Rectangle<int> bounds);
 
@@ -51,19 +62,33 @@ private:
     [[nodiscard]] std::int64_t pixelToSample(int x) const noexcept;
     [[nodiscard]] int pitchToPixel(std::uint8_t pitch) const noexcept;
     [[nodiscard]] std::uint8_t pixelToPitch(int y) const noexcept;
+    [[nodiscard]] double gridIntervalSamples() const noexcept;
+    [[nodiscard]] std::int64_t snapSample(std::int64_t sample) const noexcept;
+    [[nodiscard]] bool isNoteSelected(project::NoteId id) const noexcept;
     [[nodiscard]] const project::MidiClip* findActiveClip() const noexcept;
     [[nodiscard]] const project::MidiNote* findNoteAt(juce::Point<int> pos, bool& outNearRightEdge) const noexcept;
+    void quantizeNotes();
+    void selectAllNotes();
 
     CommandHandler m_handler;
     EditorViewModel m_model;
     std::optional<project::MidiClipId> m_activeClipId;
 
-    std::optional<project::NoteId> m_selectedNoteId;
+    std::vector<project::NoteId> m_selectedNoteIds;
     std::optional<project::NoteId> m_draggedNoteId;
     project::MidiNote m_dragInitialNote {};
     DragMode m_dragMode {DragMode::none};
     juce::Point<int> m_dragStartPos;
+    juce::Rectangle<int> m_lassoRect;
 
+    QuantizeGrid m_grid {QuantizeGrid::sixteenth};
+    float m_swing {0.0f};
+
+    juce::ComboBox m_gridCombo;
+    juce::ComboBox m_swingCombo;
+    juce::TextButton m_quantizeButton {"Quantize [Q]"};
+
+    int m_toolbarHeight {28};
     int m_keyWidth {50};
     int m_noteRowHeight {14};
     int m_velocityHeight {60};

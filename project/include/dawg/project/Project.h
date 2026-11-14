@@ -33,6 +33,9 @@ public:
     [[nodiscard]] bool addTakeToTrack(TrackId trackId, Take take);
     [[nodiscard]] bool toggleTakeLanesExpanded(TrackId trackId);
     [[nodiscard]] bool promoteTakeRegion(TrackId trackId, std::uint32_t takeId, std::uint64_t startSample, std::uint64_t lengthSamples);
+    [[nodiscard]] bool addTrackInsert(TrackId trackId, DspNodeDescriptor descriptor);
+    [[nodiscard]] bool removeTrackInsert(TrackId trackId, std::uint32_t slotIndex);
+    [[nodiscard]] bool setTrackInsertBypassed(TrackId trackId, std::uint32_t slotIndex, bool bypassed);
     MediaAssetId addAudioAsset(AudioAsset asset);
     ClipId addAudioClip(AudioClip clip);
     MidiClipId addMidiClip(MidiClip clip);
@@ -41,6 +44,7 @@ public:
     [[nodiscard]] bool removeMidiNote(MidiClipId clipId, NoteId noteId);
     [[nodiscard]] bool moveMidiNote(MidiClipId clipId, NoteId noteId, std::uint64_t newStartSample, std::uint8_t newPitch);
     [[nodiscard]] bool resizeMidiNote(MidiClipId clipId, NoteId noteId, std::uint64_t newLengthSamples);
+    [[nodiscard]] bool setMidiNoteVelocity(MidiClipId clipId, NoteId noteId, std::uint8_t newVelocity);
     AutomationLaneId addAutomationLane(AutomationLane lane);
     [[nodiscard]] bool removeAutomationLane(AutomationLaneId laneId);
     AutomationPointId addAutomationPoint(AutomationLaneId laneId, AutomationPoint point);

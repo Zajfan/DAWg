@@ -34,6 +34,7 @@ enum MenuId
     cmdToggleMixer = 30,
     cmdTogglePianoRoll = 31,
     cmdToggleAutomation = 32,
+    cmdToggleBrowser = 33,
 
     // Options
     cmdAudioPreferences = 40,
@@ -100,11 +101,68 @@ MainEditorView::MainEditorView(EditorViewModel model,
     m_tabPianoRollButton.onClick = [this] { setDockMode(BottomDockMode::pianoRoll); };
     addAndMakeVisible(m_tabPianoRollButton);
 
+    m_tabBrowserButton.setClickingTogglesState(false);
+    m_tabBrowserButton.onClick = [this] { togglePluginBrowser(); };
+    addAndMakeVisible(m_tabBrowserButton);
+
     addAndMakeVisible(m_mixerPanel);
     addChildComponent(m_pianoRollView); // hidden initially
 
+    m_pluginBrowser = std::make_unique<PluginBrowserPanel>(
+        [this](const plugins::PluginDescriptor& plugin, bool createNewTrack) {
+            if (createNewTrack)
+            {
+                if (plugin.isInstrument)
+                    m_commandHandler(project::AddInstrumentTrack { plugin.name });
+                else
+                    m_commandHandler(project::AddAudioTrack { plugin.name });
+                return;
+            }
+
+            if (m_model.project.tracks.empty())
+                return;
+
+            const auto& targetTrack = m_model.project.tracks.front();
+            project::DspNodeType nodeType = project::DspNodeType::clapPlugin;
+            if (plugin.id == "tnhc.parametric_eq")
+                nodeType = project::DspNodeType::parametricEq;
+            else if (plugin.id == "tnhc.studio_compressor")
+                nodeType = project::DspNodeType::dynamicsCompressor;
+            else if (plugin.id == "tnhc.master_limiter")
+                nodeType = project::DspNodeType::brickwallLimiter;
+            else if (plugin.id == "tnhc.synth")
+                nodeType = project::DspNodeType::tnhcSynth;
+            else if (plugin.id == "tnhc.plate_reverb")
+                nodeType = project::DspNodeType::tnhcReverb;
+            else if (plugin.id == "tnhc.stereo_delay")
+                nodeType = project::DspNodeType::tnhcDelay;
+
+            m_commandHandler(project::AddTrackInsert {
+                targetTrack.id,
+                project::DspNodeDescriptor {
+                    .slotIndex = static_cast<std::uint32_t>(targetTrack.inserts.size()),
+                    .type = nodeType,
+                    .bypassed = false,
+                    .name = plugin.name,
+                    .pluginId = plugin.id,
+                    .parameters = {}
+                }
+            });
+        });
+    addChildComponent(*m_pluginBrowser);
+
     setDockMode(BottomDockMode::mixer);
     setViewModel(m_model);
+}
+
+void MainEditorView::togglePluginBrowser()
+{
+    m_browserVisible = ! m_browserVisible;
+    if (m_pluginBrowser)
+        m_pluginBrowser->setVisible(m_browserVisible);
+    m_tabBrowserButton.setColour(juce::TextButton::buttonColourId,
+                                m_browserVisible ? juce::Colour::fromRGB(45, 95, 145) : juce::Colour::fromRGB(28, 30, 36));
+    resized();
 }
 
 void MainEditorView::setDockMode(BottomDockMode mode)
@@ -194,6 +252,7 @@ juce::PopupMenu MainEditorView::getMenuForIndex(int menuIndex, const juce::Strin
         menu.addItem(cmdTogglePianoRoll, "Show Piano Roll  (P)", true, m_dockMode == BottomDockMode::pianoRoll);
         menu.addSeparator();
         menu.addItem(cmdToggleAutomation, "Toggle Automation Lanes  (A)", true, m_timelineView.showAutomation());
+        menu.addItem(cmdToggleBrowser, "Toggle Plugin Browser  (B)", true, m_browserVisible);
         break;
 
     case 4: // Options
@@ -279,6 +338,9 @@ void MainEditorView::menuItemSelected(int menuItemID, int)
     case cmdToggleAutomation:
         m_timelineView.toggleAutomation();
         break;
+    case cmdToggleBrowser:
+        togglePluginBrowser();
+        break;
 
     case cmdAudioPreferences:
         if (m_menuCallbacks.audioPreferences) m_menuCallbacks.audioPreferences();
@@ -359,6 +421,11 @@ bool MainEditorView::keyPressed(const juce::KeyPress& key)
             return true;
         }
     }
+    if (! key.getModifiers().isCtrlDown() && (key.getKeyCode() == 'B' || key.getKeyCode() == 'b'))
+    {
+        togglePluginBrowser();
+        return true;
+    }
 
     return false;
 }
@@ -385,11 +452,18 @@ void MainEditorView::resized()
     auto tabHeader = bottomDockArea.removeFromTop(24);
     m_tabMixerButton.setBounds(tabHeader.removeFromLeft(140).reduced(2, 2));
     m_tabPianoRollButton.setBounds(tabHeader.removeFromLeft(130).reduced(2, 2));
+    m_tabBrowserButton.setBounds(tabHeader.removeFromLeft(110).reduced(2, 2));
 
     m_mixerPanel.setBounds(bottomDockArea);
     m_pianoRollView.setBounds(bottomDockArea);
 
-    // 4. Center Multi-Track Timeline View
+    // 4. Right Sidebar Plugin Browser
+    if (m_browserVisible && m_pluginBrowser)
+    {
+        m_pluginBrowser->setBounds(area.removeFromRight(260));
+    }
+
+    // 5. Center Multi-Track Timeline View
     m_timelineView.setBounds(area);
 }
 

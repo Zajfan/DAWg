@@ -193,6 +193,7 @@ set(DAWG_OWN_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/DspEditorDialog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/AudioSettingsDialog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/BounceDialog.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/PluginBrowserPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/platform/juce/window/WindowRegistry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/platform/juce/window/ManagedWindow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/platform/juce/window/WindowManager.cpp

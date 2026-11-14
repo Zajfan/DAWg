@@ -63,6 +63,7 @@ private:
         moveClip,
         trimLeft,
         trimRight,
+        slipEdit,
         fadeLeft,
         fadeRight,
         moveAutomationPoint,
@@ -106,9 +107,12 @@ private:
     std::int64_t m_compStartSample {0};
     std::int64_t m_compEndSample {0};
     juce::Point<int> m_dragStartPos;
+    juce::Point<int> m_lastMousePos;
 
     juce::TextButton m_snapButton {"Snap: 1/16"};
     juce::TextButton m_autoButton {"Auto: OFF"};
+    juce::TextButton m_razorButton {"Razor [S]"};
+    bool m_razorMode {false};
 
     double m_samplesPerPixel {256.0};
     int m_scrollOffsetX {0};

@@ -156,6 +156,32 @@ struct ResizeMidiNote
     std::uint64_t newLengthSamples {};
 };
 
+struct SetMidiNoteVelocity
+{
+    MidiClipId clipId {};
+    NoteId noteId {};
+    std::uint8_t newVelocity {100};
+};
+
+struct AddTrackInsert
+{
+    TrackId trackId {};
+    DspNodeDescriptor descriptor {};
+};
+
+struct RemoveTrackInsert
+{
+    TrackId trackId {};
+    std::uint32_t slotIndex {};
+};
+
+struct SetTrackInsertBypassed
+{
+    TrackId trackId {};
+    std::uint32_t slotIndex {};
+    bool bypassed {false};
+};
+
 struct AddAutomationLane
 {
     AutomationLane lane;
@@ -273,12 +299,16 @@ using ProjectCommand = std::variant<
     RemoveMidiNote,
     MoveMidiNote,
     ResizeMidiNote,
+    SetMidiNoteVelocity,
     AddAutomationLane,
     RemoveAutomationLane,
     AddAutomationPoint,
     RemoveAutomationPoint,
     MoveAutomationPoint,
     SetProjectTempo,
-    SetProjectLoop>;
+    SetProjectLoop,
+    AddTrackInsert,
+    RemoveTrackInsert,
+    SetTrackInsertBypassed>;
 
 } // namespace dawg::project

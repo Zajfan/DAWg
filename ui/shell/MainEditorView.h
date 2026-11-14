@@ -3,6 +3,7 @@
 #include "EditorViewModel.h"
 #include "MixerPanel.h"
 #include "PianoRollView.h"
+#include "PluginBrowserPanel.h"
 #include "TimelineView.h"
 #include "TransportBar.h"
 
@@ -66,6 +67,8 @@ public:
     void setWaveformCache(media::WaveformCache* cache);
     void setDockMode(BottomDockMode mode);
     [[nodiscard]] BottomDockMode dockMode() const noexcept { return m_dockMode; }
+    void togglePluginBrowser();
+    [[nodiscard]] bool isPluginBrowserVisible() const noexcept { return m_browserVisible; }
 
     // MenuBarModel
     juce::StringArray getMenuBarNames() override;
@@ -90,8 +93,11 @@ private:
     BottomDockMode m_dockMode {BottomDockMode::mixer};
     juce::TextButton m_tabMixerButton {"Mixer Console [M]"};
     juce::TextButton m_tabPianoRollButton {"Piano Roll [P]"};
+    juce::TextButton m_tabBrowserButton {"Browser [B]"};
     MixerPanel m_mixerPanel;
     PianoRollView m_pianoRollView;
+    std::unique_ptr<PluginBrowserPanel> m_pluginBrowser;
+    bool m_browserVisible {false};
 };
 
 } // namespace dawg::ui

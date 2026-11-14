@@ -19,9 +19,11 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/AudioSettingsDialog.h
     ../../ui/shell/BounceDialog.cpp
     ../../ui/shell/BounceDialog.h
+    ../../ui/shell/PluginBrowserPanel.cpp
+    ../../ui/shell/PluginBrowserPanel.h
 )
 target_include_directories(DAWg PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ../../ui/shell)
-target_link_libraries(DAWg PRIVATE dawg_platform_juce dawg_services_commands dawg_services_media dawg_services_persistence)
+target_link_libraries(DAWg PRIVATE dawg_platform_juce dawg_services_commands dawg_services_media dawg_services_persistence dawg_services_plugins)
 
 if(DAWG_BUILD_TESTS)
     target_sources(DAWg PRIVATE ../../tests/app/MainComponentOwnershipTests.cpp)

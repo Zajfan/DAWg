@@ -17,6 +17,15 @@ TimelineView::TimelineView(Callbacks callbacks, media::WaveformCache* waveformCa
 
     m_autoButton.onClick = [this] { toggleAutomation(); };
     addAndMakeVisible(m_autoButton);
+
+    m_razorButton.onClick = [this] {
+        m_razorMode = ! m_razorMode;
+        m_razorButton.setColour(juce::TextButton::buttonColourId,
+                                m_razorMode ? juce::Colour::fromRGB(180, 50, 50)
+                                            : juce::Colour::fromRGB(40, 42, 50));
+        repaint();
+    };
+    addAndMakeVisible(m_razorButton);
 }
 
 void TimelineView::toggleAutomation() noexcept
@@ -329,7 +338,7 @@ void TimelineView::drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bo
                 g.fillPath(fadeWedge);
             }
 
-            // Draw waveform
+            // Draw waveform with fade curve gain ramp
             if (m_waveformCache != nullptr && clipBounds.getWidth() > 4)
             {
                 const auto peaks = m_waveformCache->getMinMaxPeaks(
@@ -345,10 +354,28 @@ void TimelineView::drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bo
                     const int centerY = clipBounds.getCentreY() + 4;
                     const int halfHeight = (clipBounds.getHeight() - 18) / 2;
 
-                    for (int p = 0; p < clipBounds.getWidth() && p < static_cast<int>(peaks.size()); ++p)
+                    const int fadeInPx = (clip.fadeInSamples > 0 && clip.lengthSamples > 0)
+                        ? std::min(clipBounds.getWidth(), sampleToPixel(clip.fadeInSamples))
+                        : 0;
+                    const int fadeOutPx = (clip.fadeOutSamples > 0 && clip.lengthSamples > 0)
+                        ? std::min(clipBounds.getWidth(), sampleToPixel(clip.fadeOutSamples))
+                        : 0;
+                    const int clipW = clipBounds.getWidth();
+
+                    for (int p = 0; p < clipW && p < static_cast<int>(peaks.size()); ++p)
                     {
-                        const float minVal = peaks[static_cast<std::size_t>(p)].minVal;
-                        const float maxVal = peaks[static_cast<std::size_t>(p)].maxVal;
+                        float gain = 1.0f;
+                        if (fadeInPx > 0 && p < fadeInPx)
+                        {
+                            gain *= static_cast<float>(p) / static_cast<float>(fadeInPx);
+                        }
+                        if (fadeOutPx > 0 && p >= (clipW - fadeOutPx))
+                        {
+                            gain *= static_cast<float>(clipW - 1 - p) / static_cast<float>(fadeOutPx);
+                        }
+
+                        const float minVal = peaks[static_cast<std::size_t>(p)].minVal * gain;
+                        const float maxVal = peaks[static_cast<std::size_t>(p)].maxVal * gain;
 
                         const int y1 = centerY - static_cast<int>(std::round(maxVal * static_cast<float>(halfHeight)));
                         const int y2 = centerY - static_cast<int>(std::round(minVal * static_cast<float>(halfHeight)));
@@ -359,6 +386,28 @@ void TimelineView::drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bo
                     }
                 }
             }
+
+            // Draw Corner Fade Grab Handles
+            const int inPx = (clip.fadeInSamples > 0 && clip.lengthSamples > 0)
+                ? std::min(clipBounds.getWidth(), sampleToPixel(clip.fadeInSamples))
+                : 0;
+            const int outPx = (clip.fadeOutSamples > 0 && clip.lengthSamples > 0)
+                ? std::min(clipBounds.getWidth(), sampleToPixel(clip.fadeOutSamples))
+                : 0;
+
+            const float handleInX = static_cast<float>(clipBounds.getX() + inPx);
+            const float handleInY = static_cast<float>(clipBounds.getY() + 4);
+            g.setColour(juce::Colour::fromRGB(255, 230, 100));
+            g.fillEllipse(handleInX - 3.5f, handleInY - 3.5f, 7.0f, 7.0f);
+            g.setColour(juce::Colours::black.withAlpha(0.6f));
+            g.drawEllipse(handleInX - 3.5f, handleInY - 3.5f, 7.0f, 7.0f, 1.0f);
+
+            const float handleOutX = static_cast<float>(clipBounds.getRight() - outPx);
+            const float handleOutY = static_cast<float>(clipBounds.getY() + 4);
+            g.setColour(juce::Colour::fromRGB(255, 230, 100));
+            g.fillEllipse(handleOutX - 3.5f, handleOutY - 3.5f, 7.0f, 7.0f);
+            g.setColour(juce::Colours::black.withAlpha(0.6f));
+            g.drawEllipse(handleOutX - 3.5f, handleOutY - 3.5f, 7.0f, 7.0f, 1.0f);
         }
 
         drawAutomationOverlay(g, track, currentY, getWidth() - m_headerWidth);
@@ -569,16 +618,25 @@ void TimelineView::drawPlayhead(juce::Graphics& g, juce::Rectangle<int> bounds)
 
 void TimelineView::resized()
 {
-    const int btnWidth = (m_headerWidth - 16) / 2;
-    m_snapButton.setBounds(6, 4, btnWidth, m_rulerHeight - 8);
-    m_autoButton.setBounds(6 + btnWidth + 4, 4, btnWidth, m_rulerHeight - 8);
+    const int btnWidth = (m_headerWidth - 16) / 3;
+    m_snapButton.setBounds(4, 4, btnWidth, m_rulerHeight - 8);
+    m_autoButton.setBounds(4 + btnWidth + 2, 4, btnWidth, m_rulerHeight - 8);
+    m_razorButton.setBounds(4 + (btnWidth + 2) * 2, 4, btnWidth, m_rulerHeight - 8);
 }
 
 void TimelineView::mouseMove(const juce::MouseEvent& e)
 {
+    m_lastMousePos = e.getPosition();
+
     if (e.y < m_rulerHeight)
     {
         setMouseCursor(juce::MouseCursor::PointingHandCursor);
+        return;
+    }
+
+    if (m_razorMode)
+    {
+        setMouseCursor(juce::MouseCursor::CrosshairCursor);
         return;
     }
 
@@ -586,13 +644,19 @@ void TimelineView::mouseMove(const juce::MouseEvent& e)
     const auto* clip = findClipAt(e.getPosition(), laneY);
     if (clip != nullptr)
     {
+        if (e.mods.isAltDown())
+        {
+            setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
+            return;
+        }
+
         const auto bounds = getClipBounds(*clip, laneY);
         if (e.x <= bounds.getX() + 6 || e.x >= bounds.getRight() - 6)
         {
             setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
             return;
         }
-        if ((e.x <= bounds.getX() + 16 || e.x >= bounds.getRight() - 16) && e.y <= bounds.getY() + 12)
+        if ((e.x <= bounds.getX() + 16 || e.x >= bounds.getRight() - 16) && e.y <= bounds.getY() + 16)
         {
             setMouseCursor(juce::MouseCursor::UpDownLeftRightResizeCursor);
             return;
@@ -607,12 +671,30 @@ void TimelineView::mouseMove(const juce::MouseEvent& e)
 void TimelineView::mouseDown(const juce::MouseEvent& e)
 {
     grabKeyboardFocus();
+    m_lastMousePos = e.getPosition();
 
     if (e.y < m_rulerHeight)
     {
         m_dragMode = DragMode::seekRuler;
         seekToX(e.x);
         return;
+    }
+
+    if (m_razorMode)
+    {
+        int laneY = 0;
+        const auto* clip = findClipAt(e.getPosition(), laneY);
+        if (clip != nullptr && m_callbacks.commandHandler)
+        {
+            const auto splitSample = snapSample(pixelToSample(e.x));
+            if (splitSample > static_cast<std::int64_t>(clip->startSample)
+                && splitSample < static_cast<std::int64_t>(clip->startSample + clip->lengthSamples))
+            {
+                m_callbacks.commandHandler(project::SplitClip {clip->id, static_cast<std::uint64_t>(splitSample)});
+                repaint();
+                return;
+            }
+        }
     }
 
     // Header interaction: Takes toggle button
@@ -756,7 +838,12 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
         m_dragStartPos = e.getPosition();
 
         const auto bounds = getClipBounds(*clip, laneY);
-        if (e.x <= bounds.getX() + 6)
+        if (e.mods.isAltDown())
+        {
+            m_dragMode = DragMode::slipEdit;
+            m_dragTrimSourceOffset = clip->sourceOffset;
+        }
+        else if (e.x <= bounds.getX() + 6)
         {
             m_dragMode = DragMode::trimLeft;
         }
@@ -764,11 +851,11 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
         {
             m_dragMode = DragMode::trimRight;
         }
-        else if (e.x <= bounds.getX() + 16 && e.y <= bounds.getY() + 12)
+        else if (e.x <= bounds.getX() + 16 && e.y <= bounds.getY() + 16)
         {
             m_dragMode = DragMode::fadeLeft;
         }
-        else if (e.x >= bounds.getRight() - 16 && e.y <= bounds.getY() + 12)
+        else if (e.x >= bounds.getRight() - 16 && e.y <= bounds.getY() + 16)
         {
             m_dragMode = DragMode::fadeRight;
         }
@@ -882,6 +969,22 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
             std::min<std::int64_t>(maxFade,
                                   static_cast<std::int64_t>(static_cast<double>(fadePx) * m_samplesPerPixel)));
     }
+    else if (m_dragMode == DragMode::slipEdit)
+    {
+        const auto rawShift = static_cast<std::int64_t>(deltaSample);
+        if (rawShift >= 0)
+        {
+            m_dragTrimSourceOffset = m_dragInitialClip.sourceOffset + static_cast<std::uint64_t>(rawShift);
+        }
+        else
+        {
+            const auto backShift = static_cast<std::uint64_t>(-rawShift);
+            m_dragTrimSourceOffset = (backShift > m_dragInitialClip.sourceOffset)
+                ? 0
+                : (m_dragInitialClip.sourceOffset - backShift);
+        }
+        repaint();
+    }
 }
 
 void TimelineView::mouseUp(const juce::MouseEvent&)
@@ -940,6 +1043,17 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
                 });
             }
         }
+        else if (m_dragMode == DragMode::slipEdit)
+        {
+            if (m_dragTrimSourceOffset != m_dragInitialClip.sourceOffset)
+            {
+                m_callbacks.commandHandler(project::TrimClip {
+                    *m_draggedClipId,
+                    m_dragTrimSourceOffset,
+                    m_dragInitialClip.lengthSamples
+                });
+            }
+        }
         else if (m_dragMode == DragMode::fadeLeft || m_dragMode == DragMode::fadeRight)
         {
             m_callbacks.commandHandler(project::SetClipGainFade {
@@ -978,22 +1092,38 @@ bool TimelineView::keyPressed(const juce::KeyPress& key)
         }
     }
 
-    // S: Split selected clip at playhead position
+    // S: Split clip at mouse cursor (razor), or selected clip at playhead position
     if (key.getKeyCode() == 'S' || key.getKeyCode() == 's')
     {
-        if (m_selectedClipId.has_value() && m_callbacks.commandHandler)
+        if (m_callbacks.commandHandler)
         {
-            const auto playhead = static_cast<std::uint64_t>(std::max<std::int64_t>(0, m_model.playbackPosition));
-            for (const auto& clip : m_model.project.clips)
+            int laneY = 0;
+            const auto* hoverClip = findClipAt(m_lastMousePos, laneY);
+            if (hoverClip != nullptr)
             {
-                if (clip.id == *m_selectedClipId)
+                const auto splitSample = snapSample(pixelToSample(m_lastMousePos.x));
+                if (splitSample > static_cast<std::int64_t>(hoverClip->startSample)
+                    && splitSample < static_cast<std::int64_t>(hoverClip->startSample + hoverClip->lengthSamples))
                 {
-                    if (playhead > clip.startSample && playhead < clip.startSample + clip.lengthSamples)
+                    m_callbacks.commandHandler(project::SplitClip {hoverClip->id, static_cast<std::uint64_t>(splitSample)});
+                    return true;
+                }
+            }
+
+            if (m_selectedClipId.has_value())
+            {
+                const auto playhead = static_cast<std::uint64_t>(std::max<std::int64_t>(0, m_model.playbackPosition));
+                for (const auto& clip : m_model.project.clips)
+                {
+                    if (clip.id == *m_selectedClipId)
                     {
-                        m_callbacks.commandHandler(project::SplitClip {clip.id, playhead});
-                        return true;
+                        if (playhead > clip.startSample && playhead < clip.startSample + clip.lengthSamples)
+                        {
+                            m_callbacks.commandHandler(project::SplitClip {clip.id, playhead});
+                            return true;
+                        }
+                        break;
                     }
-                    break;
                 }
             }
         }
