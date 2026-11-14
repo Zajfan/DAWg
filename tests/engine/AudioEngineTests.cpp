@@ -13,6 +13,9 @@
 #include <dawg/engine/SubBlockSplitter.h>
 #include <dawg/engine/TempoMap.h>
 #include <dawg/engine/WorkStealingScheduler.h>
+#include <dawg/engine/dsp/BrickwallLimiterNode.h>
+#include <dawg/engine/dsp/DynamicsCompressorNode.h>
+#include <dawg/engine/dsp/ParametricEQNode.h>
 
 #include <array>
 #include <atomic>
@@ -935,6 +938,235 @@ void testDspGraphCycleRejectionAutomaticPdcAndWorkStealing()
 
     scheduler.shutdown();
 }
+
+void testStudioDspSuiteAndPdcActivation()
+{
+    using namespace dawg::engine::dsp;
+
+    // 1. ParametricEQNode
+    ParametricEQSettings eqSettings;
+    // Band 0: High-pass at 300 Hz
+    eqSettings.bands[0] = BandSettings {
+        .type = FilterBandType::highPass,
+        .frequencyHz = 300.0,
+        .q = 0.707,
+        .gainDb = 0.0,
+        .enabled = true
+    };
+    // Bands 1-3 disabled for this test
+    eqSettings.bands[1].enabled = false;
+    eqSettings.bands[2].enabled = false;
+    eqSettings.bands[3].enabled = false;
+
+    ParametricEQNode eq {eqSettings};
+    require(eq.prepare(48000.0, 128, 2), "ParametricEQ prepares");
+
+    // Feed a 40 Hz low-frequency sine wave and verify attenuation
+    std::array<float, 128> lowSineL {};
+    std::array<float, 128> lowSineR {};
+    for (std::size_t i = 0; i < 128; ++i)
+    {
+        const float val = std::sin(2.0f * std::numbers::pi_v<float> * 40.0f * static_cast<float>(i) / 48000.0f);
+        lowSineL[i] = val;
+        lowSineR[i] = val;
+    }
+    std::array<float*, 2> eqPlanes {lowSineL.data(), lowSineR.data()};
+    dawg::engine::ProcessContext eqContext {
+        .audio = dawg::engine::AudioBufferView {eqPlanes.data(), 2, 128},
+        .midi = {},
+        .sampleRate = 48000.0
+    };
+
+    {
+        ScopedAllocationGuard guard;
+        eq.process(eqContext);
+        require(g_allocationCount.load() == 0, "ParametricEQ process performs zero heap allocations");
+    }
+
+    // Highpass at 300 Hz should attenuate 40 Hz by > 12 dB (amplitude < 0.25)
+    float maxLowOut = 0.0f;
+    for (std::size_t i = 32; i < 128; ++i)
+    {
+        maxLowOut = std::max(maxLowOut, std::abs(lowSineL[i]));
+    }
+    require(maxLowOut < 0.25f, "40 Hz sine is strongly attenuated by 300 Hz high-pass filter");
+
+    // 2. DynamicsCompressorNode
+    CompressorSettings compSettings {
+        .bypassed = false,
+        .thresholdDb = -12.0f, // ~0.251 amplitude
+        .ratio = 4.0f,
+        .attackMs = 0.5f,
+        .releaseMs = 50.0f,
+        .makeupGainDb = 0.0f,
+        .kneeDb = 0.0f,
+        .useRms = false
+    };
+    DynamicsCompressorNode compressor {compSettings};
+    require(compressor.prepare(48000.0, 128, 2), "Compressor prepares");
+
+    // Feed a loud 1.0 amplitude signal (0 dBFS, which is 12 dB above threshold)
+    std::array<float, 128> loudL {};
+    std::array<float, 128> loudR {};
+    std::fill(loudL.begin(), loudL.end(), 1.0f);
+    std::fill(loudR.begin(), loudR.end(), 1.0f);
+    std::array<float*, 2> compPlanes {loudL.data(), loudR.data()};
+    dawg::engine::ProcessContext compContext {
+        .audio = dawg::engine::AudioBufferView {compPlanes.data(), 2, 128},
+        .midi = {},
+        .sampleRate = 48000.0
+    };
+
+    {
+        ScopedAllocationGuard guard;
+        compressor.process(compContext);
+        require(g_allocationCount.load() == 0, "Compressor process performs zero heap allocations");
+    }
+
+    // Steady state output should be attenuated and gain reduction reported
+    require(loudL.back() < 0.65f, "Loud signal is attenuated by compressor");
+    require(compressor.gainReductionDb() > 3.0f, "Gain reduction telemetry reports active compression");
+
+    // 3. BrickwallLimiterNode
+    LimiterSettings limSettings {
+        .bypassed = false,
+        .ceilingDb = -0.1f, // ~0.988553f
+        .releaseMs = 50.0f,
+        .lookaheadSamples = 64
+    };
+    BrickwallLimiterNode limiter {limSettings};
+    require(limiter.prepare(48000.0, 128, 2), "BrickwallLimiter prepares");
+    require(limiter.latencySamples() == 64, "Limiter declares exact lookahead latency for PDC");
+
+    // Feed signal with hot peaks up to 2.5 (+8 dBFS)
+    std::array<float, 128> hotL {};
+    std::array<float, 128> hotR {};
+    for (std::size_t i = 0; i < 128; ++i)
+    {
+        hotL[i] = (i % 8 == 0) ? 2.5f : 0.5f;
+        hotR[i] = (i % 8 == 0) ? -2.5f : -0.5f;
+    }
+    std::array<float*, 2> limPlanes {hotL.data(), hotR.data()};
+    dawg::engine::ProcessContext limContext {
+        .audio = dawg::engine::AudioBufferView {limPlanes.data(), 2, 128},
+        .midi = {},
+        .sampleRate = 48000.0
+    };
+
+    {
+        ScopedAllocationGuard guard;
+        limiter.process(limContext);
+        require(g_allocationCount.load() == 0, "Limiter process performs zero heap allocations");
+    }
+
+    constexpr float maxAllowedCeiling = 0.988553f + 1e-3f;
+    for (std::size_t i = 0; i < 128; ++i)
+    {
+        require(std::abs(hotL[i]) <= maxAllowedCeiling, "Limiter strictly enforces ceiling on left");
+        require(std::abs(hotR[i]) <= maxAllowedCeiling, "Limiter strictly enforces ceiling on right");
+    }
+
+    // 4. DspGraph Integration: EQ -> Compressor -> Limiter chain
+    dawg::engine::DspGraph graph;
+    const auto eqNodeId = graph.addNode(std::make_unique<ParametricEQNode>(eqSettings), true, false);
+    const auto compNodeId = graph.addNode(std::make_unique<DynamicsCompressorNode>(compSettings), false, false);
+    const auto limNodeId = graph.addNode(std::make_unique<BrickwallLimiterNode>(limSettings), false, true);
+
+    require(graph.addEdge(eqNodeId, compNodeId), "add EQ -> Compressor edge");
+    require(graph.addEdge(compNodeId, limNodeId), "add Compressor -> Limiter edge");
+    require(graph.compile(48000.0, 128, 2), "compile Studio DSP Graph");
+    require(graph.totalLatencySamples() == 64, "Graph total latency matches Limiter lookahead PDC");
+
+    std::array<float, 128> inL {};
+    std::array<float, 128> inR {};
+    std::fill(inL.begin(), inL.end(), 1.5f);
+    std::fill(inR.begin(), inR.end(), -1.5f);
+    std::array<float*, 2> inPlanes {inL.data(), inR.data()};
+
+    std::array<float, 128> outL {};
+    std::array<float, 128> outR {};
+    std::array<float*, 2> outPlanes {outL.data(), outR.data()};
+
+    graph.process(
+        dawg::engine::AudioBufferView {inPlanes.data(), 2, 128},
+        dawg::engine::AudioBufferView {outPlanes.data(), 2, 128});
+
+    for (std::size_t i = 0; i < 128; ++i)
+    {
+        require(! std::isnan(outL[i]) && ! std::isinf(outL[i]), "DSP graph output is finite");
+        require(! std::isnan(outR[i]) && ! std::isinf(outR[i]), "DSP graph output is finite");
+        require(std::abs(outL[i]) <= maxAllowedCeiling, "DSP graph output stays within limiter ceiling");
+    }
+}
+
+void testAudioEngineMasterLimiterActivation()
+{
+    AudioEngine engine;
+    require(engine.prepare({48000.0, 128, 2}), "engine prepares with 128-sample blocks");
+    require(! engine.isMasterLimiterEnabled(), "master limiter is disabled by default");
+
+    engine.setMasterLimiterEnabled(true);
+    require(engine.isMasterLimiterEnabled(), "master limiter can be enabled");
+
+    // Create hot multi-track sum that would severely clip without limiter:
+    // 4 tracks each playing 1.0 amplitude = 4.0 (+12 dBFS)
+    auto graph = std::make_unique<CompiledGraph>();
+    graph->generation = 1;
+
+    PlaybackRingBuffer ring;
+    require(ring.prepare(1, 256), "playback ring prepares");
+    std::array<float, 128> ones {};
+    std::fill(ones.begin(), ones.end(), 1.0f);
+    const std::array<const float*, 1> planes {ones.data()};
+    require(ring.write(0, planes, 128) == 128, "prefill ring");
+
+    // 4 tracks summing together
+    for (std::uint64_t t = 1; t <= 4; ++t)
+    {
+        graph->tracks.push_back(CompiledTrack {
+            .trackId = t,
+            .muted = false,
+            .solo = false,
+            .phaseInvert = false,
+            .gainLinear = 1.0f,
+            .pan = 0.0f,
+            .clipOffset = static_cast<std::uint32_t>(t - 1),
+            .clipCount = 1
+        });
+        graph->clips.push_back(CompiledClip {
+            .clipId = t,
+            .assetId = 1,
+            .buffer = &ring,
+            .startSample = 0,
+            .lengthSamples = 128,
+            .sourceOffset = 0,
+            .channelCount = 1,
+            .gainLinear = 1.0f
+        });
+    }
+
+    engine.publishCompiledGraph(std::move(graph));
+    require(engine.enqueueCommand({EngineCommandType::play, 0}), "play command enqueues");
+
+    std::array<float, 128> outL {};
+    std::array<float, 128> outR {};
+    std::array<float*, 2> outPlanes {outL.data(), outR.data()};
+
+    // Process two 128-sample blocks (first block fills lookahead, second block outputs limited audio)
+    engine.process(dawg::engine::AudioBufferView {outPlanes.data(), 2, 128}, {}, {});
+    engine.process(dawg::engine::AudioBufferView {outPlanes.data(), 2, 128}, {}, {});
+
+    constexpr float ceiling = 0.988553f + 1e-3f;
+    for (std::size_t i = 0; i < 128; ++i)
+    {
+        require(std::abs(outL[i]) <= ceiling, "4.0 sum is clamped strictly to ceiling on left");
+        require(std::abs(outR[i]) <= ceiling, "4.0 sum is clamped strictly to ceiling on right");
+    }
+
+    const auto meter = engine.meterReading();
+    require(meter.peakLeft <= ceiling && meter.peakRight <= ceiling,
+            "Master meters reflect limiter-clamped true peaks");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -1036,4 +1268,6 @@ int main()
     testTempoMapSubBlockLoopWrappingAndMetronome();
     testRecordRingBufferAndRealtimeInputCapture();
     testDspGraphCycleRejectionAutomaticPdcAndWorkStealing();
+    testStudioDspSuiteAndPdcActivation();
+    testAudioEngineMasterLimiterActivation();
 }

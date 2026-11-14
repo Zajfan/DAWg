@@ -27,7 +27,8 @@ static_assert(std::is_constructible_v<MainComponent,
         .record = [] {},
         .undo = [] {},
         .redo = [] {},
-        .seek = [](std::int64_t) {}
+        .seek = [](std::int64_t) {},
+        .setMasterLimiter = [](bool) {}
     };
     MainComponent component(
         EditorViewModel {},

@@ -38,34 +38,42 @@ private:
     juce::TextButton m_soloButton {"S"};
     juce::TextButton m_phaseButton {"Ø"};
     juce::TextButton m_armButton {"REC"};
+    juce::TextButton m_eqButton {"EQ"};
+    juce::TextButton m_compButton {"COMP"};
 };
 
 class MasterStripComponent final : public juce::Component
 {
 public:
-    MasterStripComponent();
+    using LimiterCallback = std::function<void(bool)>;
 
-    void updateMeter(const engine::MeterReading& meter);
+    explicit MasterStripComponent(LimiterCallback limiterCb = {});
+
+    void updateMeter(const engine::MeterReading& meter, bool limiterActive);
     void paint(juce::Graphics& g) override;
     void resized() override;
 
 private:
     void drawMeterBar(juce::Graphics& g, juce::Rectangle<int> barBounds, float peak, float rms);
 
+    LimiterCallback m_limiterCallback;
     juce::Label m_nameLabel {"Master", "MASTER"};
+    juce::TextButton m_limiterButton {"LIMITER"};
     engine::MeterReading m_meter {};
     float m_displayPeakL {0.0f};
     float m_displayPeakR {0.0f};
     float m_displayRmsL {0.0f};
     float m_displayRmsR {0.0f};
+    bool m_limiterActive {false};
 };
 
 class MixerPanel final : public juce::Component
 {
 public:
     using CommandHandler = std::function<void(project::ProjectCommand)>;
+    using LimiterCallback = std::function<void(bool)>;
 
-    explicit MixerPanel(CommandHandler handler);
+    explicit MixerPanel(CommandHandler handler, LimiterCallback limiterCb = {});
 
     void setViewModel(const EditorViewModel& model);
     void paint(juce::Graphics& g) override;

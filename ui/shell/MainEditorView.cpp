@@ -22,7 +22,7 @@ MainEditorView::MainEditorView(EditorViewModel model,
         .redo = m_transportCallbacks.redo
     })
     , m_timelineView(m_commandHandler, waveformCache, m_transportCallbacks.seek)
-    , m_mixerPanel(m_commandHandler)
+    , m_mixerPanel(m_commandHandler, m_transportCallbacks.setMasterLimiter)
 {
     addAndMakeVisible(m_transportBar);
     addAndMakeVisible(m_timelineView);

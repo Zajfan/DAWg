@@ -119,8 +119,14 @@ public:
             .recording = m_engine.isRecording(),
             .canUndo = m_controller.canUndo(),
             .canRedo = m_controller.canRedo(),
-            .transportRecordArmed = m_transportRecordArmed
+            .transportRecordArmed = m_transportRecordArmed,
+            .masterLimiterEnabled = m_engine.isMasterLimiterEnabled()
         };
+    }
+
+    void setMasterLimiterEnabled(const bool enabled) noexcept
+    {
+        m_engine.setMasterLimiterEnabled(enabled);
     }
 
     [[nodiscard]] bool undo()

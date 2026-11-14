@@ -19,6 +19,7 @@ public:
     using CommandHandler = std::function<void(project::ProjectCommand)>;
     using ActionHandler = std::function<void()>;
     using SeekCallback = std::function<void(std::int64_t samplePosition)>;
+    using LimiterCallback = std::function<void(bool enabled)>;
 
     struct TransportCallbacks
     {
@@ -30,6 +31,7 @@ public:
         ActionHandler undo;
         ActionHandler redo;
         SeekCallback seek;
+        LimiterCallback setMasterLimiter;
     };
 
     MainEditorView(EditorViewModel model,

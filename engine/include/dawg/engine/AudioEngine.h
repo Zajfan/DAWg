@@ -12,6 +12,7 @@
 #include <dawg/engine/RenderSnapshotPublisher.h>
 #include <dawg/engine/TransportSnapshot.h>
 #include <dawg/engine/TransportState.h>
+#include <dawg/engine/dsp/BrickwallLimiterNode.h>
 
 #include <memory>
 #include <vector>
@@ -63,6 +64,9 @@ public:
     void setRecording(bool recording) noexcept;
     [[nodiscard]] bool isRecording() const noexcept;
 
+    void setMasterLimiterEnabled(bool enabled) noexcept;
+    [[nodiscard]] bool isMasterLimiterEnabled() const noexcept;
+
     // Adopts the latest render snapshot, then applies at most 64 queued commands
     // in FIFO order before rendering.
     // Bounded by queue capacity and supplied view; no allocation, I/O, blocking.
@@ -86,6 +90,9 @@ private:
     TransportState m_transportState {};
     std::atomic<RecordRingBuffer*> m_recordBuffer {nullptr};
     std::atomic<bool> m_recording {false};
+    std::atomic<bool> m_masterLimiterEnabled {false};
+    dsp::BrickwallLimiterNode m_masterLimiter;
+    double m_sampleRate {48000.0};
     bool m_prepared {};
 };
 

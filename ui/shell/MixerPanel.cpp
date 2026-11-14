@@ -32,6 +32,8 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
     addAndMakeVisible(m_soloButton);
     addAndMakeVisible(m_phaseButton);
     addAndMakeVisible(m_armButton);
+    addAndMakeVisible(m_eqButton);
+    addAndMakeVisible(m_compButton);
 
     m_panKnob.onValueChange = [this] {
         if (! m_updatingFromModel)
@@ -75,10 +77,22 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
         });
     };
 
+    m_eqButton.onClick = [this] {
+        if (m_eqButton.getToggleState())
+            m_eqButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(60, 160, 220));
+    };
+
+    m_compButton.onClick = [this] {
+        if (m_compButton.getToggleState())
+            m_compButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(220, 140, 50));
+    };
+
     m_muteButton.setClickingTogglesState(true);
     m_soloButton.setClickingTogglesState(true);
     m_phaseButton.setClickingTogglesState(true);
     m_armButton.setClickingTogglesState(true);
+    m_eqButton.setClickingTogglesState(true);
+    m_compButton.setClickingTogglesState(true);
 }
 
 void ChannelStripComponent::sendGainPan()
@@ -132,19 +146,25 @@ void ChannelStripComponent::resized()
     m_nameLabel.setBounds(area.removeFromTop(20));
     area.removeFromTop(2);
 
-    m_panKnob.setBounds(area.removeFromTop(28).reduced(6, 0));
-    area.removeFromTop(4);
+    // DSP Inserts row: EQ, COMP
+    auto dspRow = area.removeFromTop(18);
+    m_eqButton.setBounds(dspRow.removeFromLeft(dspRow.getWidth() / 2).reduced(1));
+    m_compButton.setBounds(dspRow.reduced(1));
+    area.removeFromTop(2);
+
+    m_panKnob.setBounds(area.removeFromTop(26).reduced(6, 0));
+    area.removeFromTop(3);
 
     // Button row: M, S, Ø, REC
-    auto buttonRow1 = area.removeFromTop(22);
+    auto buttonRow1 = area.removeFromTop(20);
     m_muteButton.setBounds(buttonRow1.removeFromLeft(buttonRow1.getWidth() / 2).reduced(1));
     m_soloButton.setBounds(buttonRow1.reduced(1));
     area.removeFromTop(2);
 
-    auto buttonRow2 = area.removeFromTop(22);
+    auto buttonRow2 = area.removeFromTop(20);
     m_phaseButton.setBounds(buttonRow2.removeFromLeft(buttonRow2.getWidth() / 2).reduced(1));
     m_armButton.setBounds(buttonRow2.reduced(1));
-    area.removeFromTop(4);
+    area.removeFromTop(3);
 
     m_fader.setBounds(area);
 }
@@ -153,16 +173,31 @@ void ChannelStripComponent::resized()
 // MasterStripComponent
 // ============================================================================
 
-MasterStripComponent::MasterStripComponent()
+MasterStripComponent::MasterStripComponent(LimiterCallback limiterCb)
+    : m_limiterCallback(std::move(limiterCb))
 {
     m_nameLabel.setJustificationType(juce::Justification::centred);
     m_nameLabel.setFont(juce::FontOptions(12.0f, juce::Font::bold));
     addAndMakeVisible(m_nameLabel);
+
+    m_limiterButton.setClickingTogglesState(true);
+    m_limiterButton.onClick = [this] {
+        const bool active = m_limiterButton.getToggleState();
+        if (m_limiterCallback)
+            m_limiterCallback(active);
+        if (active)
+            m_limiterButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(40, 160, 220));
+    };
+    addAndMakeVisible(m_limiterButton);
 }
 
-void MasterStripComponent::updateMeter(const engine::MeterReading& meter)
+void MasterStripComponent::updateMeter(const engine::MeterReading& meter, const bool limiterActive)
 {
     m_meter = meter;
+    m_limiterActive = limiterActive;
+    m_limiterButton.setToggleState(limiterActive, juce::dontSendNotification);
+    if (limiterActive)
+        m_limiterButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(40, 160, 220));
 
     // Decay falloff
     constexpr float decay = 0.85f;
@@ -180,7 +215,10 @@ void MasterStripComponent::paint(juce::Graphics& g)
     g.setColour(juce::Colour::fromRGB(60, 64, 74));
     g.drawRect(getLocalBounds(), 1);
 
-    auto meterArea = getLocalBounds().reduced(8, 28);
+    auto meterArea = getLocalBounds();
+    meterArea.removeFromTop(44); // room for label and limiter button
+    meterArea.reduce(8, 4);
+
     const int barWidth = (meterArea.getWidth() - 4) / 2;
 
     auto leftBar = meterArea.removeFromLeft(barWidth);
@@ -193,7 +231,6 @@ void MasterStripComponent::paint(juce::Graphics& g)
 
 void MasterStripComponent::drawMeterBar(juce::Graphics& g, juce::Rectangle<int> barBounds, float peak, float rms)
 {
-    // Background meter track
     g.setColour(juce::Colour::fromRGB(18, 19, 22));
     g.fillRect(barBounds);
 
@@ -201,14 +238,12 @@ void MasterStripComponent::drawMeterBar(juce::Graphics& g, juce::Rectangle<int> 
     if (totalHeight <= 0)
         return;
 
-    // Clamp normalized heights (assuming 1.0 = 0 dBFS)
     const float clampedRms = std::clamp(rms, 0.0f, 1.5f);
     const float clampedPeak = std::clamp(peak, 0.0f, 1.5f);
 
     const int rmsHeight = static_cast<int>(std::round((clampedRms / 1.0f) * static_cast<float>(totalHeight)));
     const int peakY = barBounds.getBottom() - static_cast<int>(std::round((clampedPeak / 1.0f) * static_cast<float>(totalHeight)));
 
-    // Draw RMS fill
     auto rmsFill = barBounds.removeFromBottom(std::min(totalHeight, rmsHeight));
     if (! rmsFill.isEmpty())
     {
@@ -222,7 +257,6 @@ void MasterStripComponent::drawMeterBar(juce::Graphics& g, juce::Rectangle<int> 
         g.fillRect(rmsFill);
     }
 
-    // Draw Peak line
     if (peakY >= barBounds.getY() && peakY <= barBounds.getBottom())
     {
         g.setColour(clampedPeak > 1.0f ? juce::Colour::fromRGB(255, 60, 60) : juce::Colours::white);
@@ -232,15 +266,19 @@ void MasterStripComponent::drawMeterBar(juce::Graphics& g, juce::Rectangle<int> 
 
 void MasterStripComponent::resized()
 {
-    m_nameLabel.setBounds(getLocalBounds().removeFromTop(20));
+    auto area = getLocalBounds().reduced(3, 4);
+    m_nameLabel.setBounds(area.removeFromTop(18));
+    area.removeFromTop(2);
+    m_limiterButton.setBounds(area.removeFromTop(20).reduced(2, 0));
 }
 
 // ============================================================================
 // MixerPanel
 // ============================================================================
 
-MixerPanel::MixerPanel(CommandHandler handler)
+MixerPanel::MixerPanel(CommandHandler handler, LimiterCallback limiterCb)
     : m_handler(std::move(handler))
+    , m_masterStrip(std::move(limiterCb))
 {
     m_viewport.setViewedComponent(&m_tracksContainer, false);
     m_viewport.setScrollBarsShown(false, true);
@@ -250,7 +288,6 @@ MixerPanel::MixerPanel(CommandHandler handler)
 
 void MixerPanel::setViewModel(const EditorViewModel& model)
 {
-    // Match channel strip count
     const auto& tracks = model.project.tracks;
     while (m_strips.size() < tracks.size())
     {
@@ -268,7 +305,7 @@ void MixerPanel::setViewModel(const EditorViewModel& model)
         m_strips[i]->updateTrack(tracks[i]);
     }
 
-    m_masterStrip.updateMeter(model.masterMeter);
+    m_masterStrip.updateMeter(model.masterMeter, model.masterLimiterEnabled);
     resized();
 }
 
@@ -282,12 +319,12 @@ void MixerPanel::paint(juce::Graphics& g)
 void MixerPanel::resized()
 {
     auto area = getLocalBounds();
-    constexpr int masterWidth = 80;
+    constexpr int masterWidth = 84;
     m_masterStrip.setBounds(area.removeFromRight(masterWidth));
 
     m_viewport.setBounds(area);
 
-    constexpr int stripWidth = 74;
+    constexpr int stripWidth = 76;
     const int totalWidth = static_cast<int>(m_strips.size()) * stripWidth;
     m_tracksContainer.setBounds(0, 0, std::max(totalWidth, m_viewport.getWidth()), m_viewport.getHeight());
 

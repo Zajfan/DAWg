@@ -91,6 +91,16 @@ bool AudioEngine::isRecording() const noexcept
     return m_recording.load(std::memory_order_acquire);
 }
 
+void AudioEngine::setMasterLimiterEnabled(const bool enabled) noexcept
+{
+    m_masterLimiterEnabled.store(enabled, std::memory_order_relaxed);
+}
+
+bool AudioEngine::isMasterLimiterEnabled() const noexcept
+{
+    return m_masterLimiterEnabled.load(std::memory_order_relaxed);
+}
+
 bool AudioEngine::prepare(const EngineConfig& config) noexcept
 {
     if (! std::isfinite(config.sampleRate) || config.sampleRate <= 0.0
@@ -116,6 +126,8 @@ bool AudioEngine::prepare(const EngineConfig& config) noexcept
         return false;
     }
 
+    m_sampleRate = config.sampleRate;
+    static_cast<void>(m_masterLimiter.prepare(config.sampleRate, config.maximumBlockSize, config.outputChannels));
     m_prepared = true;
     return true;
 }
@@ -385,7 +397,18 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
                 }
             }
 
-            publishMasterMeters();
+            if (m_masterLimiterEnabled.load(std::memory_order_relaxed)
+        && output.channels != nullptr && output.frameCount > 0)
+    {
+        ProcessContext ctx {
+            .audio = output,
+            .midi = {},
+            .sampleRate = m_sampleRate
+        };
+        m_masterLimiter.process(ctx);
+    }
+
+    publishMasterMeters();
             m_transportState.samplePosition = static_cast<std::int64_t>(
                 std::min<std::uint64_t>(
                     currentTimeline,
@@ -394,7 +417,18 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
         }
 
         renderCompiledSlice(blockStart, 0, output.frameCount);
-        publishMasterMeters();
+        if (m_masterLimiterEnabled.load(std::memory_order_relaxed)
+        && output.channels != nullptr && output.frameCount > 0)
+    {
+        ProcessContext ctx {
+            .audio = output,
+            .midi = {},
+            .sampleRate = m_sampleRate
+        };
+        m_masterLimiter.process(ctx);
+    }
+
+    publishMasterMeters();
         m_transportState.samplePosition = saturatingAdvance(
             m_transportState.samplePosition, output.frameCount);
         return;
@@ -480,6 +514,17 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
                     ++m_transportState.underrunCount;
             }
         }
+    }
+
+    if (m_masterLimiterEnabled.load(std::memory_order_relaxed)
+        && output.channels != nullptr && output.frameCount > 0)
+    {
+        ProcessContext ctx {
+            .audio = output,
+            .midi = {},
+            .sampleRate = m_sampleRate
+        };
+        m_masterLimiter.process(ctx);
     }
 
     publishMasterMeters();

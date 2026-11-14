@@ -25,6 +25,7 @@ struct EditorViewModel
     bool canUndo {};
     bool canRedo {};
     bool transportRecordArmed {};
+    bool masterLimiterEnabled {};
 
     [[nodiscard]] std::size_t trackCount() const noexcept { return project.tracks.size(); }
 };

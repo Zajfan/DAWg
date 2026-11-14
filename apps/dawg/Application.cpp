@@ -55,6 +55,13 @@ void Application::initialise(const juce::String&)
         .seek = [this](const std::int64_t pos) {
             if (m_state && m_state->seekSamples(pos))
                 refreshMainComponent();
+        },
+        .setMasterLimiter = [this](const bool enabled) {
+            if (m_state)
+            {
+                m_state->setMasterLimiterEnabled(enabled);
+                refreshMainComponent();
+            }
         }
     };
 

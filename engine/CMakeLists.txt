@@ -11,6 +11,9 @@ add_library(dawg_engine_core STATIC
     src/TempoMap.cpp
     src/TransportCommandQueue.cpp
     src/WorkStealingScheduler.cpp
+    src/dsp/BrickwallLimiterNode.cpp
+    src/dsp/DynamicsCompressorNode.cpp
+    src/dsp/ParametricEQNode.cpp
 )
 target_include_directories(dawg_engine_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(dawg_engine_core PUBLIC Threads::Threads)
