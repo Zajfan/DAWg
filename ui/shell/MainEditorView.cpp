@@ -1,103 +1,75 @@
 #include "MainEditorView.h"
 
-#include <string>
 #include <utility>
 
 namespace dawg::ui {
 
 MainEditorView::MainEditorView(EditorViewModel model,
                                CommandHandler commandHandler,
-                               TransportCallbacks transportCallbacks)
-    : m_commandHandler(std::move(commandHandler))
-    , m_transportCallbacks(std::move(transportCallbacks))
+                               TransportCallbacks transportCallbacks,
+                               media::WaveformCache* waveformCache)
+    : m_model(std::move(model))
+    , m_commandHandler(commandHandler)
+    , m_transportCallbacks(transportCallbacks)
+    , m_transportBar({
+        .commandHandler = m_commandHandler,
+        .importWav = m_transportCallbacks.importWav,
+        .play = m_transportCallbacks.play,
+        .stop = m_transportCallbacks.stop,
+        .returnToStart = m_transportCallbacks.returnToStart,
+        .record = m_transportCallbacks.record,
+        .undo = m_transportCallbacks.undo,
+        .redo = m_transportCallbacks.redo
+    })
+    , m_timelineView(m_commandHandler, waveformCache, m_transportCallbacks.seek)
+    , m_mixerPanel(m_commandHandler)
 {
-    addAndMakeVisible(m_projectLabel);
-    addAndMakeVisible(m_transportLabel);
-    addAndMakeVisible(m_addTrackButton);
-    addAndMakeVisible(m_importWavButton);
-    addAndMakeVisible(m_playButton);
-    addAndMakeVisible(m_stopButton);
-    addAndMakeVisible(m_returnToStartButton);
+    addAndMakeVisible(m_transportBar);
+    addAndMakeVisible(m_timelineView);
+    addAndMakeVisible(m_mixerPanel);
 
-    m_addTrackButton.onClick = [this] {
-        if (m_commandHandler)
-            m_commandHandler(project::AddAudioTrack {"Audio " + std::to_string(m_model.trackCount() + 1)});
-    };
-    m_importWavButton.onClick = [this] {
-        if (m_transportCallbacks.importWav)
-            m_transportCallbacks.importWav();
-    };
-    m_playButton.onClick = [this] {
-        if (m_transportCallbacks.play)
-            m_transportCallbacks.play();
-    };
-    m_stopButton.onClick = [this] {
-        if (m_transportCallbacks.stop)
-            m_transportCallbacks.stop();
-    };
-    m_returnToStartButton.onClick = [this] {
-        if (m_transportCallbacks.returnToStart)
-            m_transportCallbacks.returnToStart();
-    };
-
-    setViewModel(std::move(model));
+    setViewModel(m_model);
 }
 
 void MainEditorView::setViewModel(EditorViewModel model)
 {
     m_model = std::move(model);
-    refreshLabels();
+    m_transportBar.setViewModel(m_model);
+    m_timelineView.setViewModel(m_model);
+    m_mixerPanel.setViewModel(m_model);
 }
 
 void MainEditorView::setSnapshot(project::ProjectSnapshot snapshot)
 {
     m_model.project = std::move(snapshot);
-    refreshLabels();
+    m_transportBar.setViewModel(m_model);
+    m_timelineView.setViewModel(m_model);
+    m_mixerPanel.setViewModel(m_model);
 }
 
-void MainEditorView::refreshLabels()
+void MainEditorView::setWaveformCache(media::WaveformCache* cache)
 {
-    m_projectLabel.setText(
-        juce::String(m_model.project.name) + "  |  "
-            + juce::String(static_cast<juce::int64>(m_model.trackCount())) + " audio tracks  |  "
-            + (m_model.hasAudioClip
-                   ? ("clip " + juce::String(static_cast<juce::int64>(m_model.clipLengthSamples))
-                      + " samples")
-                   : juce::String("no clip")),
-        juce::dontSendNotification);
+    m_timelineView.setWaveformCache(cache);
+}
 
-    juce::String transportText = m_model.playing ? "Playing" : "Stopped";
-    transportText << "  |  pos " << juce::String(static_cast<juce::int64>(m_model.playbackPosition))
-                  << " samples  |  underruns "
-                  << juce::String(static_cast<juce::int64>(m_model.underrunCount));
-
-    if (!m_model.mediaAvailable) {
-        transportText << "  |  media unavailable";
-        if (!m_model.mediaError.empty())
-            transportText << ": " << juce::String(m_model.mediaError);
-    }
-
-    m_transportLabel.setText(transportText, juce::dontSendNotification);
+void MainEditorView::paint(juce::Graphics& g)
+{
+    g.fillAll(juce::Colour::fromRGB(24, 25, 29));
 }
 
 void MainEditorView::resized()
 {
     auto area = getLocalBounds();
-    m_projectLabel.setBounds(area.removeFromTop(32));
-    area.removeFromTop(6);
-    m_transportLabel.setBounds(area.removeFromTop(32));
-    area.removeFromTop(12);
 
-    auto buttonRow = area.removeFromTop(36);
-    m_addTrackButton.setBounds(buttonRow.removeFromLeft(160));
-    buttonRow.removeFromLeft(10);
-    m_importWavButton.setBounds(buttonRow.removeFromLeft(130));
-    buttonRow.removeFromLeft(10);
-    m_playButton.setBounds(buttonRow.removeFromLeft(90));
-    buttonRow.removeFromLeft(10);
-    m_stopButton.setBounds(buttonRow.removeFromLeft(90));
-    buttonRow.removeFromLeft(10);
-    m_returnToStartButton.setBounds(buttonRow.removeFromLeft(140));
+    // Top: Transport Bar (height 44 px)
+    m_transportBar.setBounds(area.removeFromTop(44));
+
+    // Bottom: Mixer Console (height 190 px)
+    constexpr int mixerHeight = 190;
+    m_mixerPanel.setBounds(area.removeFromBottom(mixerHeight));
+
+    // Center: Multi-track Timeline
+    m_timelineView.setBounds(area);
 }
 
 } // namespace dawg::ui

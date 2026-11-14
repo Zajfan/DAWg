@@ -5,6 +5,8 @@
 #include <functional>
 #include <string>
 
+namespace dawg::media { class WaveformCache; }
+
 namespace dawg::ui {
 
 struct AudioStatus
@@ -24,16 +26,17 @@ public:
                   MainEditorView::CommandHandler,
                   MainEditorView::TransportCallbacks,
                   AudioStatus,
-                  RestartAudio);
+                  RestartAudio,
+                  media::WaveformCache* waveformCache = nullptr);
 
     void setViewModel(EditorViewModel);
     void setProjectSnapshot(project::ProjectSnapshot);
     void setAudioStatus(const AudioStatus&);
+    void setWaveformCache(media::WaveformCache* cache);
     void paint(juce::Graphics&) override;
     void resized() override;
 
 private:
-    juce::Label m_titleLabel;
     juce::Label m_statusLabel;
     juce::TextButton m_restartButton {"Restart audio device"};
     MainEditorView m_editor;

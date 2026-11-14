@@ -23,7 +23,11 @@ static_assert(std::is_constructible_v<MainComponent,
         .importWav = [] {},
         .play = [] {},
         .stop = [] {},
-        .returnToStart = [] {}
+        .returnToStart = [] {},
+        .record = [] {},
+        .undo = [] {},
+        .redo = [] {},
+        .seek = [](std::int64_t) {}
     };
     MainComponent component(
         EditorViewModel {},

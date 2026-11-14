@@ -70,6 +70,14 @@ public:
         return m_engine.enqueueCommand({engine::EngineCommandType::seekSamples, 0});
     }
 
+    [[nodiscard]] bool seekSamples(const std::int64_t samplePosition) noexcept
+    {
+        return m_engine.enqueueCommand({
+            engine::EngineCommandType::seekSamples,
+            std::max<std::int64_t>(0, samplePosition)
+        });
+    }
+
     [[nodiscard]] std::optional<project::MediaAssetId> addAudioAsset(project::AudioAsset asset)
     {
         const auto id = m_controller.addAudioAsset(std::move(asset));

@@ -13,6 +13,7 @@ namespace dawg::media {
 class AudioMediaService;
 class AudioRecordService;
 class DiskStreamPool;
+class WaveformCache;
 }
 namespace dawg::platform::juce {
 class JuceAudioDeviceBridge;
@@ -66,6 +67,7 @@ private:
     std::unique_ptr<media::AudioMediaService> m_mediaService;
     std::unique_ptr<media::DiskStreamPool> m_diskStreamPool;
     std::unique_ptr<media::AudioRecordService> m_recordService;
+    std::unique_ptr<media::WaveformCache> m_waveformCache;
     std::unique_ptr<platform::juce::window::WindowManager> m_windowManager;
     juce::Component::SafePointer<ui::MainComponent> m_mainComponent;
     std::unique_ptr<juce::FileChooser> m_fileChooser;

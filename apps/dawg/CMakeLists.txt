@@ -5,6 +5,12 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/MainEditorView.cpp
     ../../ui/shell/MainEditorView.h
     ../../ui/shell/EditorViewModel.h
+    ../../ui/shell/TransportBar.cpp
+    ../../ui/shell/TransportBar.h
+    ../../ui/shell/MixerPanel.cpp
+    ../../ui/shell/MixerPanel.h
+    ../../ui/shell/TimelineView.cpp
+    ../../ui/shell/TimelineView.h
 )
 target_include_directories(DAWg PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ../../ui/shell)
 target_link_libraries(DAWg PRIVATE dawg_platform_juce dawg_services_commands dawg_services_media)

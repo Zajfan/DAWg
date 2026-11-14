@@ -8,17 +8,20 @@ MainComponent::MainComponent(EditorViewModel model,
                              MainEditorView::CommandHandler commandHandler,
                              MainEditorView::TransportCallbacks transportCallbacks,
                              AudioStatus audioStatus,
-                             RestartAudio restartAudio)
-    : m_editor(std::move(model), std::move(commandHandler), std::move(transportCallbacks))
+                             RestartAudio restartAudio,
+                             media::WaveformCache* waveformCache)
+    : m_editor(std::move(model), std::move(commandHandler), std::move(transportCallbacks), waveformCache)
 {
-    setSize(900, 560);
-    m_titleLabel.setText("DAWg", juce::dontSendNotification);
-    m_titleLabel.setFont(juce::FontOptions(28.0f, juce::Font::bold));
-    addAndMakeVisible(m_titleLabel);
+    setSize(1024, 680);
+
     m_statusLabel.setJustificationType(juce::Justification::centredLeft);
+    m_statusLabel.setFont(juce::FontOptions(11.0f));
+    m_statusLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(150, 155, 170));
     addAndMakeVisible(m_statusLabel);
+
     m_restartButton.onClick = std::move(restartAudio);
     addAndMakeVisible(m_restartButton);
+
     addAndMakeVisible(m_editor);
     setAudioStatus(audioStatus);
 }
@@ -33,34 +36,49 @@ void MainComponent::setProjectSnapshot(project::ProjectSnapshot snapshot)
     m_editor.setSnapshot(std::move(snapshot));
 }
 
+void MainComponent::setWaveformCache(media::WaveformCache* cache)
+{
+    m_editor.setWaveformCache(cache);
+}
+
 void MainComponent::setAudioStatus(const AudioStatus& status)
 {
     if (! status.error.empty())
-        m_statusLabel.setText("Audio device error: " + juce::String(status.error),
+    {
+        m_statusLabel.setText("Audio error: " + juce::String(status.error),
                               juce::dontSendNotification);
+        m_statusLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(240, 80, 80));
+    }
     else if (! status.ready)
-        m_statusLabel.setText("No audio device is ready. Check the device settings and retry.",
+    {
+        m_statusLabel.setText("No audio device ready. Check device settings and retry.",
                               juce::dontSendNotification);
+        m_statusLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(240, 180, 50));
+    }
     else
-        m_statusLabel.setText("Audio device ready  |  " + juce::String(status.sampleRate, 0)
-                                  + " Hz  |  block " + juce::String(status.blockSize) + " samples",
+    {
+        m_statusLabel.setText("Device ready  |  " + juce::String(status.sampleRate, 0)
+                                  + " Hz  |  buffer " + juce::String(status.blockSize) + " smp",
                               juce::dontSendNotification);
+        m_statusLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(150, 155, 170));
+    }
 }
 
 void MainComponent::paint(juce::Graphics& graphics)
 {
-    graphics.fillAll(juce::Colour::fromRGB(25, 28, 34));
+    graphics.fillAll(juce::Colour::fromRGB(20, 21, 25));
 }
 
 void MainComponent::resized()
 {
-    auto area = getLocalBounds().reduced(28);
-    m_titleLabel.setBounds(area.removeFromTop(52));
-    area.removeFromTop(20);
-    m_statusLabel.setBounds(area.removeFromTop(36));
-    area.removeFromTop(12);
-    m_restartButton.setBounds(area.removeFromTop(36).removeFromLeft(200));
-    area.removeFromTop(24);
+    auto area = getLocalBounds();
+
+    // Compact bottom status bar (height 24 px)
+    auto statusBar = area.removeFromBottom(24).reduced(6, 2);
+    m_restartButton.setBounds(statusBar.removeFromRight(140));
+    m_statusLabel.setBounds(statusBar);
+
+    // Workbench editor takes all the remaining window area
     m_editor.setBounds(area);
 }
 

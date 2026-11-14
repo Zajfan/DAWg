@@ -186,6 +186,9 @@ set(DAWG_OWN_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/dawg/Application.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/MainEditorView.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/MainComponent.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/TransportBar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/MixerPanel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/TimelineView.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/platform/juce/window/WindowRegistry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/platform/juce/window/ManagedWindow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/platform/juce/window/WindowManager.cpp

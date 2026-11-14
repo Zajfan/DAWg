@@ -12,6 +12,7 @@
 #include <dawg/media/AudioMediaService.h>
 #include <dawg/media/AudioRecordService.h>
 #include <dawg/media/DiskStreamPool.h>
+#include <dawg/media/WaveformCache.h>
 
 #include <algorithm>
 #include <cmath>
@@ -37,6 +38,7 @@ void Application::initialise(const juce::String&)
     m_mediaService = std::make_unique<media::AudioMediaService>(*m_assetReaderFactory);
     m_diskStreamPool = std::make_unique<media::DiskStreamPool>(*m_assetReaderFactory, 2);
     m_recordService = std::make_unique<media::AudioRecordService>(*m_assetWriterFactory);
+    m_waveformCache = std::make_unique<media::WaveformCache>(*m_assetReaderFactory, 2);
     m_engine->setRecordBuffer(&m_recordService->buffer());
     m_windowManager = std::make_unique<platform::juce::window::WindowManager>();
     restartAudio();
@@ -49,7 +51,11 @@ void Application::initialise(const juce::String&)
         .returnToStart = [this] { returnTransportToStart(); },
         .record = [this] { toggleTransportRecord(); },
         .undo = [this] { undo(); },
-        .redo = [this] { redo(); }
+        .redo = [this] { redo(); },
+        .seek = [this](const std::int64_t pos) {
+            if (m_state && m_state->seekSamples(pos))
+                refreshMainComponent();
+        }
     };
 
     auto content = std::make_unique<ui::MainComponent>(
@@ -57,14 +63,15 @@ void Application::initialise(const juce::String&)
         [this](project::ProjectCommand command) { dispatchProjectCommand(std::move(command)); },
         std::move(transportCallbacks),
         audioStatus(),
-        [this] { restartAudio(); });
+        [this] { restartAudio(); },
+        m_waveformCache.get());
     m_mainComponent = content.get();
 
     platform::juce::window::WindowOptions options;
     options.title = getApplicationName().toStdString();
-    options.bounds = {0, 0, 900, 560};
-    options.minimumWidth = 640;
-    options.minimumHeight = 360;
+    options.bounds = {0, 0, 1024, 680};
+    options.minimumWidth = 720;
+    options.minimumHeight = 440;
     options.useNativeTitleBar = true;
     options.resizable = true;
     options.closeRequested = [this](platform::juce::window::WindowHandle) { systemRequestedQuit(); };
@@ -83,6 +90,8 @@ void Application::shutdown()
     m_fileChooser.reset();
     // Stop the media workers before removing the device callback, then tear down
     // UI, media services, audio bridge, state, controller, engine, and factories.
+    if (m_waveformCache)
+        m_waveformCache->clear();
     if (m_recordService)
         m_recordService->stop();
     if (m_diskStreamPool)
@@ -93,6 +102,7 @@ void Application::shutdown()
         m_audioBridge->shutdown();
     m_windowManager.reset();
     m_mainComponent = nullptr;
+    m_waveformCache.reset();
     m_recordService.reset();
     m_diskStreamPool.reset();
     m_mediaService.reset();
@@ -221,6 +231,8 @@ void Application::importWavFile(const juce::File& file)
     m_state->setMediaStatus(true, {});
     m_state->setClipBuffer(*clipId, voiceBuffer);
     m_state->setPlaybackBuffer(voiceBuffer);
+    if (m_waveformCache)
+        m_waveformCache->requestThumbnail(registeredAsset);
     static_cast<void>(m_state->flushRenderSnapshot());
     m_diskStreamPool->start();
     refreshMainComponent();
@@ -357,6 +369,9 @@ void Application::stopRecordingSession()
             m_diskStreamPool->start();
         }
     }
+
+    if (m_waveformCache)
+        m_waveformCache->requestThumbnail(recordedTake.asset);
 
     static_cast<void>(m_state->flushRenderSnapshot());
 }
