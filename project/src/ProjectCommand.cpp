@@ -21,6 +21,10 @@ bool Project::apply(const ProjectCommand& command)
             return setTrackSolo(operation.id, operation.solo);
         else if constexpr (std::is_same_v<Operation, SetTrackGainPan>)
             return setTrackGainPan(operation.id, operation.gainLinear, operation.pan, operation.phaseInvert);
+        else if constexpr (std::is_same_v<Operation, SetProjectTempo>)
+            return setProjectTempo(operation.bpm, operation.timeSigNumerator, operation.timeSigDenominator, operation.metronomeEnabled);
+        else if constexpr (std::is_same_v<Operation, SetProjectLoop>)
+            return setProjectLoop(operation.enabled, operation.startSample, operation.endSample);
         else
             return renameTrack(operation.id, operation.name);
     }, command);

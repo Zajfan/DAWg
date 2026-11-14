@@ -52,4 +52,23 @@ struct Track
     friend bool operator==(const Track&, const Track&) = default;
 };
 
+struct TempoSetting
+{
+    double bpm {120.0};
+    std::uint8_t timeSigNumerator {4};
+    std::uint8_t timeSigDenominator {4};
+    bool metronomeEnabled {false};
+
+    friend bool operator==(const TempoSetting&, const TempoSetting&) = default;
+};
+
+struct LoopSetting
+{
+    bool enabled {false};
+    std::uint64_t startSample {0};
+    std::uint64_t endSample {0};
+
+    friend bool operator==(const LoopSetting&, const LoopSetting&) = default;
+};
+
 } // namespace dawg::project

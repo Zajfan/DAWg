@@ -15,6 +15,8 @@ struct ProjectSnapshot
     std::vector<Track> tracks;
     std::vector<AudioAsset> assets;
     std::vector<AudioClip> clips;
+    TempoSetting tempo {};
+    LoopSetting loop {};
 };
 
 } // namespace dawg::project

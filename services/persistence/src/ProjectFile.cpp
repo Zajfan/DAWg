@@ -127,16 +127,17 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
     if (! version.is_number_integer())
         return failure(Code::invalidFormat, "formatVersion must be an integer");
     // Compare before narrowing, including versions larger than uint32_t.
-    if (version != Json(1) && version != Json(2))
-        return failure(Code::unsupportedVersion, "Only project format versions 1 and 2 are supported");
+    if (version != Json(1) && version != Json(2) && version != Json(3))
+        return failure(Code::unsupportedVersion, "Only project format versions 1, 2, and 3 are supported");
 
     const auto& id = document.at("projectId");
     const auto& tracks = document.at("tracks");
     if (! id.is_number_unsigned() || ! tracks.is_array())
         return failure(Code::invalidFormat, "Expected an unsigned projectId and a tracks array");
 
+    const std::uint32_t normalizedVersion = (version == Json(3)) ? 3u : 2u;
     project::ProjectSnapshot snapshot {
-        2, id.get<project::ProjectId>(), document.at("name").get<std::string>(), {}, {}, {}};
+        normalizedVersion, id.get<project::ProjectId>(), document.at("name").get<std::string>(), {}, {}, {}};
     snapshot.tracks.reserve(tracks.size());
     for (const auto& track : tracks)
     {
@@ -145,16 +146,43 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
         const auto& solo = track.at("solo");
         if (! trackId.is_number_unsigned() || ! muted.is_boolean() || ! solo.is_boolean())
             return failure(Code::invalidFormat, "Expected an unsigned track ID and boolean flags");
-        snapshot.tracks.push_back({trackId.get<project::TrackId>(),
-            track.at("name").get<std::string>(), muted.get<bool>(), solo.get<bool>()});
+
+        project::Track parsedTrack {
+            trackId.get<project::TrackId>(),
+            track.at("name").get<std::string>(),
+            muted.get<bool>(),
+            solo.get<bool>()
+        };
+        if (track.contains("gainLinear"))
+        {
+            const auto& gain = track.at("gainLinear");
+            if (! gain.is_number())
+                return failure(Code::invalidFormat, "Expected numeric track gainLinear");
+            parsedTrack.gainLinear = gain.get<float>();
+        }
+        if (track.contains("pan"))
+        {
+            const auto& pan = track.at("pan");
+            if (! pan.is_number())
+                return failure(Code::invalidFormat, "Expected numeric track pan");
+            parsedTrack.pan = pan.get<float>();
+        }
+        if (track.contains("phaseInvert"))
+        {
+            const auto& phaseInvert = track.at("phaseInvert");
+            if (! phaseInvert.is_boolean())
+                return failure(Code::invalidFormat, "Expected boolean track phaseInvert");
+            parsedTrack.phaseInvert = phaseInvert.get<bool>();
+        }
+        snapshot.tracks.push_back(std::move(parsedTrack));
     }
 
-    if (version == Json(2))
+    if (version == Json(2) || version == Json(3))
     {
         const auto& assets = document.at("assets");
         const auto& clips = document.at("clips");
         if (! assets.is_array() || ! clips.is_array())
-            return failure(Code::invalidFormat, "Expected assets and clips arrays in format version 2");
+            return failure(Code::invalidFormat, "Expected assets and clips arrays in format version 2/3");
 
         snapshot.assets.reserve(assets.size());
         for (const auto& asset : assets)
@@ -197,11 +225,83 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
                 || ! lengthSamples.is_number_unsigned())
                 return failure(Code::invalidFormat, "Expected unsigned clip timing and ID fields");
 
-            snapshot.clips.push_back({clipId.get<project::ClipId>(),
+            project::AudioClip parsedClip {
+                clipId.get<project::ClipId>(),
                 assetId.get<project::MediaAssetId>(),
                 startSample.get<std::uint64_t>(),
                 sourceOffset.get<std::uint64_t>(),
-                lengthSamples.get<std::uint64_t>()});
+                lengthSamples.get<std::uint64_t>()
+            };
+            if (clip.contains("trackId"))
+            {
+                const auto& trackId = clip.at("trackId");
+                if (! trackId.is_number_unsigned())
+                    return failure(Code::invalidFormat, "Expected unsigned clip trackId");
+                parsedClip.trackId = trackId.get<project::TrackId>();
+            }
+            if (clip.contains("gainLinear"))
+            {
+                const auto& gain = clip.at("gainLinear");
+                if (! gain.is_number())
+                    return failure(Code::invalidFormat, "Expected numeric clip gainLinear");
+                parsedClip.gainLinear = gain.get<float>();
+            }
+            if (clip.contains("fadeInSamples"))
+            {
+                const auto& fadeIn = clip.at("fadeInSamples");
+                if (! fadeIn.is_number_unsigned()
+                    || fadeIn.get<std::uint64_t>() > std::numeric_limits<std::uint32_t>::max())
+                    return failure(Code::invalidFormat, "Expected uint32 clip fadeInSamples");
+                parsedClip.fadeInSamples = static_cast<std::uint32_t>(fadeIn.get<std::uint64_t>());
+            }
+            if (clip.contains("fadeOutSamples"))
+            {
+                const auto& fadeOut = clip.at("fadeOutSamples");
+                if (! fadeOut.is_number_unsigned()
+                    || fadeOut.get<std::uint64_t>() > std::numeric_limits<std::uint32_t>::max())
+                    return failure(Code::invalidFormat, "Expected uint32 clip fadeOutSamples");
+                parsedClip.fadeOutSamples = static_cast<std::uint32_t>(fadeOut.get<std::uint64_t>());
+            }
+            snapshot.clips.push_back(parsedClip);
+        }
+
+        if (version == Json(3) || document.contains("tempo"))
+        {
+            const auto& tempo = document.at("tempo");
+            if (! tempo.is_object())
+                return failure(Code::invalidFormat, "Expected tempo object");
+            const auto& bpm = tempo.at("bpm");
+            const auto& num = tempo.at("timeSigNumerator");
+            const auto& den = tempo.at("timeSigDenominator");
+            const auto& met = tempo.at("metronomeEnabled");
+            if (! bpm.is_number() || ! num.is_number_unsigned() || ! den.is_number_unsigned()
+                || ! met.is_boolean() || num.get<std::uint64_t>() > 255
+                || den.get<std::uint64_t>() > 255)
+                return failure(Code::invalidFormat, "Invalid tempo object fields");
+            snapshot.tempo = project::TempoSetting {
+                .bpm = bpm.get<double>(),
+                .timeSigNumerator = static_cast<std::uint8_t>(num.get<std::uint64_t>()),
+                .timeSigDenominator = static_cast<std::uint8_t>(den.get<std::uint64_t>()),
+                .metronomeEnabled = met.get<bool>()
+            };
+        }
+
+        if (version == Json(3) || document.contains("loop"))
+        {
+            const auto& loop = document.at("loop");
+            if (! loop.is_object())
+                return failure(Code::invalidFormat, "Expected loop object");
+            const auto& enabled = loop.at("enabled");
+            const auto& startSample = loop.at("startSample");
+            const auto& endSample = loop.at("endSample");
+            if (! enabled.is_boolean() || ! startSample.is_number_unsigned()
+                || ! endSample.is_number_unsigned())
+                return failure(Code::invalidFormat, "Invalid loop object fields");
+            snapshot.loop = project::LoopSetting {
+                .enabled = enabled.get<bool>(),
+                .startSample = startSample.get<std::uint64_t>(),
+                .endSample = endSample.get<std::uint64_t>()
+            };
         }
     }
 
@@ -220,15 +320,24 @@ std::expected<void, ProjectFileError> saveProject(
     {
         if (! validPath(path))
             return failure(Code::invalidPath, "Expected a nonempty project file path without NUL characters");
-        if (snapshot.formatVersion != 2)
-            return failure(Code::unsupportedVersion, "Only project format version 2 is supported");
+        if (snapshot.formatVersion != 2 && snapshot.formatVersion != 3)
+            return failure(Code::unsupportedVersion, "Only project format versions 2 and 3 are supported");
         if (! project::Project::fromSnapshot(snapshot))
             return failure(Code::invalidFormat, "Project IDs, names, assets, and clips must be valid");
 
         Json tracks = Json::array();
         for (const auto& track : snapshot.tracks)
-            tracks.push_back({{"id", track.id}, {"name", track.name},
-                              {"muted", track.muted}, {"solo", track.solo}});
+        {
+            Json trackJson {{"id", track.id}, {"name", track.name},
+                            {"muted", track.muted}, {"solo", track.solo}};
+            if (snapshot.formatVersion >= 3)
+            {
+                trackJson["gainLinear"] = track.gainLinear;
+                trackJson["pan"] = track.pan;
+                trackJson["phaseInvert"] = track.phaseInvert;
+            }
+            tracks.push_back(std::move(trackJson));
+        }
         Json assets = Json::array();
         for (const auto& asset : snapshot.assets)
             assets.push_back({{"id", asset.id}, {"path", asset.path},
@@ -238,13 +347,37 @@ std::expected<void, ProjectFileError> saveProject(
                               {"frameCount", asset.frameCount}});
         Json clips = Json::array();
         for (const auto& clip : snapshot.clips)
-            clips.push_back({{"id", clip.id}, {"assetId", clip.assetId},
-                             {"startSample", clip.startSample},
-                             {"sourceOffset", clip.sourceOffset},
-                             {"lengthSamples", clip.lengthSamples}});
-        const Json document {{"formatVersion", snapshot.formatVersion}, {"projectId", snapshot.id},
-                             {"name", snapshot.name}, {"tracks", std::move(tracks)},
-                             {"assets", std::move(assets)}, {"clips", std::move(clips)}};
+        {
+            Json clipJson {{"id", clip.id}, {"assetId", clip.assetId},
+                           {"startSample", clip.startSample},
+                           {"sourceOffset", clip.sourceOffset},
+                           {"lengthSamples", clip.lengthSamples}};
+            if (snapshot.formatVersion >= 3)
+            {
+                clipJson["trackId"] = clip.trackId;
+                clipJson["gainLinear"] = clip.gainLinear;
+                clipJson["fadeInSamples"] = clip.fadeInSamples;
+                clipJson["fadeOutSamples"] = clip.fadeOutSamples;
+            }
+            clips.push_back(std::move(clipJson));
+        }
+        Json document {{"formatVersion", snapshot.formatVersion}, {"projectId", snapshot.id},
+                       {"name", snapshot.name}, {"tracks", std::move(tracks)},
+                       {"assets", std::move(assets)}, {"clips", std::move(clips)}};
+        if (snapshot.formatVersion >= 3)
+        {
+            document["tempo"] = {
+                {"bpm", snapshot.tempo.bpm},
+                {"timeSigNumerator", snapshot.tempo.timeSigNumerator},
+                {"timeSigDenominator", snapshot.tempo.timeSigDenominator},
+                {"metronomeEnabled", snapshot.tempo.metronomeEnabled}
+            };
+            document["loop"] = {
+                {"enabled", snapshot.loop.enabled},
+                {"startSample", snapshot.loop.startSample},
+                {"endSample", snapshot.loop.endSample}
+            };
+        }
         // Serialize completely before creating a temporary file (e.g. invalid UTF-8).
         return writeTransaction(document.dump(2) + '\n', path);
     }

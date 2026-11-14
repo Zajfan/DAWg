@@ -31,6 +31,8 @@ public:
     [[nodiscard]] bool setTrackMute(TrackId id, bool muted);
     [[nodiscard]] bool setTrackSolo(TrackId id, bool solo);
     [[nodiscard]] bool setTrackGainPan(TrackId id, float gainLinear, float pan, bool phaseInvert);
+    [[nodiscard]] bool setProjectTempo(double bpm, std::uint8_t numerator, std::uint8_t denominator, bool metronomeEnabled);
+    [[nodiscard]] bool setProjectLoop(bool enabled, std::uint64_t startSample, std::uint64_t endSample);
     [[nodiscard]] bool apply(const ProjectCommand& command);
 
 private:

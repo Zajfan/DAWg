@@ -49,14 +49,25 @@ Project Project::create(std::string name, const ProjectId id)
 
 std::optional<Project> Project::fromSnapshot(ProjectSnapshot snapshot)
 {
-    if (snapshot.formatVersion != 2 || snapshot.id == 0 || snapshot.name.empty())
+    if ((snapshot.formatVersion != 2 && snapshot.formatVersion != 3)
+        || snapshot.id == 0 || snapshot.name.empty())
+        return std::nullopt;
+
+    if (! std::isfinite(snapshot.tempo.bpm) || snapshot.tempo.bpm <= 0.0
+        || snapshot.tempo.timeSigNumerator == 0 || snapshot.tempo.timeSigDenominator == 0)
+        return std::nullopt;
+
+    if (snapshot.loop.enabled && snapshot.loop.endSample <= snapshot.loop.startSample)
         return std::nullopt;
 
     std::unordered_set<TrackId> ids;
     TrackId largestId {};
     for (const auto& track : snapshot.tracks)
     {
-        if (track.id == 0 || track.name.empty() || ! ids.insert(track.id).second)
+        if (track.id == 0 || track.name.empty()
+            || ! std::isfinite(track.gainLinear) || track.gainLinear < 0.0f
+            || ! std::isfinite(track.pan) || track.pan < -1.0f || track.pan > 1.0f
+            || ! ids.insert(track.id).second)
             return std::nullopt;
 
         largestId = std::max(largestId, track.id);
@@ -75,7 +86,10 @@ std::optional<Project> Project::fromSnapshot(ProjectSnapshot snapshot)
     ClipId largestClipId {};
     for (const auto& clip : snapshot.clips)
     {
-        if (clip.id == 0 || ! clipIds.insert(clip.id).second)
+        if (clip.id == 0 || ! std::isfinite(clip.gainLinear) || clip.gainLinear < 0.0f
+            || ! clipIds.insert(clip.id).second)
+            return std::nullopt;
+        if (clip.trackId != 0 && ! ids.contains(clip.trackId))
             return std::nullopt;
         const auto asset = std::find_if(snapshot.assets.begin(), snapshot.assets.end(),
                                         [&clip](const AudioAsset& value) {
@@ -220,6 +234,35 @@ bool Project::setTrackGainPan(const TrackId id, const float gainLinear, const fl
     track->gainLinear = gainLinear;
     track->pan = pan;
     track->phaseInvert = phaseInvert;
+    return true;
+}
+
+bool Project::setProjectTempo(const double bpm, const std::uint8_t numerator,
+                              const std::uint8_t denominator, const bool metronomeEnabled)
+{
+    if (! std::isfinite(bpm) || bpm <= 0.0 || numerator == 0 || denominator == 0)
+        return false;
+
+    m_state.tempo = TempoSetting {
+        .bpm = bpm,
+        .timeSigNumerator = numerator,
+        .timeSigDenominator = denominator,
+        .metronomeEnabled = metronomeEnabled
+    };
+    return true;
+}
+
+bool Project::setProjectLoop(const bool enabled, const std::uint64_t startSample,
+                             const std::uint64_t endSample)
+{
+    if (enabled && endSample <= startSample)
+        return false;
+
+    m_state.loop = LoopSetting {
+        .enabled = enabled,
+        .startSample = startSample,
+        .endSample = endSample
+    };
     return true;
 }
 

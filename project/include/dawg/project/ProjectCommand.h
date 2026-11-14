@@ -47,6 +47,21 @@ struct SetTrackGainPan
     bool phaseInvert {};
 };
 
+struct SetProjectTempo
+{
+    double bpm {120.0};
+    std::uint8_t timeSigNumerator {4};
+    std::uint8_t timeSigDenominator {4};
+    bool metronomeEnabled {false};
+};
+
+struct SetProjectLoop
+{
+    bool enabled {false};
+    std::uint64_t startSample {0};
+    std::uint64_t endSample {0};
+};
+
 using ProjectCommand = std::variant<
     AddAudioTrack,
     RemoveTrack,
@@ -54,6 +69,8 @@ using ProjectCommand = std::variant<
     AddAudioClip,
     SetTrackMute,
     SetTrackSolo,
-    SetTrackGainPan>;
+    SetTrackGainPan,
+    SetProjectTempo,
+    SetProjectLoop>;
 
 } // namespace dawg::project

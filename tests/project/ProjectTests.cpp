@@ -376,6 +376,37 @@ void testTrackChannelStripCommands()
     require(! project.apply(SetTrackGainPan {trackId, 1.0f, -1.5f, false}),
             "SetTrackGainPan rejects out-of-range pan");
 }
+
+void testProjectTempoAndLoopCommands()
+{
+    auto project = Project::create("Timebase", 1);
+    require(project.snapshot().tempo == TempoSetting {120.0, 4, 4, false},
+            "default project tempo is 120 BPM 4/4 metronome off");
+    require(project.snapshot().loop == LoopSetting {false, 0, 0},
+            "default project loop is disabled [0, 0)");
+
+    require(project.apply(SetProjectTempo {140.0, 7, 8, true}),
+            "SetProjectTempo accepts valid BPM and 7/8 time signature");
+    require(project.snapshot().tempo == TempoSetting {140.0, 7, 8, true},
+            "snapshot stores updated TempoSetting");
+
+    require(! project.apply(SetProjectTempo {0.0, 4, 4, false}),
+            "SetProjectTempo rejects non-positive BPM");
+    require(! project.apply(SetProjectTempo {120.0, 0, 4, false}),
+            "SetProjectTempo rejects zero numerator");
+    require(! project.apply(SetProjectTempo {120.0, 4, 0, false}),
+            "SetProjectTempo rejects zero denominator");
+
+    require(project.apply(SetProjectLoop {true, 48000, 96000}),
+            "SetProjectLoop accepts valid active loop range");
+    require(project.snapshot().loop == LoopSetting {true, 48000, 96000},
+            "snapshot stores updated LoopSetting");
+
+    require(! project.apply(SetProjectLoop {true, 96000, 48000}),
+            "SetProjectLoop rejects enabled loop where endSample <= startSample");
+    require(project.apply(SetProjectLoop {false, 0, 0}),
+            "SetProjectLoop accepts disabled loop with [0, 0)");
+}
 }
 
 int main()
@@ -390,5 +421,6 @@ int main()
     testInvalidSnapshots();
     testAudioAssetsAndClips();
     testTrackChannelStripCommands();
-    std::puts("PASS: 10 project behavior tests");
+    testProjectTempoAndLoopCommands();
+    std::puts("PASS: 11 project behavior tests");
 }

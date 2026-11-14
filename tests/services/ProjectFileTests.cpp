@@ -206,12 +206,57 @@ void testMalformedDocuments(const fs::path& root)
         writeDocument(path, document);
         requireError(loadProject(path), Code::invalidFormat);
     }
-    for (const auto version : {"0", "3", "999", "-1", "4294967297", "18446744073709551615"})
+    for (const auto version : {"0", "4", "999", "-1", "4294967297", "18446744073709551615"})
     {
         writeDocument(path, std::string {R"({"formatVersion":)"} + version +
                             R"(,"projectId":42,"name":"P","tracks":[]})");
         requireError(loadProject(path), Code::unsupportedVersion);
     }
+}
+
+void testVersionThreeFivePillarRoundTrip(const fs::path& root)
+{
+    auto project = Project::create("Five Pillar Session", 77);
+    const auto track1 = project.addAudioTrack("Drums");
+    const auto track2 = project.addAudioTrack("Bass");
+    require(project.setTrackGainPan(track1, 0.75f, -0.25f, true), "set Drums channel strip");
+    require(project.setTrackMute(track2, true), "mute Bass");
+    require(project.setTrackSolo(track1, true), "solo Drums");
+    require(project.setTrackGainPan(track2, 1.25f, 0.5f, false), "set Bass channel strip");
+
+    require(project.addAudioAsset({1, "audio/drums.wav", AudioAssetPathKind::projectRelative, 48000, 2, 96000}) == 1,
+            "add drums asset");
+    require(project.addAudioClip({
+                .id = 1,
+                .assetId = 1,
+                .startSample = 1200,
+                .sourceOffset = 400,
+                .lengthSamples = 48000,
+                .trackId = track1,
+                .gainLinear = 0.8f,
+                .fadeInSamples = 128,
+                .fadeOutSamples = 256
+            }) == 1,
+            "add clip with fades and track assignment");
+    require(project.apply(SetProjectTempo {128.5, 6, 8, true}), "set project tempo 128.5 BPM 6/8");
+    require(project.apply(SetProjectLoop {true, 4800, 52800}), "set project loop region");
+
+    auto v3Snapshot = project.snapshot();
+    v3Snapshot.formatVersion = 3;
+
+    const auto path = root / "session-v3.dawg";
+    require(saveProject(v3Snapshot, path).has_value(), "save v3 project");
+
+    const auto loaded = loadProject(path);
+    require(loaded.has_value() && loaded->formatVersion == 3, "load v3 project");
+    require(loaded->tracks == v3Snapshot.tracks,
+            "v3 track channel strip parameters (gainLinear, pan, phaseInvert, muted, solo) survive round trip");
+    require(loaded->clips == v3Snapshot.clips,
+            "v3 clip parameters (trackId, gainLinear, fadeInSamples, fadeOutSamples) survive round trip");
+    require(loaded->tempo == v3Snapshot.tempo,
+            "v3 TempoSetting (bpm, timeSignature, metronomeEnabled) survives round trip");
+    require(loaded->loop == v3Snapshot.loop,
+            "v3 LoopSetting (enabled, startSample, endSample) survives round trip");
 }
 
 void testRejectedSaves(const fs::path& root)
@@ -316,5 +361,6 @@ int main()
     testPathFailures(directory.root);
     testRenameFailure(directory.root);
     testReplacement(directory.root);
-    std::puts("PASS: 7 persistence behavior tests");
+    testVersionThreeFivePillarRoundTrip(directory.root);
+    std::puts("PASS: 8 persistence behavior tests");
 }
