@@ -48,6 +48,7 @@ struct Track
     float gainLinear {1.0f};
     float pan {0.0f};
     bool phaseInvert {};
+    bool recordArmed {};
 
     friend bool operator==(const Track&, const Track&) = default;
 };

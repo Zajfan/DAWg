@@ -251,6 +251,65 @@ void testGraphCompilerBuildsMultiTrackContiguousExecutionPlan()
     require(compiled->clips[0].buffer == &ring1 && compiled->clips[2].buffer == &ring2,
             "compiled clips bind to their PlaybackRingBuffer pointers");
 }
+
+void testUndoRedoJournal()
+{
+    ProjectController controller {Project::create("UndoRedoTest", 1)};
+    require(! controller.canUndo(), "initially cannot undo");
+    require(! controller.canRedo(), "initially cannot redo");
+    require(! controller.undo(), "undo on empty stack returns false");
+    require(! controller.redo(), "redo on empty stack returns false");
+
+    const auto initialSnapshot = controller.snapshot();
+
+    // 1. Add track
+    require(controller.dispatch(AddAudioTrack {"Track 1"}), "dispatch add track");
+    require(controller.canUndo() && ! controller.canRedo(), "can undo after dispatch");
+    const auto track1Snapshot = controller.snapshot();
+    require(track1Snapshot.tracks.size() == 1, "track 1 present");
+
+    // 2. Add asset and clip
+    const auto assetId = controller.addAudioAsset({1, "audio.wav", AudioAssetPathKind::projectRelative, 48000, 1, 100});
+    require(assetId.has_value(), "add asset");
+    const auto assetSnapshot = controller.snapshot();
+
+    require(controller.dispatch(AddAudioClip {AudioClip {1, *assetId, 0, 0, 100, 1}}), "add clip");
+    const auto clipSnapshot = controller.snapshot();
+    require(clipSnapshot.clips.size() == 1, "clip present");
+
+    // 3. Multi-level Undo
+    require(controller.undo(), "undo clip add");
+    require(controller.snapshot().clips.empty(), "clip removed after undo");
+    require(controller.snapshot().assets == assetSnapshot.assets, "asset still present");
+    require(controller.canRedo(), "can redo after undo");
+
+    require(controller.undo(), "undo asset add");
+    require(controller.snapshot().assets.empty(), "asset removed after undo");
+    require(controller.snapshot() == track1Snapshot, "snapshot equals track 1 state");
+
+    require(controller.undo(), "undo track add");
+    require(controller.snapshot() == initialSnapshot, "snapshot equals initial state");
+    require(! controller.canUndo(), "cannot undo past beginning");
+    require(controller.canRedo(), "can redo");
+
+    // 4. Multi-level Redo
+    require(controller.redo(), "redo track add");
+    require(controller.snapshot() == track1Snapshot, "redo restored track 1 state");
+
+    require(controller.redo(), "redo asset add");
+    require(controller.snapshot() == assetSnapshot, "redo restored asset state");
+
+    require(controller.redo(), "redo clip add");
+    require(controller.snapshot() == clipSnapshot, "redo restored clip state");
+    require(! controller.canRedo(), "cannot redo past end");
+
+    // 5. New edit invalidates redo stack
+    require(controller.undo(), "undo clip add");
+    require(controller.canRedo(), "redo stack has 1 entry");
+    require(controller.dispatch(AddAudioTrack {"Branch Track"}), "dispatch new command while un-done");
+    require(! controller.canRedo(), "new dispatch cleared redo stack");
+    require(controller.snapshot().tracks.size() == 2, "both tracks present in new branch");
+}
 }
 
 int main()
@@ -264,5 +323,6 @@ int main()
     testPublisherConcurrentCoherence();
     testEngineBurstAndLifecycle();
     testGraphCompilerBuildsMultiTrackContiguousExecutionPlan();
-    std::puts("PASS: 8 render publication, graph compiler, and controller behavior tests");
+    testUndoRedoJournal();
+    std::puts("PASS: 9 render publication, graph compiler, and controller behavior tests");
 }

@@ -2,7 +2,9 @@
 
 #include <dawg/project/ProjectTypes.h>
 
+#include <string>
 #include <variant>
+#include <vector>
 
 namespace dawg::project {
 
@@ -62,14 +64,72 @@ struct SetProjectLoop
     std::uint64_t endSample {0};
 };
 
+struct SetTrackRecordArm
+{
+    TrackId id {};
+    bool armed {};
+};
+
+struct ReorderTracks
+{
+    std::vector<TrackId> trackIds;
+};
+
+struct RemoveClip
+{
+    ClipId id {};
+};
+
+struct MoveClip
+{
+    ClipId id {};
+    TrackId newTrackId {};
+    std::uint64_t newStartSample {};
+};
+
+struct TrimClip
+{
+    ClipId id {};
+    std::uint64_t newSourceOffset {};
+    std::uint64_t newLengthSamples {};
+};
+
+struct SplitClip
+{
+    ClipId id {};
+    std::uint64_t splitSample {};
+};
+
+struct DuplicateClip
+{
+    ClipId id {};
+    std::uint64_t newStartSample {};
+};
+
+struct SetClipGainFade
+{
+    ClipId id {};
+    float gainLinear {1.0f};
+    std::uint32_t fadeInSamples {};
+    std::uint32_t fadeOutSamples {};
+};
+
 using ProjectCommand = std::variant<
     AddAudioTrack,
     RemoveTrack,
     RenameTrack,
-    AddAudioClip,
+    ReorderTracks,
     SetTrackMute,
     SetTrackSolo,
     SetTrackGainPan,
+    SetTrackRecordArm,
+    AddAudioClip,
+    RemoveClip,
+    MoveClip,
+    TrimClip,
+    SplitClip,
+    DuplicateClip,
+    SetClipGainFade,
     SetProjectTempo,
     SetProjectLoop>;
 

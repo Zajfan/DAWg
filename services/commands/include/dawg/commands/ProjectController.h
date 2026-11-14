@@ -21,9 +21,17 @@ public:
     [[nodiscard]] project::ProjectSnapshot snapshot() const;
     [[nodiscard]] engine::RenderSnapshot latestRenderSnapshot() const noexcept;
 
+    [[nodiscard]] bool undo();
+    [[nodiscard]] bool redo();
+    [[nodiscard]] bool canUndo() const noexcept;
+    [[nodiscard]] bool canRedo() const noexcept;
+    void clearHistory() noexcept;
+
 private:
     project::Project m_project;
     engine::RenderSnapshot m_renderSnapshot {};
+    std::vector<project::ProjectSnapshot> m_undoStack;
+    std::vector<project::ProjectSnapshot> m_redoStack;
 };
 
 } // namespace dawg::commands

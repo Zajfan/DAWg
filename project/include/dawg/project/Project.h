@@ -31,6 +31,14 @@ public:
     [[nodiscard]] bool setTrackMute(TrackId id, bool muted);
     [[nodiscard]] bool setTrackSolo(TrackId id, bool solo);
     [[nodiscard]] bool setTrackGainPan(TrackId id, float gainLinear, float pan, bool phaseInvert);
+    [[nodiscard]] bool setTrackRecordArm(TrackId id, bool armed);
+    [[nodiscard]] bool reorderTracks(const std::vector<TrackId>& trackIds);
+    [[nodiscard]] bool removeClip(ClipId id);
+    [[nodiscard]] bool moveClip(ClipId id, TrackId newTrackId, std::uint64_t newStartSample);
+    [[nodiscard]] bool trimClip(ClipId id, std::uint64_t newSourceOffset, std::uint64_t newLengthSamples);
+    [[nodiscard]] bool splitClip(ClipId id, std::uint64_t splitSample);
+    [[nodiscard]] bool duplicateClip(ClipId id, std::uint64_t newStartSample);
+    [[nodiscard]] bool setClipGainFade(ClipId id, float gainLinear, std::uint32_t fadeInSamples, std::uint32_t fadeOutSamples);
     [[nodiscard]] bool setProjectTempo(double bpm, std::uint8_t numerator, std::uint8_t denominator, bool metronomeEnabled);
     [[nodiscard]] bool setProjectLoop(bool enabled, std::uint64_t startSample, std::uint64_t endSample);
     [[nodiscard]] bool apply(const ProjectCommand& command);

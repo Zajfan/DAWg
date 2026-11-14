@@ -21,6 +21,22 @@ bool Project::apply(const ProjectCommand& command)
             return setTrackSolo(operation.id, operation.solo);
         else if constexpr (std::is_same_v<Operation, SetTrackGainPan>)
             return setTrackGainPan(operation.id, operation.gainLinear, operation.pan, operation.phaseInvert);
+        else if constexpr (std::is_same_v<Operation, SetTrackRecordArm>)
+            return setTrackRecordArm(operation.id, operation.armed);
+        else if constexpr (std::is_same_v<Operation, ReorderTracks>)
+            return reorderTracks(operation.trackIds);
+        else if constexpr (std::is_same_v<Operation, RemoveClip>)
+            return removeClip(operation.id);
+        else if constexpr (std::is_same_v<Operation, MoveClip>)
+            return moveClip(operation.id, operation.newTrackId, operation.newStartSample);
+        else if constexpr (std::is_same_v<Operation, TrimClip>)
+            return trimClip(operation.id, operation.newSourceOffset, operation.newLengthSamples);
+        else if constexpr (std::is_same_v<Operation, SplitClip>)
+            return splitClip(operation.id, operation.splitSample);
+        else if constexpr (std::is_same_v<Operation, DuplicateClip>)
+            return duplicateClip(operation.id, operation.newStartSample);
+        else if constexpr (std::is_same_v<Operation, SetClipGainFade>)
+            return setClipGainFade(operation.id, operation.gainLinear, operation.fadeInSamples, operation.fadeOutSamples);
         else if constexpr (std::is_same_v<Operation, SetProjectTempo>)
             return setProjectTempo(operation.bpm, operation.timeSigNumerator, operation.timeSigDenominator, operation.metronomeEnabled);
         else if constexpr (std::is_same_v<Operation, SetProjectLoop>)

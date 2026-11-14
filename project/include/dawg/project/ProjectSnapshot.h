@@ -17,6 +17,8 @@ struct ProjectSnapshot
     std::vector<AudioClip> clips;
     TempoSetting tempo {};
     LoopSetting loop {};
+
+    friend bool operator==(const ProjectSnapshot&, const ProjectSnapshot&) = default;
 };
 
 } // namespace dawg::project

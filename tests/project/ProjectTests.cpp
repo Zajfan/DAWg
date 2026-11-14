@@ -407,6 +407,82 @@ void testProjectTempoAndLoopCommands()
     require(project.apply(SetProjectLoop {false, 0, 0}),
             "SetProjectLoop accepts disabled loop with [0, 0)");
 }
+
+void testExtendedTimelineCommands()
+{
+    auto project = Project::create("Editing", 1);
+    const auto t1 = project.addAudioTrack("Drums");
+    const auto t2 = project.addAudioTrack("Bass");
+    require(t1 == 1 && t2 == 2, "tracks added");
+
+    // Track record arming
+    require(project.apply(SetTrackRecordArm {t1, true}), "arm track 1");
+    require(project.snapshot().tracks[0].recordArmed, "track 1 is armed");
+    require(project.apply(SetTrackRecordArm {t1, false}), "disarm track 1");
+    require(! project.snapshot().tracks[0].recordArmed, "track 1 is disarmed");
+    require(! project.apply(SetTrackRecordArm {99, true}), "reject arm on unknown track");
+
+    // Reorder tracks
+    require(project.apply(ReorderTracks {{t2, t1}}), "reorder tracks 2, 1");
+    require(project.snapshot().tracks[0].id == t2 && project.snapshot().tracks[1].id == t1,
+            "tracks reordered");
+    require(! project.apply(ReorderTracks {{t1}}), "reject reorder with mismatched count");
+    require(! project.apply(ReorderTracks {{t1, 99}}), "reject reorder with invalid ID");
+    require(! project.apply(ReorderTracks {{t1, t1}}), "reject reorder with duplicate ID");
+
+    // Audio asset + clip commands
+    const auto a1 = project.addAudioAsset({1, "loop.wav", AudioAssetPathKind::projectRelative, 48000, 2, 1000});
+    require(a1 == 1, "asset added");
+    const auto c1 = project.addAudioClip({1, a1, 0, 0, 800, t1, 1.0f, 0, 0});
+    require(c1 == 1, "clip added");
+
+    // Move clip
+    require(project.apply(MoveClip {c1, t2, 500}), "move clip to track 2 at sample 500");
+    require(project.snapshot().clips[0].trackId == t2 && project.snapshot().clips[0].startSample == 500,
+            "clip moved to track 2 sample 500");
+    require(! project.apply(MoveClip {99, t1, 0}), "reject move unknown clip");
+    require(! project.apply(MoveClip {c1, 99, 0}), "reject move to unknown track");
+
+    // Trim clip
+    require(project.apply(TrimClip {c1, 100, 600}), "trim clip to offset 100 length 600");
+    require(project.snapshot().clips[0].sourceOffset == 100 && project.snapshot().clips[0].lengthSamples == 600,
+            "clip trimmed");
+    require(! project.apply(TrimClip {c1, 100, 0}), "reject trim zero length");
+    require(! project.apply(TrimClip {c1, 900, 200}), "reject trim past asset bounds");
+
+    // SetClipGainFade
+    require(project.apply(SetClipGainFade {c1, 0.75f, 50, 100}), "set clip gain and fades");
+    require(project.snapshot().clips[0].gainLinear == 0.75f &&
+            project.snapshot().clips[0].fadeInSamples == 50 &&
+            project.snapshot().clips[0].fadeOutSamples == 100, "clip gain and fades updated");
+    require(! project.apply(SetClipGainFade {c1, -0.5f, 0, 0}), "reject negative clip gain");
+
+    // Duplicate clip
+    require(project.apply(DuplicateClip {c1, 2000}), "duplicate clip at sample 2000");
+    require(project.snapshot().clips.size() == 2, "second clip created");
+    const auto c2 = project.snapshot().clips[1];
+    require(c2.id == 2 && c2.startSample == 2000 && c2.sourceOffset == 100 && c2.lengthSamples == 600,
+            "duplicated clip has new ID and updated startSample while preserving source range");
+
+    // Split clip
+    // Clip 1 is at startSample 500, length 600 (covers 500..1100). Split at 800.
+    require(project.apply(SplitClip {c1, 800}), "split clip at sample 800");
+    require(project.snapshot().clips.size() == 3, "three clips after split");
+    const auto part1 = project.snapshot().clips[0];
+    const auto part2 = project.snapshot().clips[2];
+    require(part1.id == c1 && part1.startSample == 500 && part1.lengthSamples == 300,
+            "part 1 retains original ID with length 300 (500..800)");
+    require(part2.id == 3 && part2.startSample == 800 && part2.lengthSamples == 300 && part2.sourceOffset == 400,
+            "part 2 gets new ID 3 with length 300 (800..1100) and offset advanced to 400");
+    require(! project.apply(SplitClip {c1, 500}), "reject split at startSample");
+    require(! project.apply(SplitClip {c1, 400}), "reject split before startSample");
+    require(! project.apply(SplitClip {c1, 800}), "reject split at end of part 1");
+
+    // Remove clip
+    require(project.apply(RemoveClip {part2.id}), "remove split part 2");
+    require(project.snapshot().clips.size() == 2, "clip removed");
+    require(! project.apply(RemoveClip {99}), "reject remove unknown clip");
+}
 }
 
 int main()
@@ -422,5 +498,6 @@ int main()
     testAudioAssetsAndClips();
     testTrackChannelStripCommands();
     testProjectTempoAndLoopCommands();
-    std::puts("PASS: 11 project behavior tests");
+    testExtendedTimelineCommands();
+    std::puts("PASS: 12 project behavior tests");
 }

@@ -237,6 +237,167 @@ bool Project::setTrackGainPan(const TrackId id, const float gainLinear, const fl
     return true;
 }
 
+bool Project::setTrackRecordArm(const TrackId id, const bool armed)
+{
+    const auto track = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                   [id](const Track& value) { return value.id == id; });
+    if (track == m_state.tracks.end())
+        return false;
+
+    track->recordArmed = armed;
+    return true;
+}
+
+bool Project::reorderTracks(const std::vector<TrackId>& trackIds)
+{
+    if (trackIds.size() != m_state.tracks.size())
+        return false;
+
+    std::vector<Track> reordered;
+    reordered.reserve(trackIds.size());
+    for (const auto id : trackIds)
+    {
+        const auto it = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                     [id](const Track& t) { return t.id == id; });
+        if (it == m_state.tracks.end())
+            return false;
+        if (std::any_of(reordered.begin(), reordered.end(),
+                        [id](const Track& t) { return t.id == id; }))
+        {
+            return false;
+        }
+        reordered.push_back(*it);
+    }
+
+    m_state.tracks = std::move(reordered);
+    return true;
+}
+
+bool Project::removeClip(const ClipId id)
+{
+    const auto it = std::find_if(m_state.clips.begin(), m_state.clips.end(),
+                                 [id](const AudioClip& c) { return c.id == id; });
+    if (it == m_state.clips.end())
+        return false;
+
+    m_state.clips.erase(it);
+    return true;
+}
+
+bool Project::moveClip(const ClipId id, const TrackId newTrackId, const std::uint64_t newStartSample)
+{
+    const auto clipIt = std::find_if(m_state.clips.begin(), m_state.clips.end(),
+                                     [id](const AudioClip& c) { return c.id == id; });
+    if (clipIt == m_state.clips.end())
+        return false;
+
+    if (newTrackId != 0 && std::none_of(m_state.tracks.begin(), m_state.tracks.end(),
+                                        [newTrackId](const Track& t) { return t.id == newTrackId; }))
+    {
+        return false;
+    }
+
+    clipIt->trackId = newTrackId;
+    clipIt->startSample = newStartSample;
+    return true;
+}
+
+bool Project::trimClip(const ClipId id, const std::uint64_t newSourceOffset,
+                       const std::uint64_t newLengthSamples)
+{
+    if (newLengthSamples == 0)
+        return false;
+
+    const auto clipIt = std::find_if(m_state.clips.begin(), m_state.clips.end(),
+                                     [id](const AudioClip& c) { return c.id == id; });
+    if (clipIt == m_state.clips.end())
+        return false;
+
+    const auto assetIt = std::find_if(m_state.assets.begin(), m_state.assets.end(),
+                                      [assetId = clipIt->assetId](const AudioAsset& a) {
+                                          return a.id == assetId;
+                                      });
+    if (assetIt == m_state.assets.end())
+        return false;
+
+    if (newSourceOffset > assetIt->frameCount
+        || newLengthSamples > assetIt->frameCount - newSourceOffset)
+    {
+        return false;
+    }
+
+    clipIt->sourceOffset = newSourceOffset;
+    clipIt->lengthSamples = newLengthSamples;
+    return true;
+}
+
+bool Project::splitClip(const ClipId id, const std::uint64_t splitSample)
+{
+    const auto clipIt = std::find_if(m_state.clips.begin(), m_state.clips.end(),
+                                     [id](const AudioClip& c) { return c.id == id; });
+    if (clipIt == m_state.clips.end())
+        return false;
+
+    if (splitSample <= clipIt->startSample
+        || splitSample >= clipIt->startSample + clipIt->lengthSamples)
+    {
+        return false;
+    }
+
+    if (m_nextClipId == 0)
+        return false;
+
+    const auto offsetInClip = splitSample - clipIt->startSample;
+    const auto part2Length = clipIt->lengthSamples - offsetInClip;
+
+    AudioClip part2 = *clipIt;
+    part2.id = m_nextClipId;
+    part2.startSample = splitSample;
+    part2.sourceOffset = clipIt->sourceOffset + offsetInClip;
+    part2.lengthSamples = part2Length;
+    part2.fadeInSamples = 0;
+
+    clipIt->lengthSamples = offsetInClip;
+    clipIt->fadeOutSamples = 0;
+
+    m_nextClipId = nextIdAfter(m_nextClipId);
+    m_state.clips.push_back(std::move(part2));
+    return true;
+}
+
+bool Project::duplicateClip(const ClipId id, const std::uint64_t newStartSample)
+{
+    const auto clipIt = std::find_if(m_state.clips.begin(), m_state.clips.end(),
+                                     [id](const AudioClip& c) { return c.id == id; });
+    if (clipIt == m_state.clips.end() || m_nextClipId == 0)
+        return false;
+
+    AudioClip dup = *clipIt;
+    dup.id = m_nextClipId;
+    dup.startSample = newStartSample;
+    m_nextClipId = nextIdAfter(m_nextClipId);
+    m_state.clips.push_back(std::move(dup));
+    return true;
+}
+
+bool Project::setClipGainFade(const ClipId id, const float gainLinear,
+                              const std::uint32_t fadeInSamples,
+                              const std::uint32_t fadeOutSamples)
+{
+    if (! std::isfinite(gainLinear) || gainLinear < 0.0f)
+        return false;
+
+    const auto clipIt = std::find_if(m_state.clips.begin(), m_state.clips.end(),
+                                     [id](const AudioClip& c) { return c.id == id; });
+    if (clipIt == m_state.clips.end())
+        return false;
+
+    clipIt->gainLinear = gainLinear;
+    clipIt->fadeInSamples = fadeInSamples;
+    clipIt->fadeOutSamples = fadeOutSamples;
+    return true;
+}
+
 bool Project::setProjectTempo(const double bpm, const std::uint8_t numerator,
                               const std::uint8_t denominator, const bool metronomeEnabled)
 {
