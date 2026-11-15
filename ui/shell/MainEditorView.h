@@ -1,7 +1,9 @@
 #pragma once
 
 #include "ChannelRackView.h"
+#include "DragSplitterBar.h"
 #include "EditorViewModel.h"
+#include "FloatingPanelWindow.h"
 #include "MixerPanel.h"
 #include "PianoRollView.h"
 #include "PluginBrowserPanel.h"
@@ -63,6 +65,24 @@ public:
         channelRack
     };
 
+    enum class DetachablePanel : std::uint8_t
+    {
+        mixer,
+        pianoRoll,
+        channelRack,
+        sessionMatrix,
+        browser
+    };
+
+    enum class WorkspacePreset : std::uint8_t
+    {
+        defaultArrangement,
+        dualScreenStudio,
+        beatmakerFocus,
+        livePerformanceRig,
+        masteringSuite
+    };
+
     enum class CenterViewMode : std::uint8_t
     {
         arrangement,
@@ -80,7 +100,7 @@ public:
                    TransportCallbacks transportCallbacks = {},
                    MenuCallbacks menuCallbacks = {},
                    media::WaveformCache* waveformCache = nullptr);
-    ~MainEditorView() override = default;
+    ~MainEditorView() override;
 
     void setViewModel(EditorViewModel model);
     void setSnapshot(project::ProjectSnapshot snapshot);
@@ -94,6 +114,27 @@ public:
     [[nodiscard]] bool isPluginBrowserVisible() const noexcept { return m_browserVisible; }
     void setSidebarTab(SidebarTab tab);
     [[nodiscard]] SidebarTab sidebarTab() const noexcept { return m_sidebarTab; }
+
+    // Multi-Window Detach / Re-Dock (Frontier 1)
+    void detachPanel(DetachablePanel panel);
+    void reDockPanel(DetachablePanel panel);
+    void reDockAllPanels();
+    [[nodiscard]] bool isPanelDetached(DetachablePanel panel) const noexcept;
+
+    // Fluid Resizing & Splitters (Frontier 2)
+    void toggleMaximizeDock();
+    [[nodiscard]] bool isDockMaximized() const noexcept { return m_dockMaximized; }
+
+    // Workspace Presets (Frontier 3)
+    void applyWorkspacePreset(WorkspacePreset preset);
+    void saveCurrentWorkspace();
+
+    // HiDPI Scaling & Zoom (Frontier 4)
+    void setCanvasScale(float scaleFactor);
+    void zoomIn();
+    void zoomOut();
+    void resetZoom();
+    [[nodiscard]] float canvasScale() const noexcept { return m_canvasScale; }
 
     // MenuBarModel
     juce::StringArray getMenuBarNames() override;
@@ -122,6 +163,9 @@ private:
     juce::TextButton m_tabPianoRollButton {"Piano Roll [P]"};
     juce::TextButton m_tabChannelRackButton {"Channel Rack [R]"};
     juce::TextButton m_tabBrowserButton {"Browser [B]"};
+    juce::TextButton m_detachDockButton {"↗"};
+    juce::TextButton m_maximizeDockButton {"⛶"};
+
     MixerPanel m_mixerPanel;
     PianoRollView m_pianoRollView;
     ChannelRackView m_channelRackView;
@@ -131,6 +175,22 @@ private:
     juce::TextButton m_sidebarTabSamplesButton {"Samples"};
     SidebarTab m_sidebarTab {SidebarTab::plugins};
     bool m_browserVisible {false};
+
+    // Detached Floating Windows
+    std::unique_ptr<FloatingPanelWindow> m_floatingMixer;
+    std::unique_ptr<FloatingPanelWindow> m_floatingPianoRoll;
+    std::unique_ptr<FloatingPanelWindow> m_floatingChannelRack;
+    std::unique_ptr<FloatingPanelWindow> m_floatingBrowser;
+    std::unique_ptr<FloatingPanelWindow> m_floatingSessionMatrix;
+
+    // Draggable Splitters
+    DragSplitterBar m_dockSplitter;
+    DragSplitterBar m_sidebarSplitter;
+
+    int m_dockHeight {220};
+    int m_sidebarWidth {270};
+    bool m_dockMaximized {false};
+    float m_canvasScale {1.0f};
 };
 
 } // namespace dawg::ui

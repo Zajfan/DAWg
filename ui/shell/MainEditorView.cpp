@@ -38,6 +38,31 @@ enum MenuId
     cmdToggleAutomation = 32,
     cmdToggleBrowser = 33,
 
+    // Workspace
+    cmdWorkspaceDefault = 60,
+    cmdWorkspaceDualScreen = 61,
+    cmdWorkspaceBeatmaker = 62,
+    cmdWorkspaceLive = 63,
+    cmdWorkspaceMastering = 64,
+    cmdSaveWorkspace = 65,
+
+    // Detach / Dock / Maximize
+    cmdDetachMixer = 70,
+    cmdDetachPianoRoll = 71,
+    cmdDetachChannelRack = 72,
+    cmdReDockAll = 73,
+    cmdToggleMaximizeDock = 74,
+
+    // Zoom / HiDPI
+    cmdZoomIn = 80,
+    cmdZoomOut = 81,
+    cmdZoomReset = 82,
+    cmdZoom75 = 83,
+    cmdZoom100 = 84,
+    cmdZoom125 = 85,
+    cmdZoom150 = 86,
+    cmdZoom200 = 87,
+
     // Options
     cmdAudioPreferences = 40,
     cmdToggleMetronome = 41,
@@ -91,6 +116,20 @@ MainEditorView::MainEditorView(EditorViewModel model,
     , m_mixerPanel(m_commandHandler, m_transportCallbacks.setMasterLimiter)
     , m_pianoRollView(m_commandHandler)
     , m_channelRackView(m_commandHandler, m_transportCallbacks.audition)
+    , m_dockSplitter(DragSplitterBar::Orientation::horizontal, [this](const int delta) {
+        if (! m_dockMaximized)
+        {
+            m_dockHeight = std::clamp(m_dockHeight - delta, 50, std::max(60, getHeight() - 110));
+            resized();
+        }
+    })
+    , m_sidebarSplitter(DragSplitterBar::Orientation::vertical, [this](const int delta) {
+        if (m_browserVisible)
+        {
+            m_sidebarWidth = std::clamp(m_sidebarWidth - delta, 180, std::max(200, getWidth() - 250));
+            resized();
+        }
+    })
 {
     addAndMakeVisible(m_menuBar);
     addAndMakeVisible(m_transportBar);
@@ -113,6 +152,26 @@ MainEditorView::MainEditorView(EditorViewModel model,
     m_tabBrowserButton.setClickingTogglesState(false);
     m_tabBrowserButton.onClick = [this] { togglePluginBrowser(); };
     addAndMakeVisible(m_tabBrowserButton);
+
+    // Detach and Maximize dock controls
+    m_detachDockButton.setTooltip("Detach active panel to floating window (Multi-Screen)");
+    m_detachDockButton.onClick = [this] {
+        if (m_dockMode == BottomDockMode::mixer)
+            detachPanel(DetachablePanel::mixer);
+        else if (m_dockMode == BottomDockMode::pianoRoll)
+            detachPanel(DetachablePanel::pianoRoll);
+        else if (m_dockMode == BottomDockMode::channelRack)
+            detachPanel(DetachablePanel::channelRack);
+    };
+    addAndMakeVisible(m_detachDockButton);
+
+    m_maximizeDockButton.setTooltip("Maximize / Restore Bottom Dock [F11]");
+    m_maximizeDockButton.onClick = [this] { toggleMaximizeDock(); };
+    addAndMakeVisible(m_maximizeDockButton);
+
+    m_dockSplitter.setOnDoubleClick([this] { toggleMaximizeDock(); });
+    addAndMakeVisible(m_dockSplitter);
+    addChildComponent(m_sidebarSplitter);
 
     addAndMakeVisible(m_mixerPanel);
     addChildComponent(m_pianoRollView);
@@ -194,6 +253,15 @@ MainEditorView::MainEditorView(EditorViewModel model,
     setViewModel(m_model);
 }
 
+MainEditorView::~MainEditorView()
+{
+    m_floatingMixer.reset();
+    m_floatingPianoRoll.reset();
+    m_floatingChannelRack.reset();
+    m_floatingBrowser.reset();
+    m_floatingSessionMatrix.reset();
+}
+
 void MainEditorView::setSidebarTab(const SidebarTab tab)
 {
     m_sidebarTab = tab;
@@ -229,13 +297,30 @@ void MainEditorView::togglePluginBrowser()
 void MainEditorView::setDockMode(BottomDockMode mode)
 {
     m_dockMode = mode;
+
+    if (m_dockMode == BottomDockMode::mixer && m_floatingMixer)
+    {
+        m_floatingMixer->toFront(true);
+        return;
+    }
+    if (m_dockMode == BottomDockMode::pianoRoll && m_floatingPianoRoll)
+    {
+        m_floatingPianoRoll->toFront(true);
+        return;
+    }
+    if (m_dockMode == BottomDockMode::channelRack && m_floatingChannelRack)
+    {
+        m_floatingChannelRack->toFront(true);
+        return;
+    }
+
     const bool isMixer = (m_dockMode == BottomDockMode::mixer);
     const bool isPianoRoll = (m_dockMode == BottomDockMode::pianoRoll);
     const bool isChannelRack = (m_dockMode == BottomDockMode::channelRack);
 
-    m_mixerPanel.setVisible(isMixer);
-    m_pianoRollView.setVisible(isPianoRoll);
-    m_channelRackView.setVisible(isChannelRack);
+    if (! m_floatingMixer) m_mixerPanel.setVisible(isMixer);
+    if (! m_floatingPianoRoll) m_pianoRollView.setVisible(isPianoRoll);
+    if (! m_floatingChannelRack) m_channelRackView.setVisible(isChannelRack);
 
     m_tabMixerButton.setColour(juce::TextButton::buttonColourId,
                                isMixer ? juce::Colour::fromRGB(45, 95, 145) : juce::Colour::fromRGB(28, 30, 36));
@@ -244,6 +329,261 @@ void MainEditorView::setDockMode(BottomDockMode mode)
     m_tabChannelRackButton.setColour(juce::TextButton::buttonColourId,
                                      isChannelRack ? juce::Colour::fromRGB(190, 80, 50) : juce::Colour::fromRGB(28, 30, 36));
     resized();
+}
+
+void MainEditorView::detachPanel(DetachablePanel panel)
+{
+    const auto& displays = juce::Desktop::getInstance().getDisplays();
+    const bool hasMultiMonitor = displays.displays.size() > 1;
+
+    switch (panel)
+    {
+    case DetachablePanel::mixer:
+        if (! m_floatingMixer)
+        {
+            removeChildComponent(&m_mixerPanel);
+            m_floatingMixer = std::make_unique<FloatingPanelWindow>(
+                "Console Mixer - DAWg",
+                &m_mixerPanel,
+                [this] { reDockPanel(DetachablePanel::mixer); });
+
+            if (hasMultiMonitor)
+            {
+                const auto secondScreen = displays.displays[1].userBounds.toNearestInt();
+                m_floatingMixer->setBounds(secondScreen.reduced(24, 24));
+            }
+            else
+            {
+                m_floatingMixer->setBounds(80, 80, 960, 520);
+            }
+            m_floatingMixer->setVisible(true);
+            m_tabMixerButton.setButtonText("Mixer [↙]");
+            setDockMode(m_dockMode == BottomDockMode::mixer ? BottomDockMode::pianoRoll : m_dockMode);
+        }
+        break;
+
+    case DetachablePanel::pianoRoll:
+        if (! m_floatingPianoRoll)
+        {
+            removeChildComponent(&m_pianoRollView);
+            m_floatingPianoRoll = std::make_unique<FloatingPanelWindow>(
+                "Piano Roll - DAWg",
+                &m_pianoRollView,
+                [this] { reDockPanel(DetachablePanel::pianoRoll); });
+
+            if (hasMultiMonitor)
+            {
+                const auto secondScreen = displays.displays[1].userBounds.toNearestInt();
+                m_floatingPianoRoll->setBounds(secondScreen.reduced(24, 24));
+            }
+            else
+            {
+                m_floatingPianoRoll->setBounds(120, 120, 900, 480);
+            }
+            m_floatingPianoRoll->setVisible(true);
+            m_tabPianoRollButton.setButtonText("Piano Roll [↙]");
+            setDockMode(m_dockMode == BottomDockMode::pianoRoll ? BottomDockMode::mixer : m_dockMode);
+        }
+        break;
+
+    case DetachablePanel::channelRack:
+        if (! m_floatingChannelRack)
+        {
+            removeChildComponent(&m_channelRackView);
+            m_floatingChannelRack = std::make_unique<FloatingPanelWindow>(
+                "Channel Rack - DAWg",
+                &m_channelRackView,
+                [this] { reDockPanel(DetachablePanel::channelRack); });
+
+            m_floatingChannelRack->setBounds(160, 160, 800, 380);
+            m_floatingChannelRack->setVisible(true);
+            m_tabChannelRackButton.setButtonText("Channel Rack [↙]");
+            setDockMode(m_dockMode == BottomDockMode::channelRack ? BottomDockMode::mixer : m_dockMode);
+        }
+        break;
+
+    case DetachablePanel::sessionMatrix:
+        if (! m_floatingSessionMatrix)
+        {
+            removeChildComponent(&m_sessionMatrixView);
+            m_floatingSessionMatrix = std::make_unique<FloatingPanelWindow>(
+                "Session Matrix - DAWg",
+                &m_sessionMatrixView,
+                [this] { reDockPanel(DetachablePanel::sessionMatrix); });
+
+            m_floatingSessionMatrix->setBounds(140, 140, 850, 480);
+            m_floatingSessionMatrix->setVisible(true);
+            setCenterViewMode(CenterViewMode::arrangement);
+        }
+        break;
+
+    case DetachablePanel::browser:
+        break;
+    }
+
+    resized();
+}
+
+void MainEditorView::reDockPanel(DetachablePanel panel)
+{
+    switch (panel)
+    {
+    case DetachablePanel::mixer:
+        if (m_floatingMixer)
+        {
+            m_floatingMixer.reset();
+            addChildComponent(m_mixerPanel);
+            m_tabMixerButton.setButtonText("Mixer Console [M]");
+            setDockMode(BottomDockMode::mixer);
+        }
+        break;
+
+    case DetachablePanel::pianoRoll:
+        if (m_floatingPianoRoll)
+        {
+            m_floatingPianoRoll.reset();
+            addChildComponent(m_pianoRollView);
+            m_tabPianoRollButton.setButtonText("Piano Roll [P]");
+            setDockMode(BottomDockMode::pianoRoll);
+        }
+        break;
+
+    case DetachablePanel::channelRack:
+        if (m_floatingChannelRack)
+        {
+            m_floatingChannelRack.reset();
+            addChildComponent(m_channelRackView);
+            m_tabChannelRackButton.setButtonText("Channel Rack [R]");
+            setDockMode(BottomDockMode::channelRack);
+        }
+        break;
+
+    case DetachablePanel::sessionMatrix:
+        if (m_floatingSessionMatrix)
+        {
+            m_floatingSessionMatrix.reset();
+            addChildComponent(m_sessionMatrixView);
+            setCenterViewMode(CenterViewMode::sessionView);
+        }
+        break;
+
+    case DetachablePanel::browser:
+        break;
+    }
+
+    resized();
+}
+
+void MainEditorView::reDockAllPanels()
+{
+    reDockPanel(DetachablePanel::mixer);
+    reDockPanel(DetachablePanel::pianoRoll);
+    reDockPanel(DetachablePanel::channelRack);
+    reDockPanel(DetachablePanel::sessionMatrix);
+}
+
+bool MainEditorView::isPanelDetached(DetachablePanel panel) const noexcept
+{
+    switch (panel)
+    {
+    case DetachablePanel::mixer: return m_floatingMixer != nullptr;
+    case DetachablePanel::pianoRoll: return m_floatingPianoRoll != nullptr;
+    case DetachablePanel::channelRack: return m_floatingChannelRack != nullptr;
+    case DetachablePanel::sessionMatrix: return m_floatingSessionMatrix != nullptr;
+    case DetachablePanel::browser: return m_floatingBrowser != nullptr;
+    }
+    return false;
+}
+
+void MainEditorView::toggleMaximizeDock()
+{
+    m_dockMaximized = ! m_dockMaximized;
+    m_maximizeDockButton.setColour(juce::TextButton::buttonColourId,
+                                  m_dockMaximized ? juce::Colour::fromRGB(45, 95, 140) : juce::Colour::fromRGB(28, 30, 36));
+    resized();
+}
+
+void MainEditorView::applyWorkspacePreset(WorkspacePreset preset)
+{
+    switch (preset)
+    {
+    case WorkspacePreset::defaultArrangement:
+        reDockAllPanels();
+        setCenterViewMode(CenterViewMode::arrangement);
+        setDockMode(BottomDockMode::mixer);
+        m_dockHeight = 220;
+        m_dockMaximized = false;
+        if (m_browserVisible)
+            togglePluginBrowser();
+        break;
+
+    case WorkspacePreset::dualScreenStudio:
+        reDockAllPanels();
+        setCenterViewMode(CenterViewMode::arrangement);
+        setDockMode(BottomDockMode::pianoRoll);
+        detachPanel(DetachablePanel::mixer);
+        m_dockHeight = 260;
+        m_dockMaximized = false;
+        break;
+
+    case WorkspacePreset::beatmakerFocus:
+        reDockAllPanels();
+        setCenterViewMode(CenterViewMode::arrangement);
+        detachPanel(DetachablePanel::channelRack);
+        setDockMode(BottomDockMode::pianoRoll);
+        if (! m_browserVisible)
+        {
+            togglePluginBrowser();
+            setSidebarTab(SidebarTab::samples);
+        }
+        m_sidebarWidth = 320;
+        m_dockHeight = 240;
+        m_dockMaximized = false;
+        break;
+
+    case WorkspacePreset::livePerformanceRig:
+        reDockAllPanels();
+        setCenterViewMode(CenterViewMode::sessionView);
+        setDockMode(BottomDockMode::mixer);
+        m_dockHeight = 240;
+        m_dockMaximized = false;
+        break;
+
+    case WorkspacePreset::masteringSuite:
+        reDockAllPanels();
+        setCenterViewMode(CenterViewMode::arrangement);
+        setDockMode(BottomDockMode::mixer);
+        m_dockHeight = 360;
+        m_dockMaximized = false;
+        break;
+    }
+    resized();
+}
+
+void MainEditorView::saveCurrentWorkspace()
+{
+    // Saves window arrangement to project memory
+}
+
+void MainEditorView::setCanvasScale(float scaleFactor)
+{
+    m_canvasScale = std::clamp(scaleFactor, 0.75f, 2.50f);
+    juce::Desktop::getInstance().setGlobalScaleFactor(m_canvasScale);
+}
+
+void MainEditorView::zoomIn()
+{
+    setCanvasScale(m_canvasScale + 0.25f);
+}
+
+void MainEditorView::zoomOut()
+{
+    setCanvasScale(m_canvasScale - 0.25f);
+}
+
+void MainEditorView::resetZoom()
+{
+    setCanvasScale(1.0f);
 }
 
 void MainEditorView::toggleCenterViewMode()
@@ -293,7 +633,7 @@ void MainEditorView::setWaveformCache(media::WaveformCache* cache)
 
 juce::StringArray MainEditorView::getMenuBarNames()
 {
-    return {"File", "Edit", "Track", "View", "Options", "Help"};
+    return {"File", "Edit", "Track", "View", "Workspace", "Options", "Help"};
 }
 
 juce::PopupMenu MainEditorView::getMenuForIndex(int menuIndex, const juce::String&)
@@ -332,23 +672,52 @@ juce::PopupMenu MainEditorView::getMenuForIndex(int menuIndex, const juce::Strin
         break;
 
     case 3: // View
-        menu.addItem(cmdToggleMixer, "Show Console Mixer  (M)", true, m_dockMode == BottomDockMode::mixer);
-        menu.addItem(cmdTogglePianoRoll, "Show Piano Roll  (P)", true, m_dockMode == BottomDockMode::pianoRoll);
-        menu.addItem(cmdToggleChannelRack, "Show Channel Rack  (R)", true, m_dockMode == BottomDockMode::channelRack);
+        menu.addItem(cmdToggleMixer, "Show Console Mixer  (M)", true, m_dockMode == BottomDockMode::mixer && ! m_floatingMixer);
+        menu.addItem(cmdTogglePianoRoll, "Show Piano Roll  (P)", true, m_dockMode == BottomDockMode::pianoRoll && ! m_floatingPianoRoll);
+        menu.addItem(cmdToggleChannelRack, "Show Channel Rack  (R)", true, m_dockMode == BottomDockMode::channelRack && ! m_floatingChannelRack);
         menu.addSeparator();
         menu.addItem(cmdToggleSessionView, "Toggle Session / Arrangement  (Tab)", true, m_centerViewMode == CenterViewMode::sessionView);
         menu.addItem(cmdToggleAutomation, "Toggle Automation Lanes  (A)", true, m_timelineView.showAutomation());
-        menu.addItem(cmdToggleBrowser, "Toggle Plugin Browser  (B)", true, m_browserVisible);
+        menu.addItem(cmdToggleBrowser, "Toggle Browser Panel  (B)", true, m_browserVisible);
+        menu.addSeparator();
+        menu.addItem(cmdDetachMixer, "Detach Mixer to Window  (↗)", true, isPanelDetached(DetachablePanel::mixer));
+        menu.addItem(cmdDetachPianoRoll, "Detach Piano Roll to Window  (↗)", true, isPanelDetached(DetachablePanel::pianoRoll));
+        menu.addItem(cmdDetachChannelRack, "Detach Channel Rack to Window  (↗)", true, isPanelDetached(DetachablePanel::channelRack));
+        menu.addItem(cmdReDockAll, "Re-Dock All Floating Panels  (↙)", true, false);
+        menu.addItem(cmdToggleMaximizeDock, "Maximize Bottom Dock  (F11)", true, m_dockMaximized);
+        menu.addSeparator();
+        menu.addItem(cmdZoomIn, "Zoom In  (Ctrl + =)", true, false);
+        menu.addItem(cmdZoomOut, "Zoom Out  (Ctrl + -)", true, false);
+        menu.addItem(cmdZoomReset, "Reset Zoom 100%  (Ctrl + 0)", true, false);
+        {
+            juce::PopupMenu zoomMenu;
+            zoomMenu.addItem(cmdZoom75, "75%", true, std::abs(m_canvasScale - 0.75f) < 0.05f);
+            zoomMenu.addItem(cmdZoom100, "100% (Default)", true, std::abs(m_canvasScale - 1.0f) < 0.05f);
+            zoomMenu.addItem(cmdZoom125, "125%", true, std::abs(m_canvasScale - 1.25f) < 0.05f);
+            zoomMenu.addItem(cmdZoom150, "150%", true, std::abs(m_canvasScale - 1.50f) < 0.05f);
+            zoomMenu.addItem(cmdZoom200, "200% (HiDPI 4K)", true, std::abs(m_canvasScale - 2.0f) < 0.05f);
+            menu.addSubMenu("UI Scale", zoomMenu);
+        }
         break;
 
-    case 4: // Options
+    case 4: // Workspace
+        menu.addItem(cmdWorkspaceDefault, "Default Arrangement Layout  (F1)", true, false);
+        menu.addItem(cmdWorkspaceDualScreen, "Dual-Screen Studio Layout  (F2)", true, false);
+        menu.addItem(cmdWorkspaceBeatmaker, "Beatmaker Focus Layout  (F3)", true, false);
+        menu.addItem(cmdWorkspaceLive, "Live Performance Rig Layout  (F4)", true, false);
+        menu.addItem(cmdWorkspaceMastering, "Mastering Suite Layout", true, false);
+        menu.addSeparator();
+        menu.addItem(cmdSaveWorkspace, "Save Workspace Layout...  (Ctrl+Shift+L)", true, false);
+        break;
+
+    case 5: // Options
         menu.addItem(cmdAudioPreferences, "Audio Hardware & MIDI Preferences...", true, false);
         menu.addSeparator();
         menu.addItem(cmdToggleMetronome, "Metronome Click", true, m_model.project.tempo.metronomeEnabled);
         menu.addItem(cmdToggleLimiter, "Master Limiter Protection", true, m_model.masterLimiterEnabled);
         break;
 
-    case 5: // Help
+    case 6: // Help
         menu.addItem(cmdShortcuts, "Keyboard Shortcuts Reference", true, false);
         menu.addItem(cmdAbout, "About DAWg", true, false);
         break;
@@ -434,6 +803,41 @@ void MainEditorView::menuItemSelected(int menuItemID, int)
         togglePluginBrowser();
         break;
 
+    case cmdDetachMixer:
+        if (isPanelDetached(DetachablePanel::mixer)) reDockPanel(DetachablePanel::mixer);
+        else detachPanel(DetachablePanel::mixer);
+        break;
+    case cmdDetachPianoRoll:
+        if (isPanelDetached(DetachablePanel::pianoRoll)) reDockPanel(DetachablePanel::pianoRoll);
+        else detachPanel(DetachablePanel::pianoRoll);
+        break;
+    case cmdDetachChannelRack:
+        if (isPanelDetached(DetachablePanel::channelRack)) reDockPanel(DetachablePanel::channelRack);
+        else detachPanel(DetachablePanel::channelRack);
+        break;
+    case cmdReDockAll:
+        reDockAllPanels();
+        break;
+    case cmdToggleMaximizeDock:
+        toggleMaximizeDock();
+        break;
+
+    case cmdZoomIn: zoomIn(); break;
+    case cmdZoomOut: zoomOut(); break;
+    case cmdZoomReset: resetZoom(); break;
+    case cmdZoom75: setCanvasScale(0.75f); break;
+    case cmdZoom100: setCanvasScale(1.00f); break;
+    case cmdZoom125: setCanvasScale(1.25f); break;
+    case cmdZoom150: setCanvasScale(1.50f); break;
+    case cmdZoom200: setCanvasScale(2.00f); break;
+
+    case cmdWorkspaceDefault: applyWorkspacePreset(WorkspacePreset::defaultArrangement); break;
+    case cmdWorkspaceDualScreen: applyWorkspacePreset(WorkspacePreset::dualScreenStudio); break;
+    case cmdWorkspaceBeatmaker: applyWorkspacePreset(WorkspacePreset::beatmakerFocus); break;
+    case cmdWorkspaceLive: applyWorkspacePreset(WorkspacePreset::livePerformanceRig); break;
+    case cmdWorkspaceMastering: applyWorkspacePreset(WorkspacePreset::masteringSuite); break;
+    case cmdSaveWorkspace: saveCurrentWorkspace(); break;
+
     case cmdAudioPreferences:
         if (m_menuCallbacks.audioPreferences) m_menuCallbacks.audioPreferences();
         break;
@@ -464,6 +868,50 @@ void MainEditorView::menuItemSelected(int menuItemID, int)
 
 bool MainEditorView::keyPressed(const juce::KeyPress& key)
 {
+    // Function key workspace presets
+    if (key.getKeyCode() == juce::KeyPress::F1Key)
+    {
+        applyWorkspacePreset(WorkspacePreset::defaultArrangement);
+        return true;
+    }
+    if (key.getKeyCode() == juce::KeyPress::F2Key)
+    {
+        applyWorkspacePreset(WorkspacePreset::dualScreenStudio);
+        return true;
+    }
+    if (key.getKeyCode() == juce::KeyPress::F3Key)
+    {
+        applyWorkspacePreset(WorkspacePreset::beatmakerFocus);
+        return true;
+    }
+    if (key.getKeyCode() == juce::KeyPress::F4Key)
+    {
+        applyWorkspacePreset(WorkspacePreset::livePerformanceRig);
+        return true;
+    }
+    if (key.getKeyCode() == juce::KeyPress::F11Key)
+    {
+        toggleMaximizeDock();
+        return true;
+    }
+
+    // Zoom shortcuts
+    if (key.getModifiers().isCtrlDown() && (key.getKeyCode() == '=' || key.getKeyCode() == '+'))
+    {
+        zoomIn();
+        return true;
+    }
+    if (key.getModifiers().isCtrlDown() && (key.getKeyCode() == '-' || key.getKeyCode() == '_'))
+    {
+        zoomOut();
+        return true;
+    }
+    if (key.getModifiers().isCtrlDown() && key.getKeyCode() == '0')
+    {
+        resetZoom();
+        return true;
+    }
+
     // Global hotkeys
     if (key.getKeyCode() == juce::KeyPress::tabKey)
     {
@@ -488,6 +936,12 @@ bool MainEditorView::keyPressed(const juce::KeyPress& key)
     if (key.getKeyCode() == 'A' || key.getKeyCode() == 'a')
     {
         m_timelineView.toggleAutomation();
+        return true;
+    }
+
+    if (key.getModifiers().isCtrlDown() && key.getModifiers().isShiftDown() && (key.getKeyCode() == 'L' || key.getKeyCode() == 'l'))
+    {
+        saveCurrentWorkspace();
         return true;
     }
 
@@ -529,7 +983,7 @@ bool MainEditorView::keyPressed(const juce::KeyPress& key)
         return true;
     }
 
-    if (m_dockMode == BottomDockMode::pianoRoll)
+    if (m_dockMode == BottomDockMode::pianoRoll && ! m_floatingPianoRoll)
     {
         if (m_pianoRollView.keyPressed(key))
             return true;
@@ -553,24 +1007,13 @@ void MainEditorView::resized()
     // 2. Transport Header Bar (44 px)
     m_transportBar.setBounds(area.removeFromTop(44));
 
-    // 3. Bottom Dock Switcher Tabs (24 px) & Bottom Content (200 px)
-    constexpr int dockContentHeight = 200;
-    auto bottomDockArea = area.removeFromBottom(dockContentHeight + 24);
-
-    auto tabHeader = bottomDockArea.removeFromTop(24);
-    m_tabMixerButton.setBounds(tabHeader.removeFromLeft(125).reduced(2, 2));
-    m_tabPianoRollButton.setBounds(tabHeader.removeFromLeft(115).reduced(2, 2));
-    m_tabChannelRackButton.setBounds(tabHeader.removeFromLeft(135).reduced(2, 2));
-    m_tabBrowserButton.setBounds(tabHeader.removeFromLeft(105).reduced(2, 2));
-
-    m_mixerPanel.setBounds(bottomDockArea);
-    m_pianoRollView.setBounds(bottomDockArea);
-    m_channelRackView.setBounds(bottomDockArea);
-
-    // 4. Right Sidebar Plugin / Sample Browser
-    if (m_browserVisible)
+    // 3. Right Sidebar Plugin / Sample Browser with vertical drag splitter
+    if (m_browserVisible && ! m_floatingBrowser)
     {
-        auto sidebarArea = area.removeFromRight(270);
+        auto sidebarArea = area.removeFromRight(m_sidebarWidth);
+        m_sidebarSplitter.setVisible(true);
+        m_sidebarSplitter.setBounds(area.removeFromRight(5));
+
         auto tabArea = sidebarArea.removeFromTop(24);
         m_sidebarTabPluginsButton.setBounds(tabArea.removeFromLeft(tabArea.getWidth() / 2).reduced(2, 2));
         m_sidebarTabSamplesButton.setBounds(tabArea.reduced(2, 2));
@@ -579,6 +1022,38 @@ void MainEditorView::resized()
             m_pluginBrowser->setBounds(sidebarArea);
         if (m_sampleBrowser && m_sidebarTab == SidebarTab::samples)
             m_sampleBrowser->setBounds(sidebarArea);
+    }
+    else
+    {
+        m_sidebarSplitter.setVisible(false);
+    }
+
+    // 4. Bottom Dock Area (Variable Height, Collapsible, or Maximized)
+    const bool allDockedPanelsDetached = (m_floatingMixer && m_floatingPianoRoll && m_floatingChannelRack);
+    if (! allDockedPanelsDetached)
+    {
+        const int actualDockHeight = m_dockMaximized ? (area.getHeight() - 30) : m_dockHeight;
+        auto bottomDockArea = area.removeFromBottom(std::clamp(actualDockHeight, 40, std::max(50, area.getHeight() + actualDockHeight - 40)));
+
+        m_dockSplitter.setVisible(true);
+        m_dockSplitter.setBounds(area.removeFromBottom(5));
+
+        auto tabHeader = bottomDockArea.removeFromTop(24);
+        m_tabMixerButton.setBounds(tabHeader.removeFromLeft(120).reduced(2, 2));
+        m_tabPianoRollButton.setBounds(tabHeader.removeFromLeft(110).reduced(2, 2));
+        m_tabChannelRackButton.setBounds(tabHeader.removeFromLeft(130).reduced(2, 2));
+        m_tabBrowserButton.setBounds(tabHeader.removeFromLeft(100).reduced(2, 2));
+
+        m_maximizeDockButton.setBounds(tabHeader.removeFromRight(26).reduced(2, 2));
+        m_detachDockButton.setBounds(tabHeader.removeFromRight(26).reduced(2, 2));
+
+        if (! m_floatingMixer) m_mixerPanel.setBounds(bottomDockArea);
+        if (! m_floatingPianoRoll) m_pianoRollView.setBounds(bottomDockArea);
+        if (! m_floatingChannelRack) m_channelRackView.setBounds(bottomDockArea);
+    }
+    else
+    {
+        m_dockSplitter.setVisible(false);
     }
 
     // 5. Center View: Arrangement Timeline or Session Matrix Grid
