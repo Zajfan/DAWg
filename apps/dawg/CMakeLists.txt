@@ -33,6 +33,12 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/RoutingMatrixView.h
     ../../ui/shell/ModulationRackView.cpp
     ../../ui/shell/ModulationRackView.h
+    ../../ui/shell/GenericPluginEditorView.cpp
+    ../../ui/shell/GenericPluginEditorView.h
+    ../../ui/shell/PluginWindow.cpp
+    ../../ui/shell/PluginWindow.h
+    ../../ui/shell/SpatialRadarView.cpp
+    ../../ui/shell/SpatialRadarView.h
     ../../ui/shell/MidiLearnManager.h
     ../../ui/shell/SessionMatrixView.cpp
     ../../ui/shell/SessionMatrixView.h

@@ -15,6 +15,7 @@
 #include <dawg/engine/TempoMap.h>
 #include <dawg/engine/WorkStealingScheduler.h>
 #include <dawg/engine/dsp/BrickwallLimiterNode.h>
+#include <dawg/engine/dsp/BinauralSpatialPannerNode.h>
 #include <dawg/engine/dsp/DrumPadSamplerNode.h>
 #include <dawg/engine/dsp/DynamicsCompressorNode.h>
 #include <dawg/engine/dsp/ModulatorRack.h>
@@ -2181,6 +2182,81 @@ void testPluginCrashSupervisorAndAirGappedImmunity()
     require(! supervisor.isCrashed(), "Plugin is no longer crashed after restart");
     require(supervisor.state() == PluginHostState::running, "Plugin restored to running state");
 }
+
+void testBinauralSpatialPanner3D()
+{
+    // Option 3: 3D Spatial Audio & Binaural Soundstage Panner
+    using dawg::engine::dsp::BinauralSpatialPannerNode;
+
+    BinauralSpatialPannerNode panner;
+    require(panner.prepare(48000.0, 256, 2), "Binaural spatial panner prepared");
+
+    // 1. Center positioning
+    panner.setAzimuthDeg(0.0f);
+    panner.setElevationDeg(0.0f);
+    panner.setDistanceMeters(1.0f);
+    require(std::abs(panner.azimuthDeg()) < 1e-4f, "Azimuth is 0 (Center/Front)");
+    require(std::abs(panner.distanceMeters() - 1.0f) < 1e-4f, "Distance is 1m");
+
+    // 2. Sound on Hard Right (+90 deg):
+    // Right ear is near ear, Left ear is far ear.
+    // Left ear receives ITD delay (Woodworth model: ~0.65ms => ~31 samples delay at 48kHz).
+    panner.setAzimuthDeg(90.0f);
+
+    std::vector<float> inL(256, 0.0f);
+    std::vector<float> inR(256, 0.0f);
+    inL[0] = 1.0f; // Single impulse at t=0
+    std::array<float*, 2> inPlanes {inL.data(), inR.data()};
+
+    dawg::engine::ProcessContext ctx {
+        .audio = dawg::engine::AudioBufferView {inPlanes.data(), 2, 256},
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+
+    panner.process(ctx);
+
+    // Right ear receives sound at sample 0
+    require(std::abs(inR[0]) > 0.1f, "Right ear (near ear) receives direct arrival at sample 0");
+    // Left ear direct arrival at sample 0 is suppressed because it is delayed by ITD
+    require(std::abs(inL[0]) < 0.05f, "Left ear (far ear) direct arrival is delayed by ITD");
+
+    // 3. Distance Attenuation (1/r inverse distance law)
+    BinauralSpatialPannerNode nearPanner;
+    require(nearPanner.prepare(48000.0, 64, 2), "Near panner prepared");
+    nearPanner.setAzimuthDeg(0.0f);
+    nearPanner.setDistanceMeters(1.0f);
+
+    BinauralSpatialPannerNode farPanner;
+    require(farPanner.prepare(48000.0, 64, 2), "Far panner prepared");
+    farPanner.setAzimuthDeg(0.0f);
+    farPanner.setDistanceMeters(5.0f);
+
+    std::vector<float> nearBufL(64, 1.0f);
+    std::vector<float> nearBufR(64, 1.0f);
+    std::array<float*, 2> nearPlanes {nearBufL.data(), nearBufR.data()};
+    dawg::engine::ProcessContext nearCtx {
+        .audio = dawg::engine::AudioBufferView {nearPlanes.data(), 2, 64},
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+    nearPanner.process(nearCtx);
+
+    std::vector<float> farBufL(64, 1.0f);
+    std::vector<float> farBufR(64, 1.0f);
+    std::array<float*, 2> farPlanes {farBufL.data(), farBufR.data()};
+    dawg::engine::ProcessContext farCtx {
+        .audio = dawg::engine::AudioBufferView {farPlanes.data(), 2, 64},
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+    farPanner.process(farCtx);
+
+    require(nearBufL[32] > farBufL[32], "Distance attenuation drops audio level at 5m compared to 1m");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -2306,4 +2382,5 @@ int main()
     testAudioEngineSchedulerAndTopologicalPdc();
     testPolyphaseOversamplingAndZdfMoogLadder();
     testPluginCrashSupervisorAndAirGappedImmunity();
+    testBinauralSpatialPanner3D();
 }

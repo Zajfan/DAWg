@@ -1,4 +1,5 @@
 #include "MainEditorView.h"
+#include "PluginWindow.h"
 
 #include <utility>
 
@@ -119,6 +120,7 @@ MainEditorView::MainEditorView(EditorViewModel model,
     , m_drumSamplerView(m_commandHandler, m_transportCallbacks.audition)
     , m_routingMatrixView(m_commandHandler, nullptr)
     , m_modulationRackView()
+    , m_spatialRadarView()
     , m_dockSplitter(DragSplitterBar::Orientation::horizontal, [this](const int delta) {
         if (! m_dockMaximized)
         {
@@ -164,6 +166,10 @@ MainEditorView::MainEditorView(EditorViewModel model,
     m_tabModulationButton.onClick = [this] { setDockMode(BottomDockMode::modulationRack); };
     addAndMakeVisible(m_tabModulationButton);
 
+    m_tabSpatialRadarButton.setClickingTogglesState(false);
+    m_tabSpatialRadarButton.onClick = [this] { setDockMode(BottomDockMode::spatialRadar); };
+    addAndMakeVisible(m_tabSpatialRadarButton);
+
     m_tabBrowserButton.setClickingTogglesState(false);
     m_tabBrowserButton.onClick = [this] { togglePluginBrowser(); };
     addAndMakeVisible(m_tabBrowserButton);
@@ -183,6 +189,8 @@ MainEditorView::MainEditorView(EditorViewModel model,
             detachPanel(DetachablePanel::routingMatrix);
         else if (m_dockMode == BottomDockMode::modulationRack)
             detachPanel(DetachablePanel::modulationRack);
+        else if (m_dockMode == BottomDockMode::spatialRadar)
+            detachPanel(DetachablePanel::spatialRadar);
     };
     addAndMakeVisible(m_detachDockButton);
 
@@ -200,9 +208,11 @@ MainEditorView::MainEditorView(EditorViewModel model,
     addChildComponent(m_drumSamplerView);
     addChildComponent(m_routingMatrixView);
     addChildComponent(m_modulationRackView);
+    addChildComponent(m_spatialRadarView);
 
     m_pluginBrowser = std::make_unique<PluginBrowserPanel>(
         [this](const plugins::PluginDescriptor& plugin, bool createNewTrack) {
+            PluginWindow::open(plugin.name);
             if (createNewTrack)
             {
                 if (plugin.isInstrument)
@@ -352,6 +362,11 @@ void MainEditorView::setDockMode(BottomDockMode mode)
         m_floatingModulationRack->toFront(true);
         return;
     }
+    if (m_dockMode == BottomDockMode::spatialRadar && m_floatingSpatialRadar)
+    {
+        m_floatingSpatialRadar->toFront(true);
+        return;
+    }
 
     const bool isMixer = (m_dockMode == BottomDockMode::mixer);
     const bool isPianoRoll = (m_dockMode == BottomDockMode::pianoRoll);
@@ -359,6 +374,7 @@ void MainEditorView::setDockMode(BottomDockMode mode)
     const bool isDrumSampler = (m_dockMode == BottomDockMode::drumSampler);
     const bool isRoutingMatrix = (m_dockMode == BottomDockMode::routingMatrix);
     const bool isModulationRack = (m_dockMode == BottomDockMode::modulationRack);
+    const bool isSpatialRadar = (m_dockMode == BottomDockMode::spatialRadar);
 
     if (! m_floatingMixer) m_mixerPanel.setVisible(isMixer);
     if (! m_floatingPianoRoll) m_pianoRollView.setVisible(isPianoRoll);
@@ -366,6 +382,7 @@ void MainEditorView::setDockMode(BottomDockMode mode)
     if (! m_floatingDrumSampler) m_drumSamplerView.setVisible(isDrumSampler);
     if (! m_floatingRoutingMatrix) m_routingMatrixView.setVisible(isRoutingMatrix);
     if (! m_floatingModulationRack) m_modulationRackView.setVisible(isModulationRack);
+    if (! m_floatingSpatialRadar) m_spatialRadarView.setVisible(isSpatialRadar);
 
     m_tabMixerButton.setColour(juce::TextButton::buttonColourId,
                                isMixer ? juce::Colour::fromRGB(45, 95, 145) : juce::Colour::fromRGB(28, 30, 36));
@@ -379,6 +396,8 @@ void MainEditorView::setDockMode(BottomDockMode mode)
                                        isRoutingMatrix ? juce::Colour::fromRGB(110, 50, 150) : juce::Colour::fromRGB(28, 30, 36));
     m_tabModulationButton.setColour(juce::TextButton::buttonColourId,
                                     isModulationRack ? juce::Colour::fromRGB(45, 120, 95) : juce::Colour::fromRGB(28, 30, 36));
+    m_tabSpatialRadarButton.setColour(juce::TextButton::buttonColourId,
+                                      isSpatialRadar ? juce::Colour::fromRGB(65, 145, 225) : juce::Colour::fromRGB(28, 30, 36));
     resized();
 }
 
@@ -516,6 +535,22 @@ void MainEditorView::detachPanel(DetachablePanel panel)
         }
         break;
 
+    case DetachablePanel::spatialRadar:
+        if (! m_floatingSpatialRadar)
+        {
+            removeChildComponent(&m_spatialRadarView);
+            m_floatingSpatialRadar = std::make_unique<FloatingPanelWindow>(
+                "3D Spatial Audio & Binaural Soundstage - DAWg",
+                &m_spatialRadarView,
+                [this] { reDockPanel(DetachablePanel::spatialRadar); });
+
+            m_floatingSpatialRadar->setBounds(200, 200, 720, 520);
+            m_floatingSpatialRadar->setVisible(true);
+            m_tabSpatialRadarButton.setButtonText("Spatial 3D [↙]");
+            setDockMode(m_dockMode == BottomDockMode::spatialRadar ? BottomDockMode::mixer : m_dockMode);
+        }
+        break;
+
     case DetachablePanel::browser:
         break;
     }
@@ -596,6 +631,16 @@ void MainEditorView::reDockPanel(DetachablePanel panel)
         }
         break;
 
+    case DetachablePanel::spatialRadar:
+        if (m_floatingSpatialRadar)
+        {
+            m_floatingSpatialRadar.reset();
+            addChildComponent(m_spatialRadarView);
+            m_tabSpatialRadarButton.setButtonText("Spatial 3D [Z]");
+            setDockMode(BottomDockMode::spatialRadar);
+        }
+        break;
+
     case DetachablePanel::browser:
         break;
     }
@@ -612,6 +657,7 @@ void MainEditorView::reDockAllPanels()
     reDockPanel(DetachablePanel::drumSampler);
     reDockPanel(DetachablePanel::routingMatrix);
     reDockPanel(DetachablePanel::modulationRack);
+    reDockPanel(DetachablePanel::spatialRadar);
 }
 
 bool MainEditorView::isPanelDetached(DetachablePanel panel) const noexcept
@@ -625,6 +671,7 @@ bool MainEditorView::isPanelDetached(DetachablePanel panel) const noexcept
     case DetachablePanel::drumSampler: return m_floatingDrumSampler != nullptr;
     case DetachablePanel::routingMatrix: return m_floatingRoutingMatrix != nullptr;
     case DetachablePanel::modulationRack: return m_floatingModulationRack != nullptr;
+    case DetachablePanel::spatialRadar: return m_floatingSpatialRadar != nullptr;
     case DetachablePanel::browser: return false;
     }
     return false;
@@ -746,6 +793,7 @@ void MainEditorView::setViewModel(EditorViewModel model)
     m_channelRackView.setViewModel(m_model);
     m_drumSamplerView.setViewModel(m_model);
     m_routingMatrixView.setViewModel(m_model);
+    m_spatialRadarView.setViewModel(m_model);
 }
 
 void MainEditorView::setSnapshot(project::ProjectSnapshot snapshot)
@@ -759,6 +807,7 @@ void MainEditorView::setSnapshot(project::ProjectSnapshot snapshot)
     m_channelRackView.setViewModel(m_model);
     m_drumSamplerView.setViewModel(m_model);
     m_routingMatrixView.setViewModel(m_model);
+    m_spatialRadarView.setViewModel(m_model);
 }
 
 void MainEditorView::setWaveformCache(media::WaveformCache* cache)
@@ -1087,6 +1136,11 @@ bool MainEditorView::keyPressed(const juce::KeyPress& key)
         setDockMode(BottomDockMode::modulationRack);
         return true;
     }
+    if (key.getKeyCode() == 'Z' || key.getKeyCode() == 'z')
+    {
+        setDockMode(BottomDockMode::spatialRadar);
+        return true;
+    }
     if (key.getKeyCode() == 'A' || key.getKeyCode() == 'a')
     {
         m_timelineView.toggleAutomation();
@@ -1183,7 +1237,7 @@ void MainEditorView::resized()
     }
 
     // 4. Bottom Dock Area (Variable Height, Collapsible, or Maximized)
-    const bool allDockedPanelsDetached = (m_floatingMixer && m_floatingPianoRoll && m_floatingChannelRack && m_floatingDrumSampler && m_floatingRoutingMatrix && m_floatingModulationRack);
+    const bool allDockedPanelsDetached = (m_floatingMixer && m_floatingPianoRoll && m_floatingChannelRack && m_floatingDrumSampler && m_floatingRoutingMatrix && m_floatingModulationRack && m_floatingSpatialRadar);
     if (! allDockedPanelsDetached)
     {
         const int actualDockHeight = m_dockMaximized ? (area.getHeight() - 30) : m_dockHeight;
@@ -1199,6 +1253,7 @@ void MainEditorView::resized()
         m_tabDrumSamplerButton.setBounds(tabHeader.removeFromLeft(115).reduced(2, 2));
         m_tabRoutingMatrixButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
         m_tabModulationButton.setBounds(tabHeader.removeFromLeft(105).reduced(2, 2));
+        m_tabSpatialRadarButton.setBounds(tabHeader.removeFromLeft(100).reduced(2, 2));
         m_tabBrowserButton.setBounds(tabHeader.removeFromLeft(85).reduced(2, 2));
 
         m_maximizeDockButton.setBounds(tabHeader.removeFromRight(26).reduced(2, 2));
@@ -1210,6 +1265,7 @@ void MainEditorView::resized()
         if (! m_floatingDrumSampler) m_drumSamplerView.setBounds(bottomDockArea);
         if (! m_floatingRoutingMatrix) m_routingMatrixView.setBounds(bottomDockArea);
         if (! m_floatingModulationRack) m_modulationRackView.setBounds(bottomDockArea);
+        if (! m_floatingSpatialRadar) m_spatialRadarView.setBounds(bottomDockArea);
     }
     else
     {

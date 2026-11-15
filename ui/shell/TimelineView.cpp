@@ -613,10 +613,19 @@ void TimelineView::drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bo
                 juce::Rectangle<int> tkHeaderBounds {0, currentY, m_headerWidth, kTakeLaneHeight};
                 g.setColour(juce::Colour::fromRGB(26, 29, 36));
                 g.fillRect(tkHeaderBounds);
+
+                // Take Solo pill [S]
+                juce::Rectangle<int> tkSoloPill {m_headerWidth - 28, currentY + 6, 22, kTakeLaneHeight - 12};
+                g.setColour(juce::Colour::fromRGB(40, 48, 62));
+                g.fillRoundedRectangle(tkSoloPill.toFloat(), 2.0f);
+                g.setColour(juce::Colour::fromRGB(180, 200, 230));
+                g.setFont(juce::FontOptions(9.0f, juce::Font::bold));
+                g.drawText("S", tkSoloPill, juce::Justification::centred);
+
                 g.setColour(juce::Colour::fromRGB(160, 180, 205));
                 g.setFont(juce::FontOptions(10.0f));
                 g.drawText(take.name.empty() ? ("Take " + juce::String(take.id)) : take.name,
-                           tkHeaderBounds.reduced(8, 2), juce::Justification::centredLeft);
+                           tkHeaderBounds.removeFromLeft(m_headerWidth - 32).reduced(8, 2), juce::Justification::centredLeft);
 
                 // Take audio block
                 const int takePxStart = m_headerWidth + sampleToPixel(0);
@@ -624,6 +633,29 @@ void TimelineView::drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bo
                 juce::Rectangle<int> takeBlockBounds {takePxStart, currentY + 2, std::max(20, takePxWidth), kTakeLaneHeight - 4};
                 g.setColour(juce::Colour::fromRGB(35, 55, 75));
                 g.fillRoundedRectangle(takeBlockBounds.toFloat(), 3.0f);
+
+                // Render waveform thumbnail inside take lane
+                if (m_waveformCache != nullptr && takeBlockBounds.getWidth() > 10)
+                {
+                    const auto peaks = m_waveformCache->getMinMaxPeaks(
+                        take.assetId, 0, take.sourceOffset, take.lengthSamples,
+                        static_cast<std::size_t>(takeBlockBounds.getWidth()));
+                    if (! peaks.empty())
+                    {
+                        g.setColour(juce::Colour::fromRGBA(140, 190, 240, 160));
+                        const int centerY = takeBlockBounds.getCentreY();
+                        const int halfH = (takeBlockBounds.getHeight() - 4) / 2;
+                        for (int p = 0; p < takeBlockBounds.getWidth() && p < static_cast<int>(peaks.size()); ++p)
+                        {
+                            const int minPx = static_cast<int>(peaks[static_cast<std::size_t>(p)].minVal * static_cast<float>(halfH));
+                            const int maxPx = static_cast<int>(peaks[static_cast<std::size_t>(p)].maxVal * static_cast<float>(halfH));
+                            g.drawVerticalLine(takeBlockBounds.getX() + p,
+                                               static_cast<float>(centerY - maxPx),
+                                               static_cast<float>(centerY - minPx + 1));
+                        }
+                    }
+                }
+
                 g.setColour(juce::Colour::fromRGB(65, 105, 145));
                 g.drawRoundedRectangle(takeBlockBounds.toFloat(), 3.0f, 1.0f);
 

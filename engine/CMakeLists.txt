@@ -17,6 +17,7 @@ add_library(dawg_engine_core STATIC
     src/WsolaTimeStretcher.cpp
     src/clap/ClapPluginNode.cpp
     src/dsp/BrickwallLimiterNode.cpp
+    src/dsp/BinauralSpatialPannerNode.cpp
     src/dsp/DynamicsCompressorNode.cpp
     src/dsp/DrumPadSamplerNode.cpp
     src/dsp/ModulatorRack.cpp
