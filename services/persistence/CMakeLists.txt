@@ -7,7 +7,10 @@ FetchContent_Declare(nlohmann_json
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
-add_library(dawg_services_persistence STATIC src/ProjectFile.cpp)
+add_library(dawg_services_persistence STATIC
+    src/ProjectFile.cpp
+    src/ProjectBundlerService.cpp
+)
 target_include_directories(dawg_services_persistence PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(dawg_services_persistence
     PUBLIC dawg_project_model

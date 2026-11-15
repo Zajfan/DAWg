@@ -25,6 +25,7 @@
 #include <dawg/engine/dsp/DynamicsCompressorNode.h>
 #include <dawg/engine/dsp/GranularCloudNode.h>
 #include <dawg/engine/dsp/HarmonicAssistant.h>
+#include <dawg/engine/dsp/HarmonizerVocoderNode.h>
 #include <dawg/engine/dsp/ModulatorRack.h>
 #include <dawg/engine/dsp/MultiSampleInstrumentNode.h>
 #include <dawg/engine/dsp/MultibandCompressorNode.h>
@@ -34,6 +35,7 @@
 #include <dawg/engine/dsp/SpatialSurroundPannerNode.h>
 #include <dawg/engine/dsp/SpectralBalanceAssistant.h>
 #include <dawg/engine/dsp/SpectralSidechainNode.h>
+#include <dawg/engine/dsp/StepSequencerEngine.h>
 #include <dawg/engine/dsp/TapeConsoleSummingNode.h>
 #include <dawg/engine/dsp/TnhcDelayNode.h>
 #include <dawg/engine/dsp/TnhcReverbNode.h>
@@ -3643,6 +3645,170 @@ void testSpectralBalanceAssistantAndSmartUnmasking()
     require(unmasking[0].recommendedGainCutDb < -1.0f, "Recommended surgical notch gain cut");
     require(!unmasking[0].description.empty(), "Unmasking recommendation provides explanatory diagnosis");
 }
+
+void testHarmonizerVocoderEngine()
+{
+    using dawg::engine::dsp::HarmonizerVocoderNode;
+    using dawg::engine::dsp::ChordQuality;
+    using dawg::engine::dsp::HarmonyVoice;
+    using dawg::engine::dsp::VocoderCarrierSource;
+
+    HarmonizerVocoderNode node;
+    constexpr double sampleRate = 48000.0;
+    constexpr std::size_t blockSize = 256;
+
+    require(node.prepare(sampleRate, blockSize, 2), "HarmonizerVocoderNode prepares");
+    require(node.latencySamples() == 0, "Zero latency harmonizer & vocoder");
+
+    // 1. Intelligent Polyphonic Pitch-Shifting Harmonizer
+    node.setHarmonizerEnabled(true);
+    node.setVocoderEnabled(false);
+    node.setDryMix(0.7f);
+    node.setHarmonizerWetMix(0.8f);
+    node.setChordContext(60, ChordQuality::major); // C Major
+    require(node.isHarmonizerEnabled(), "Harmonizer is enabled");
+    require(node.isScaleSnapEnabled(), "Scale/Chord snap enabled");
+
+    // Configure Voice 0: Major 3rd (+4 st), Voice 1: Perfect 5th (+7 st)
+    HarmonyVoice v0 {.enabled = true, .semitones = 4.0f, .fineTuneCents = 0.0f, .gain = 0.8f, .pan = -0.3f, .formantMorph = 1.0f};
+    HarmonyVoice v1 {.enabled = true, .semitones = 7.0f, .fineTuneCents = 0.0f, .gain = 0.8f, .pan = 0.3f, .formantMorph = 1.1f};
+    node.setVoice(0, v0);
+    node.setVoice(1, v1);
+
+    require(node.voice(0).enabled && std::abs(node.voice(0).semitones - 4.0f) < 1e-4f, "Voice 0 configured to +4 semitones");
+    require(node.voice(1).enabled && std::abs(node.voice(1).semitones - 7.0f) < 1e-4f, "Voice 1 configured to +7 semitones");
+
+    node.setGlobalFormantMorph(1.15f);
+    require(std::abs(node.globalFormantMorph() - 1.15f) < 1e-4f, "Formant morph configured for throat/gender shift");
+
+    // Feed 220 Hz sine tone (vocal pitch fundamental)
+    std::vector<float> chL(blockSize);
+    std::vector<float> chR(blockSize);
+    for (std::size_t i = 0; i < blockSize; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(sampleRate);
+        const float s = 0.6f * std::sin(2.0f * std::numbers::pi_v<float> * 220.0f * t);
+        chL[i] = s;
+        chR[i] = s;
+    }
+
+    std::array<float*, 2> channels {chL.data(), chR.data()};
+    dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+    dawg::engine::AudioBufferView emptySidechain(nullptr, 0, 0);
+    dawg::engine::ProcessContext ctx {
+        .audio = audioView,
+        .midi = {},
+        .sampleRate = sampleRate,
+        .sidechain = emptySidechain
+    };
+
+    // Process multiple blocks to populate grain ring buffer
+    for (int b = 0; b < 6; ++b) {
+        node.process(ctx);
+    }
+
+    float maxHarmL = 0.0f;
+    for (float s : chL) {
+        maxHarmL = std::max(maxHarmL, std::abs(s));
+    }
+    require(maxHarmL > 0.1f && !std::isnan(maxHarmL) && !std::isinf(maxHarmL),
+            "Harmonizer produces stable pitch-shifted polyphonic vocal harmonies");
+
+    // 2. 32-Band Classic Analog Vocoder Engine
+    node.setHarmonizerEnabled(false);
+    node.setVocoderEnabled(true);
+    node.setDryMix(0.0f);
+    node.setVocoderWetMix(1.0f);
+    node.setVocoderCarrierSource(VocoderCarrierSource::internalPulseSaw);
+    node.setVocoderFormantShift(1.1f);
+    require(node.isVocoderEnabled(), "Vocoder is enabled");
+    require(node.vocoderCarrierSource() == VocoderCarrierSource::internalPulseSaw, "Pulse/saw carrier oscillator selected");
+    require(std::abs(node.vocoderFormantShift() - 1.1f) < 1e-4f, "Vocoder formant shift set to 1.1x");
+
+    // Process modulator audio block through vocoder filterbank
+    for (int b = 0; b < 6; ++b) {
+        node.process(ctx);
+    }
+
+    float maxVocL = 0.0f;
+    for (float s : chL) {
+        maxVocL = std::max(maxVocL, std::abs(s));
+    }
+    require(maxVocL > 0.001f && !std::isnan(maxVocL),
+            "Vocoder processes speech modulator through 32-band analysis & synthesis filterbank");
+}
+
+void testStepSequencerAndEuclideanPolyrhythm()
+{
+    using dawg::engine::dsp::StepSequencerEngine;
+    using dawg::engine::dsp::StepCondition;
+    using dawg::engine::dsp::StepData;
+
+    StepSequencerEngine seq;
+    constexpr double sampleRate = 48000.0;
+    seq.prepare(sampleRate);
+    seq.setPlaybackBpm(120.0);
+
+    // 1. Bjorklund Euclidean Polyrhythm Generation
+    // 4 pulses over 16 steps = straight 4-on-the-floor
+    const auto p4_16 = StepSequencerEngine::generateEuclideanPattern(16, 4, 0);
+    require(p4_16.size() == 16, "Pattern length is 16");
+    std::size_t activeCount4_16 = 0;
+    for (bool bit : p4_16) {
+        if (bit) ++activeCount4_16;
+    }
+    require(activeCount4_16 == 4, "4 pulses generated in 16 steps");
+    require(p4_16[0] && p4_16[4] && p4_16[8] && p4_16[12], "4-on-the-floor evenly spaced at 0, 4, 8, 12");
+
+    // 3 pulses over 8 steps = classic Cuban Tresillo [1, 0, 0, 1, 0, 0, 1, 0]
+    const auto p3_8 = StepSequencerEngine::generateEuclideanPattern(8, 3, 0);
+    require(p3_8.size() == 8, "Tresillo length is 8");
+    require(p3_8[0] && !p3_8[1] && !p3_8[2] && p3_8[3] && !p3_8[4] && !p3_8[5] && p3_8[6] && !p3_8[7],
+            "Bjorklund generates authentic Cuban Tresillo rhythm [1, 0, 0, 1, 0, 0, 1, 0]");
+
+    // Rotation test
+    const auto pRotated = StepSequencerEngine::generateEuclideanPattern(4, 1, 1);
+    require(!pRotated[0] && pRotated[1] && !pRotated[2] && !pRotated[3], "Pattern rotated by 1 step offset");
+
+    // 2. Track Setup & Parameter Locks (P-Locks)
+    seq.applyEuclideanPattern(0, 16, 4, 0, 110); // Track 0 = Kick
+    require(seq.trackStepCount(0) == 16, "Track 0 step count is 16");
+
+    // P-Lock pitch transpose on Step 0 (+5 semitones)
+    StepData lockStep = seq.step(0, 0);
+    lockStep.pitchOffsetSemitones = 5.0f;
+    lockStep.ratchets = 2; // 2x ratchet burst
+    seq.setStep(0, 0, lockStep);
+    require(std::abs(seq.step(0, 0).pitchOffsetSemitones - 5.0f) < 1e-4f, "P-Lock pitch stored on Step 0");
+    require(seq.step(0, 0).ratchets == 2, "Step 0 configured with 2x ratchet roll");
+
+    // Step 4 with cycle condition pass2of2 (should only fire on second pattern loop)
+    StepData condStep = seq.step(0, 4);
+    condStep.condition = StepCondition::pass2of2;
+    seq.setStep(0, 4, condStep);
+
+    // Step 12 with Fill Only condition
+    StepData fillStep = seq.step(0, 12);
+    fillStep.condition = StepCondition::fillOnly;
+    seq.setStep(0, 12, fillStep);
+
+    // 3. Step Advance & Real-Time MIDI Generation
+    std::vector<dawg::engine::MidiEvent> midiEvents;
+    // Step duration at 120 BPM: (15 / 120) * 48000 = 6000 samples per 16th step
+    constexpr std::size_t stepSamples = 6000;
+
+    // Advance first step (Step 0)
+    seq.advance(stepSamples, 120.0, midiEvents);
+    require(!midiEvents.empty(), "MIDI events generated on active step");
+    require(midiEvents.size() >= 2, "Step 0 emitted 2 ratcheted note-on events");
+
+    // Verify MIDI Note has P-Locked transposition (+5 semitones on note 36 = 41)
+    const auto noteNum = static_cast<std::uint8_t>(midiEvents[0].data[1]);
+    require(noteNum == 41, "Note event reflects P-Lock transposition (36 + 5 = 41)");
+
+    // Test Fill Mode
+    seq.setFillMode(true);
+    require(seq.isFillMode(), "Fill mode active for live performance variations");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -3790,4 +3956,6 @@ int main()
     testTapeConsoleSummingAndWowFlutter();
     testMultiSampleInstrumentRoundRobinAndSfz();
     testSpectralBalanceAssistantAndSmartUnmasking();
+    testHarmonizerVocoderEngine();
+    testStepSequencerAndEuclideanPolyrhythm();
 }

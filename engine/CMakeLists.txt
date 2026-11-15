@@ -28,6 +28,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/DynamicLinearPhaseEQNode.cpp
     src/dsp/GranularCloudNode.cpp
     src/dsp/HarmonicAssistant.cpp
+    src/dsp/HarmonizerVocoderNode.cpp
     src/dsp/MasteringMeterNode.cpp
     src/dsp/ModulatorRack.cpp
     src/dsp/MultiSampleInstrumentNode.cpp
@@ -38,6 +39,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/SpatialSurroundPannerNode.cpp
     src/dsp/SpectralBalanceAssistant.cpp
     src/dsp/SpectralSidechainNode.cpp
+    src/dsp/StepSequencerEngine.cpp
     src/dsp/TapeConsoleSummingNode.cpp
     src/dsp/TnhcDelayNode.cpp
     src/dsp/TnhcReverbNode.cpp

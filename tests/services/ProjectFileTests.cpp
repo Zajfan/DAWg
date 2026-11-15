@@ -1,3 +1,4 @@
+#include <dawg/persistence/ProjectBundlerService.h>
 #include <dawg/persistence/ProjectFile.h>
 #include <dawg/project/Project.h>
 
@@ -381,6 +382,77 @@ void testReplacement(const fs::path& root)
             "replacement publishes complete new content without leftover bytes");
     require(entryCount(root) == entries, "successful replacement leaves no temporary files");
 }
+
+void testProjectBundlerAndBranchingVersioning(const fs::path& root)
+{
+    ProjectBundlerService bundler;
+
+    // 1. Deterministic Project Bundler (.dawgpkg)
+    const auto packageDir = root / "MySong.dawgpkg";
+    const auto dummyAsset = root / "vocal_lead.wav";
+    {
+        std::ofstream out(dummyAsset, std::ios::binary);
+        out << "RIFF....WAVEfmt ....dataFAKEAUDIO123456";
+    }
+
+    ProjectSnapshot snap1 {2, 42, "Solar Flare", {{1, "Lead Vocal", true, true}}, {}, {}};
+    snap1.tempo = TempoSetting {128.0, 4, 4};
+
+    auto bundleResult = bundler.bundleProject(snap1, packageDir, {dummyAsset}, "AntigravityProducer");
+    require(bundleResult.has_value(), "bundleProject succeeded");
+    require(fs::exists(packageDir / "manifest.json"), "package manifest.json exists");
+    require(fs::exists(packageDir / "project.json"), "package project.json exists");
+    require(fs::exists(packageDir / "assets" / "vocal_lead.wav"), "bundled asset copied to assets directory");
+
+    auto unbundleResult = bundler.unbundleProject(packageDir);
+    require(unbundleResult.has_value(), "unbundleProject succeeded and verified integrity");
+    require(unbundleResult->name == "Solar Flare", "Unbundled project matches snapshot name");
+    require(unbundleResult->tracks.size() == 1, "Unbundled project has 1 track");
+    require(unbundleResult->tracks[0].name == "Lead Vocal", "Unbundled track name matches");
+
+    // 2. Branching & Commit Version History (Splice / Git style)
+    const std::string commit1 = bundler.commit("main", "Initial tracking pass", "Alice", snap1);
+    require(!commit1.empty(), "Commit on main branch created successfully");
+
+    require(bundler.createBranch("alternate-arrangement", commit1), "Create branch from commit");
+    ProjectSnapshot snap2 {2, 42, "Solar Flare (Alternate Drop)", {{1, "Lead Vocal", true, true}, {2, "Sub Bass", true, true}}, {}, {}};
+    snap2.tempo = TempoSetting {130.0, 4, 4};
+    const std::string commit2 = bundler.commit("alternate-arrangement", "Added heavy sub bass", "Bob", snap2);
+    require(!commit2.empty(), "Commit on alternate branch created successfully");
+
+    const auto branches = bundler.branches();
+    require(branches.size() >= 2, "At least 2 active branches");
+
+    // Verify checkout
+    const auto checkoutMain = bundler.checkout("main");
+    require(checkoutMain.has_value() && checkoutMain->name == "Solar Flare", "Checkout main branch restores snap1");
+
+    const auto checkoutAlt = bundler.checkout("alternate-arrangement");
+    require(checkoutAlt.has_value() && checkoutAlt->name == "Solar Flare (Alternate Drop)", "Checkout alternate branch restores snap2");
+
+    const auto mainHistory = bundler.commitHistory("main");
+    require(mainHistory.size() == 1, "Main branch has 1 commit");
+    require(mainHistory[0].commitId == commit1, "Main branch head commit matches");
+
+    const auto altHistory = bundler.commitHistory("alternate-arrangement");
+    require(altHistory.size() == 2, "Alternate branch has 2 commits (base + head)");
+
+    // 3. Lossless Stem Exporter Helpers
+    StemExportDescriptor stemDesc {
+        .trackIndex = 3,
+        .trackName = "SynthLead",
+        .preFx = false,
+        .measuredLufs = -18.0f,
+        .targetLufs = -14.0f,
+        .normalizeLoudness = true
+    };
+
+    const std::string stemFilename = ProjectBundlerService::formatStemFilename(stemDesc, 128.0, "Dmin");
+    require(stemFilename == "03_SynthLead_128bpm_Dmin_postFX_-14.0lufs.wav", "Formatted stem filename adheres to standard naming convention");
+
+    const float normGain = ProjectBundlerService::calculateLoudnessNormalizationGain(-18.0f, -14.0f);
+    require(std::abs(normGain - 1.58489f) < 0.01f, "Calculated +4 dB loudness normalization linear gain (~1.585)");
+}
 }
 
 int main()
@@ -394,5 +466,6 @@ int main()
     testRenameFailure(directory.root);
     testReplacement(directory.root);
     testVersionThreeFivePillarRoundTrip(directory.root);
-    std::puts("PASS: 8 persistence behavior tests");
+    testProjectBundlerAndBranchingVersioning(directory.root);
+    std::puts("PASS: 9 persistence behavior tests");
 }
