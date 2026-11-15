@@ -561,6 +561,33 @@ void TimelineView::drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bo
             g.fillEllipse(handleOutX - 3.5f, handleOutY - 3.5f, 7.0f, 7.0f);
             g.setColour(juce::Colours::black.withAlpha(0.6f));
             g.drawEllipse(handleOutX - 3.5f, handleOutY - 3.5f, 7.0f, 7.0f, 1.0f);
+
+            // Draw Warp Markers if warping enabled
+            if (clip.warpingEnabled)
+            {
+                // [WARP] badge
+                g.setColour(juce::Colour::fromRGB(255, 180, 50));
+                g.setFont(juce::FontOptions(9.0f).withStyle("Bold"));
+                g.drawText("[WARP]", clipBounds.getRight() - 52, clipBounds.getY() + 3, 48, 12, juce::Justification::topRight);
+
+                for (const auto& wm : clip.warpMarkers)
+                {
+                    const int wmPx = clipBounds.getX() + sampleToPixel(static_cast<std::int64_t>(wm.targetSample));
+                    if (wmPx >= clipBounds.getX() && wmPx <= clipBounds.getRight())
+                    {
+                        g.setColour(juce::Colour::fromRGB(255, 205, 60));
+                        g.drawVerticalLine(wmPx, static_cast<float>(clipBounds.getY() + 14), static_cast<float>(clipBounds.getBottom()));
+
+                        // Flag head
+                        juce::Path flag;
+                        flag.startNewSubPath(static_cast<float>(wmPx), static_cast<float>(clipBounds.getY() + 4));
+                        flag.lineTo(static_cast<float>(wmPx + 7), static_cast<float>(clipBounds.getY() + 8));
+                        flag.lineTo(static_cast<float>(wmPx), static_cast<float>(clipBounds.getY() + 12));
+                        flag.closeSubPath();
+                        g.fillPath(flag);
+                    }
+                }
+            }
         }
 
         drawAutomationOverlay(g, track, currentY, getWidth() - m_headerWidth);
@@ -709,6 +736,36 @@ void TimelineView::drawAutomationOverlay(juce::Graphics& g, const project::Track
 
     g.setColour(juce::Colour::fromRGB(0, 225, 255).withAlpha(0.85f));
     g.strokePath(curvePath, juce::PathStrokeType(2.0f));
+
+    // Draw Bézier Curvature Tension Handles between points
+    for (std::size_t p = 0; p + 1 < points.size(); ++p)
+    {
+        const auto& p1 = points[p];
+        const auto& p2 = points[p + 1];
+        const float x1 = static_cast<float>(m_headerWidth + sampleToPixel(static_cast<std::int64_t>(p1.samplePosition)));
+        const float y1 = valToY(p1.value);
+        const float x2 = static_cast<float>(m_headerWidth + sampleToPixel(static_cast<std::int64_t>(p2.samplePosition)));
+        const float y2 = valToY(p2.value);
+
+        float shapedT = 0.5f;
+        if (std::abs(p1.curveTension) > 0.001f)
+        {
+            if (p1.curveTension > 0.0f)
+                shapedT = std::pow(0.5f, 1.0f + p1.curveTension * 3.0f);
+            else
+                shapedT = 1.0f - std::pow(0.5f, 1.0f - p1.curveTension * 3.0f);
+        }
+        const float midX = (x1 + x2) * 0.5f;
+        const float midY = y1 + shapedT * (y2 - y1);
+
+        if (midX >= m_headerWidth && midX <= m_headerWidth + laneWidth)
+        {
+            g.setColour(juce::Colour::fromRGB(80, 225, 255));
+            g.fillEllipse(midX - 3.5f, midY - 3.5f, 7.0f, 7.0f);
+            g.setColour(juce::Colour::fromRGB(15, 20, 26));
+            g.drawEllipse(midX - 3.5f, midY - 3.5f, 7.0f, 7.0f, 1.2f);
+        }
+    }
 
     for (const auto& pt : points)
     {
@@ -965,7 +1022,7 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
     // Automation interactions
     if (m_showAutomation && e.x >= m_headerWidth)
     {
-        const int laneIdx = (e.y - m_rulerHeight) / m_trackLaneHeight;
+        const int laneIdx = (e.y - tracksTopY()) / m_trackLaneHeight;
         if (laneIdx >= 0 && laneIdx < static_cast<int>(m_model.project.tracks.size()))
         {
             const auto& track = m_model.project.tracks[static_cast<std::size_t>(laneIdx)];
@@ -979,7 +1036,7 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                 }
             }
 
-            const int laneTop = m_rulerHeight + laneIdx * m_trackLaneHeight + 6;
+            const int laneTop = tracksTopY() + laneIdx * m_trackLaneHeight + 6;
             const int laneH = m_trackLaneHeight - 12;
 
             if (trackLane != nullptr)
@@ -993,6 +1050,38 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                         m_dragMode = DragMode::moveAutomationPoint;
                         m_dragAutomationLaneId = trackLane->id;
                         m_dragAutomationPointId = pt.id;
+                        m_dragStartPos = e.getPosition();
+                        return;
+                    }
+                }
+
+                // Check Bézier curvature tension handles
+                for (std::size_t p = 0; p + 1 < trackLane->points.size(); ++p)
+                {
+                    const auto& p1 = trackLane->points[p];
+                    const auto& p2 = trackLane->points[p + 1];
+                    const float x1 = static_cast<float>(m_headerWidth + sampleToPixel(static_cast<std::int64_t>(p1.samplePosition)));
+                    const float y1 = static_cast<float>(laneTop + laneH) - p1.value * static_cast<float>(laneH);
+                    const float x2 = static_cast<float>(m_headerWidth + sampleToPixel(static_cast<std::int64_t>(p2.samplePosition)));
+                    const float y2 = static_cast<float>(laneTop + laneH) - p2.value * static_cast<float>(laneH);
+
+                    float shapedT = 0.5f;
+                    if (std::abs(p1.curveTension) > 0.001f)
+                    {
+                        if (p1.curveTension > 0.0f)
+                            shapedT = std::pow(0.5f, 1.0f + p1.curveTension * 3.0f);
+                        else
+                            shapedT = 1.0f - std::pow(0.5f, 1.0f - p1.curveTension * 3.0f);
+                    }
+                    const float midX = (x1 + x2) * 0.5f;
+                    const float midY = y1 + shapedT * (y2 - y1);
+
+                    if (std::abs(static_cast<float>(e.x) - midX) <= 8.0f && std::abs(static_cast<float>(e.y) - midY) <= 8.0f)
+                    {
+                        m_dragMode = DragMode::dragTensionHandle;
+                        m_dragAutomationLaneId = trackLane->id;
+                        m_dragAutomationPointId = p1.id;
+                        m_dragInitialTension = p1.curveTension;
                         m_dragStartPos = e.getPosition();
                         return;
                     }
@@ -1051,12 +1140,107 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
     const auto* clip = findClipAt(e.getPosition(), laneY);
     if (clip != nullptr)
     {
+        if (e.mods.isRightButtonDown())
+        {
+            const auto clipId = clip->id;
+            juce::PopupMenu menu;
+            menu.addItem(1, "Auto-Fit Loop to BPM (WSOLA Time Stretch)");
+            menu.addItem(2, clip->warpingEnabled ? "Disable Audio Warping" : "Enable Audio Warping");
+            menu.addItem(3, "Add Warp Marker at Cursor");
+            menu.addSeparator();
+            menu.addItem(4, "Split Clip at Cursor (S)");
+            menu.addItem(5, "Delete Clip");
+
+            menu.showMenuAsync(juce::PopupMenu::Options {}, [this, clipId, mouseX = e.x](int result) {
+                if (result == 1)
+                {
+                    // WSOLA BPM Auto-fit: snap loop length to nearest whole bar
+                    const double bpm = m_model.project.tempo.bpm > 0.0 ? m_model.project.tempo.bpm : 120.0;
+                    constexpr double sr = 48000.0;
+                    const double barSamples = (sr * 60.0 * 4.0) / bpm;
+                    for (auto& c : m_model.project.clips)
+                    {
+                        if (c.id == clipId)
+                        {
+                            const double numBars = std::max(1.0, std::round(static_cast<double>(c.lengthSamples) / barSamples));
+                            c.lengthSamples = static_cast<std::uint64_t>(numBars * barSamples);
+                            c.warpingEnabled = true;
+                            if (m_callbacks.commandHandler)
+                            {
+                                m_callbacks.commandHandler(project::MoveClip {
+                                    .id = c.id,
+                                    .newTrackId = c.trackId,
+                                    .newStartSample = c.startSample
+                                });
+                            }
+                            repaint();
+                            break;
+                        }
+                    }
+                }
+                else if (result == 2)
+                {
+                    for (auto& c : m_model.project.clips)
+                    {
+                        if (c.id == clipId)
+                        {
+                            c.warpingEnabled = ! c.warpingEnabled;
+                            repaint();
+                            break;
+                        }
+                    }
+                }
+                else if (result == 3)
+                {
+                    for (auto& c : m_model.project.clips)
+                    {
+                        if (c.id == clipId)
+                        {
+                            const auto localSample = static_cast<std::uint64_t>(std::max<std::int64_t>(0, pixelToSample(mouseX) - static_cast<std::int64_t>(c.startSample)));
+                            const auto markerId = static_cast<std::uint32_t>(c.warpMarkers.size() + 1);
+                            c.warpingEnabled = true;
+                            c.warpMarkers.push_back(project::WarpMarker { markerId, localSample, localSample });
+                            repaint();
+                            break;
+                        }
+                    }
+                }
+                else if (result == 4 && m_callbacks.commandHandler)
+                {
+                    const auto splitSample = snapSample(pixelToSample(mouseX));
+                    m_callbacks.commandHandler(project::SplitClip {clipId, static_cast<std::uint64_t>(splitSample)});
+                }
+                else if (result == 5 && m_callbacks.commandHandler)
+                {
+                    m_callbacks.commandHandler(project::RemoveClip {clipId});
+                }
+            });
+            return;
+        }
+
         m_selectedClipId = clip->id;
         m_draggedClipId = clip->id;
         m_dragInitialClip = *clip;
         m_dragStartPos = e.getPosition();
 
         const auto bounds = getClipBounds(*clip, laneY);
+
+        // Check warp markers
+        if (clip->warpingEnabled)
+        {
+            for (std::size_t wi = 0; wi < clip->warpMarkers.size(); ++wi)
+            {
+                const int wmPx = bounds.getX() + sampleToPixel(static_cast<std::int64_t>(clip->warpMarkers[wi].targetSample));
+                if (std::abs(e.x - wmPx) <= 6)
+                {
+                    m_dragMode = DragMode::dragWarpMarker;
+                    m_dragWarpMarkerIndex = wi;
+                    repaint();
+                    return;
+                }
+            }
+        }
+
         if (e.mods.isAltDown())
         {
             m_dragMode = DragMode::slipEdit;
@@ -1147,6 +1331,43 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
             m_callbacks.commandHandler(project::MoveAutomationPoint {
                 m_dragAutomationLaneId, m_dragAutomationPointId, newSample, newVal, 0.0f
             });
+        }
+        return;
+    }
+
+    if (m_dragMode == DragMode::dragTensionHandle)
+    {
+        const float delta = static_cast<float>(m_dragStartPos.y - e.y) * 0.02f;
+        const float newTension = std::clamp(m_dragInitialTension + delta, -1.0f, 1.0f);
+        for (auto& lane : m_model.project.automationLanes)
+        {
+            if (lane.id == m_dragAutomationLaneId)
+            {
+                for (auto& pt : lane.points)
+                {
+                    if (pt.id == m_dragAutomationPointId)
+                    {
+                        pt.curveTension = newTension;
+                        repaint();
+                        return;
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    if (m_dragMode == DragMode::dragWarpMarker)
+    {
+        for (auto& cl : m_model.project.clips)
+        {
+            if (cl.id == m_draggedClipId && m_dragWarpMarkerIndex < cl.warpMarkers.size())
+            {
+                const auto newTarget = snapSample(pixelToSample(e.x) - static_cast<std::int64_t>(cl.startSample));
+                cl.warpMarkers[m_dragWarpMarkerIndex].targetSample = static_cast<std::uint64_t>(std::max<std::int64_t>(0, newTarget));
+                repaint();
+                return;
+            }
         }
         return;
     }

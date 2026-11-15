@@ -17,6 +17,7 @@ add_library(dawg_engine_core STATIC
     src/clap/ClapPluginNode.cpp
     src/dsp/BrickwallLimiterNode.cpp
     src/dsp/DynamicsCompressorNode.cpp
+    src/dsp/DrumPadSamplerNode.cpp
     src/dsp/ParametricEQNode.cpp
     src/dsp/TnhcDelayNode.cpp
     src/dsp/TnhcReverbNode.cpp

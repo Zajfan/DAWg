@@ -82,6 +82,8 @@ private:
         fadeLeft,
         fadeRight,
         moveAutomationPoint,
+        dragTensionHandle,
+        dragWarpMarker,
         swipeComping
     };
 
@@ -118,6 +120,8 @@ private:
     std::uint32_t m_dragFadeOutSamples {0};
     project::AutomationLaneId m_dragAutomationLaneId {0};
     project::AutomationPointId m_dragAutomationPointId {0};
+    float m_dragInitialTension {0.0f};
+    std::size_t m_dragWarpMarkerIndex {0};
     project::TrackId m_compTrackId {0};
     std::uint32_t m_compTakeId {0};
     std::int64_t m_compStartSample {0};

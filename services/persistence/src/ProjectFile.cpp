@@ -234,6 +234,7 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
                 else if (typeStr == "clapPlugin") desc.type = project::DspNodeType::clapPlugin;
                 else if (typeStr == "tnhcReverb") desc.type = project::DspNodeType::tnhcReverb;
                 else if (typeStr == "tnhcDelay") desc.type = project::DspNodeType::tnhcDelay;
+                else if (typeStr == "drumPadSampler") desc.type = project::DspNodeType::drumPadSampler;
                 desc.bypassed = ins.at("bypassed").get<bool>();
                 desc.name = ins.at("name").get<std::string>();
                 if (ins.contains("pluginId")) desc.pluginId = ins.at("pluginId").get<std::string>();
@@ -551,6 +552,7 @@ std::expected<void, ProjectFileError> saveProject(
                         case project::DspNodeType::clapPlugin: typeStr = "clapPlugin"; break;
                         case project::DspNodeType::tnhcReverb: typeStr = "tnhcReverb"; break;
                         case project::DspNodeType::tnhcDelay: typeStr = "tnhcDelay"; break;
+                        case project::DspNodeType::drumPadSampler: typeStr = "drumPadSampler"; break;
                         }
                         inserts.push_back({
                             {"slotIndex", ins.slotIndex},

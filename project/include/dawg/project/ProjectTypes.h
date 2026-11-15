@@ -124,7 +124,8 @@ enum class DspNodeType : std::uint8_t
     tnhcSynth,
     clapPlugin,
     tnhcReverb,
-    tnhcDelay
+    tnhcDelay,
+    drumPadSampler
 };
 
 struct DspNodeDescriptor

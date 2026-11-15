@@ -2,11 +2,13 @@
 
 #include "ChannelRackView.h"
 #include "DragSplitterBar.h"
+#include "DrumPadSamplerView.h"
 #include "EditorViewModel.h"
 #include "FloatingPanelWindow.h"
 #include "MixerPanel.h"
 #include "PianoRollView.h"
 #include "PluginBrowserPanel.h"
+#include "RoutingMatrixView.h"
 #include "SampleBrowserPanel.h"
 #include "SessionMatrixView.h"
 #include "TimelineView.h"
@@ -62,7 +64,9 @@ public:
     {
         mixer,
         pianoRoll,
-        channelRack
+        channelRack,
+        drumSampler,
+        routingMatrix
     };
 
     enum class DetachablePanel : std::uint8_t
@@ -71,6 +75,8 @@ public:
         pianoRoll,
         channelRack,
         sessionMatrix,
+        drumSampler,
+        routingMatrix,
         browser
     };
 
@@ -162,6 +168,8 @@ private:
     juce::TextButton m_tabMixerButton {"Mixer Console [M]"};
     juce::TextButton m_tabPianoRollButton {"Piano Roll [P]"};
     juce::TextButton m_tabChannelRackButton {"Channel Rack [R]"};
+    juce::TextButton m_tabDrumSamplerButton {"Drum Sampler [D]"};
+    juce::TextButton m_tabRoutingMatrixButton {"Patchbay [X]"};
     juce::TextButton m_tabBrowserButton {"Browser [B]"};
     juce::TextButton m_detachDockButton {"↗"};
     juce::TextButton m_maximizeDockButton {"⛶"};
@@ -169,6 +177,8 @@ private:
     MixerPanel m_mixerPanel;
     PianoRollView m_pianoRollView;
     ChannelRackView m_channelRackView;
+    DrumPadSamplerView m_drumSamplerView;
+    RoutingMatrixView m_routingMatrixView;
     std::unique_ptr<PluginBrowserPanel> m_pluginBrowser;
     std::unique_ptr<SampleBrowserPanel> m_sampleBrowser;
     juce::TextButton m_sidebarTabPluginsButton {"Plugins"};
@@ -180,6 +190,8 @@ private:
     std::unique_ptr<FloatingPanelWindow> m_floatingMixer;
     std::unique_ptr<FloatingPanelWindow> m_floatingPianoRoll;
     std::unique_ptr<FloatingPanelWindow> m_floatingChannelRack;
+    std::unique_ptr<FloatingPanelWindow> m_floatingDrumSampler;
+    std::unique_ptr<FloatingPanelWindow> m_floatingRoutingMatrix;
     std::unique_ptr<FloatingPanelWindow> m_floatingBrowser;
     std::unique_ptr<FloatingPanelWindow> m_floatingSessionMatrix;
 

@@ -27,6 +27,11 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/SampleBrowserPanel.h
     ../../ui/shell/ChannelRackView.cpp
     ../../ui/shell/ChannelRackView.h
+    ../../ui/shell/DrumPadSamplerView.cpp
+    ../../ui/shell/DrumPadSamplerView.h
+    ../../ui/shell/RoutingMatrixView.cpp
+    ../../ui/shell/RoutingMatrixView.h
+    ../../ui/shell/MidiLearnManager.h
     ../../ui/shell/SessionMatrixView.cpp
     ../../ui/shell/SessionMatrixView.h
     ../../ui/shell/DragSplitterBar.h

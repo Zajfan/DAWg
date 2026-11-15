@@ -15,6 +15,7 @@
 #include <dawg/engine/TempoMap.h>
 #include <dawg/engine/WorkStealingScheduler.h>
 #include <dawg/engine/dsp/BrickwallLimiterNode.h>
+#include <dawg/engine/dsp/DrumPadSamplerNode.h>
 #include <dawg/engine/dsp/DynamicsCompressorNode.h>
 #include <dawg/engine/dsp/ParametricEQNode.h>
 #include <dawg/engine/dsp/TnhcDelayNode.h>
@@ -1839,6 +1840,80 @@ void testDspGraphExternalSidechainRoutingWithPdc()
         require(! std::isnan(outR[i]) && ! std::isinf(outR[i]), "Sidechain out is finite");
     }
 }
+
+void testDrumPadSamplerNodePadsChokeAndSlicing()
+{
+    using dawg::engine::DrumPadSamplerNode;
+
+    DrumPadSamplerNode sampler;
+    require(sampler.prepare(48000.0, 128, 2), "DrumPadSamplerNode prepares at 48kHz stereo");
+
+    // 1. Verify 16 factory pads
+    require(sampler.pad(0).name == "808 Kick", "Pad 0 is 808 Kick");
+    require(sampler.pad(5).name == "Closed Hat", "Pad 5 is Closed Hat");
+    require(sampler.pad(6).name == "Open Hat", "Pad 6 is Open Hat");
+    require(sampler.pad(5).chokeGroup == 1, "Pad 5 belongs to choke group 1");
+    require(sampler.pad(6).chokeGroup == 1, "Pad 6 belongs to choke group 1");
+
+    // 2. Trigger Pad 0 and process
+    sampler.triggerPad(0, 0.9f);
+    require(sampler.isPadActive(0), "Pad 0 is active after trigger");
+
+    std::array<float, 128> bufL {};
+    std::array<float, 128> bufR {};
+    std::array<float*, 2> channels {bufL.data(), bufR.data()};
+
+    dawg::engine::ProcessContext ctx {
+        .audio = dawg::engine::AudioBufferView {channels.data(), 2, 128},
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+
+    sampler.process(ctx);
+
+    float energyL = 0.0f;
+    for (std::size_t i = 0; i < 128; ++i)
+    {
+        energyL += std::abs(bufL[i]);
+        require(! std::isnan(bufL[i]) && ! std::isinf(bufL[i]), "Sampler sample is finite");
+    }
+    require(energyL > 0.01f, "Triggering pad produces audible audio");
+
+    // 3. Test Choke Group: Open Hat then Closed Hat
+    sampler.triggerPad(6, 0.8f); // Open hat
+    require(sampler.isPadActive(6), "Open hat is active");
+
+    std::fill(bufL.begin(), bufL.end(), 0.0f);
+    std::fill(bufR.begin(), bufR.end(), 0.0f);
+    sampler.process(ctx);
+
+    // Choke by hitting Closed Hat
+    sampler.triggerPad(5, 0.9f);
+    require(sampler.isPadActive(5), "Closed hat is active");
+
+    // 4. Test Transient Slicing
+    std::vector<float> syntheticBreak(48000 * 2, 0.0f); // 2 seconds
+    // Place 4 distinct impulse bursts
+    for (int t = 0; t < 4; ++t)
+    {
+        const std::size_t onset = static_cast<std::size_t>(t * 12000);
+        for (std::size_t j = 0; j < 500 && (onset + j) < syntheticBreak.size(); ++j)
+        {
+            syntheticBreak[onset + j] = 0.8f * std::sin(static_cast<float>(j) * 0.1f);
+        }
+    }
+
+    sampler.sliceSampleAcrossPads(syntheticBreak.data(), syntheticBreak.size(), 48000.0, 16);
+    require(! sampler.pad(0).sampleL.empty(), "Pad 0 received slice data");
+    require(! sampler.pad(1).sampleL.empty(), "Pad 1 received slice data");
+
+    // 5. Test MIDI Note-On mapping: Note 36 (C1) -> Pad 0
+    sampler.stopAll();
+    sampler.noteOn(36, 0.75f);
+    require(sampler.isPadActive(0), "MIDI Note 36 activates Pad 0");
+    sampler.noteOff(36);
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -1958,4 +2033,5 @@ int main()
     testTnhcReverbNodeImpulseAndDecay();
     testTnhcDelayNodePingPongAndSync();
     testDspGraphExternalSidechainRoutingWithPdc();
+    testDrumPadSamplerNodePadsChokeAndSlicing();
 }

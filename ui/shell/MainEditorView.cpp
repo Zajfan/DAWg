@@ -116,6 +116,8 @@ MainEditorView::MainEditorView(EditorViewModel model,
     , m_mixerPanel(m_commandHandler, m_transportCallbacks.setMasterLimiter)
     , m_pianoRollView(m_commandHandler)
     , m_channelRackView(m_commandHandler, m_transportCallbacks.audition)
+    , m_drumSamplerView(m_commandHandler, m_transportCallbacks.audition)
+    , m_routingMatrixView(m_commandHandler, nullptr)
     , m_dockSplitter(DragSplitterBar::Orientation::horizontal, [this](const int delta) {
         if (! m_dockMaximized)
         {
@@ -149,6 +151,14 @@ MainEditorView::MainEditorView(EditorViewModel model,
     m_tabChannelRackButton.onClick = [this] { setDockMode(BottomDockMode::channelRack); };
     addAndMakeVisible(m_tabChannelRackButton);
 
+    m_tabDrumSamplerButton.setClickingTogglesState(false);
+    m_tabDrumSamplerButton.onClick = [this] { setDockMode(BottomDockMode::drumSampler); };
+    addAndMakeVisible(m_tabDrumSamplerButton);
+
+    m_tabRoutingMatrixButton.setClickingTogglesState(false);
+    m_tabRoutingMatrixButton.onClick = [this] { setDockMode(BottomDockMode::routingMatrix); };
+    addAndMakeVisible(m_tabRoutingMatrixButton);
+
     m_tabBrowserButton.setClickingTogglesState(false);
     m_tabBrowserButton.onClick = [this] { togglePluginBrowser(); };
     addAndMakeVisible(m_tabBrowserButton);
@@ -162,6 +172,10 @@ MainEditorView::MainEditorView(EditorViewModel model,
             detachPanel(DetachablePanel::pianoRoll);
         else if (m_dockMode == BottomDockMode::channelRack)
             detachPanel(DetachablePanel::channelRack);
+        else if (m_dockMode == BottomDockMode::drumSampler)
+            detachPanel(DetachablePanel::drumSampler);
+        else if (m_dockMode == BottomDockMode::routingMatrix)
+            detachPanel(DetachablePanel::routingMatrix);
     };
     addAndMakeVisible(m_detachDockButton);
 
@@ -176,6 +190,8 @@ MainEditorView::MainEditorView(EditorViewModel model,
     addAndMakeVisible(m_mixerPanel);
     addChildComponent(m_pianoRollView);
     addChildComponent(m_channelRackView);
+    addChildComponent(m_drumSamplerView);
+    addChildComponent(m_routingMatrixView);
 
     m_pluginBrowser = std::make_unique<PluginBrowserPanel>(
         [this](const plugins::PluginDescriptor& plugin, bool createNewTrack) {
@@ -313,14 +329,28 @@ void MainEditorView::setDockMode(BottomDockMode mode)
         m_floatingChannelRack->toFront(true);
         return;
     }
+    if (m_dockMode == BottomDockMode::drumSampler && m_floatingDrumSampler)
+    {
+        m_floatingDrumSampler->toFront(true);
+        return;
+    }
+    if (m_dockMode == BottomDockMode::routingMatrix && m_floatingRoutingMatrix)
+    {
+        m_floatingRoutingMatrix->toFront(true);
+        return;
+    }
 
     const bool isMixer = (m_dockMode == BottomDockMode::mixer);
     const bool isPianoRoll = (m_dockMode == BottomDockMode::pianoRoll);
     const bool isChannelRack = (m_dockMode == BottomDockMode::channelRack);
+    const bool isDrumSampler = (m_dockMode == BottomDockMode::drumSampler);
+    const bool isRoutingMatrix = (m_dockMode == BottomDockMode::routingMatrix);
 
     if (! m_floatingMixer) m_mixerPanel.setVisible(isMixer);
     if (! m_floatingPianoRoll) m_pianoRollView.setVisible(isPianoRoll);
     if (! m_floatingChannelRack) m_channelRackView.setVisible(isChannelRack);
+    if (! m_floatingDrumSampler) m_drumSamplerView.setVisible(isDrumSampler);
+    if (! m_floatingRoutingMatrix) m_routingMatrixView.setVisible(isRoutingMatrix);
 
     m_tabMixerButton.setColour(juce::TextButton::buttonColourId,
                                isMixer ? juce::Colour::fromRGB(45, 95, 145) : juce::Colour::fromRGB(28, 30, 36));
@@ -328,6 +358,10 @@ void MainEditorView::setDockMode(BottomDockMode mode)
                                    isPianoRoll ? juce::Colour::fromRGB(120, 60, 160) : juce::Colour::fromRGB(28, 30, 36));
     m_tabChannelRackButton.setColour(juce::TextButton::buttonColourId,
                                      isChannelRack ? juce::Colour::fromRGB(190, 80, 50) : juce::Colour::fromRGB(28, 30, 36));
+    m_tabDrumSamplerButton.setColour(juce::TextButton::buttonColourId,
+                                     isDrumSampler ? juce::Colour::fromRGB(210, 140, 40) : juce::Colour::fromRGB(28, 30, 36));
+    m_tabRoutingMatrixButton.setColour(juce::TextButton::buttonColourId,
+                                       isRoutingMatrix ? juce::Colour::fromRGB(110, 50, 150) : juce::Colour::fromRGB(28, 30, 36));
     resized();
 }
 
@@ -417,6 +451,38 @@ void MainEditorView::detachPanel(DetachablePanel panel)
         }
         break;
 
+    case DetachablePanel::drumSampler:
+        if (! m_floatingDrumSampler)
+        {
+            removeChildComponent(&m_drumSamplerView);
+            m_floatingDrumSampler = std::make_unique<FloatingPanelWindow>(
+                "Drum Pad Sampler - DAWg",
+                &m_drumSamplerView,
+                [this] { reDockPanel(DetachablePanel::drumSampler); });
+
+            m_floatingDrumSampler->setBounds(150, 150, 860, 420);
+            m_floatingDrumSampler->setVisible(true);
+            m_tabDrumSamplerButton.setButtonText("Drum Sampler [↙]");
+            setDockMode(m_dockMode == BottomDockMode::drumSampler ? BottomDockMode::mixer : m_dockMode);
+        }
+        break;
+
+    case DetachablePanel::routingMatrix:
+        if (! m_floatingRoutingMatrix)
+        {
+            removeChildComponent(&m_routingMatrixView);
+            m_floatingRoutingMatrix = std::make_unique<FloatingPanelWindow>(
+                "Routing Matrix & Patchbay - DAWg",
+                &m_routingMatrixView,
+                [this] { reDockPanel(DetachablePanel::routingMatrix); });
+
+            m_floatingRoutingMatrix->setBounds(160, 160, 820, 400);
+            m_floatingRoutingMatrix->setVisible(true);
+            m_tabRoutingMatrixButton.setButtonText("Patchbay [↙]");
+            setDockMode(m_dockMode == BottomDockMode::routingMatrix ? BottomDockMode::mixer : m_dockMode);
+        }
+        break;
+
     case DetachablePanel::browser:
         break;
     }
@@ -467,6 +533,26 @@ void MainEditorView::reDockPanel(DetachablePanel panel)
         }
         break;
 
+    case DetachablePanel::drumSampler:
+        if (m_floatingDrumSampler)
+        {
+            m_floatingDrumSampler.reset();
+            addChildComponent(m_drumSamplerView);
+            m_tabDrumSamplerButton.setButtonText("Drum Sampler [D]");
+            setDockMode(BottomDockMode::drumSampler);
+        }
+        break;
+
+    case DetachablePanel::routingMatrix:
+        if (m_floatingRoutingMatrix)
+        {
+            m_floatingRoutingMatrix.reset();
+            addChildComponent(m_routingMatrixView);
+            m_tabRoutingMatrixButton.setButtonText("Patchbay [X]");
+            setDockMode(BottomDockMode::routingMatrix);
+        }
+        break;
+
     case DetachablePanel::browser:
         break;
     }
@@ -480,6 +566,8 @@ void MainEditorView::reDockAllPanels()
     reDockPanel(DetachablePanel::pianoRoll);
     reDockPanel(DetachablePanel::channelRack);
     reDockPanel(DetachablePanel::sessionMatrix);
+    reDockPanel(DetachablePanel::drumSampler);
+    reDockPanel(DetachablePanel::routingMatrix);
 }
 
 bool MainEditorView::isPanelDetached(DetachablePanel panel) const noexcept
@@ -490,7 +578,9 @@ bool MainEditorView::isPanelDetached(DetachablePanel panel) const noexcept
     case DetachablePanel::pianoRoll: return m_floatingPianoRoll != nullptr;
     case DetachablePanel::channelRack: return m_floatingChannelRack != nullptr;
     case DetachablePanel::sessionMatrix: return m_floatingSessionMatrix != nullptr;
-    case DetachablePanel::browser: return m_floatingBrowser != nullptr;
+    case DetachablePanel::drumSampler: return m_floatingDrumSampler != nullptr;
+    case DetachablePanel::routingMatrix: return m_floatingRoutingMatrix != nullptr;
+    case DetachablePanel::browser: return false;
     }
     return false;
 }
@@ -609,6 +699,8 @@ void MainEditorView::setViewModel(EditorViewModel model)
     m_mixerPanel.setViewModel(m_model);
     m_pianoRollView.setViewModel(m_model);
     m_channelRackView.setViewModel(m_model);
+    m_drumSamplerView.setViewModel(m_model);
+    m_routingMatrixView.setViewModel(m_model);
 }
 
 void MainEditorView::setSnapshot(project::ProjectSnapshot snapshot)
@@ -620,6 +712,8 @@ void MainEditorView::setSnapshot(project::ProjectSnapshot snapshot)
     m_mixerPanel.setViewModel(m_model);
     m_pianoRollView.setViewModel(m_model);
     m_channelRackView.setViewModel(m_model);
+    m_drumSamplerView.setViewModel(m_model);
+    m_routingMatrixView.setViewModel(m_model);
 }
 
 void MainEditorView::setWaveformCache(media::WaveformCache* cache)
@@ -933,6 +1027,16 @@ bool MainEditorView::keyPressed(const juce::KeyPress& key)
         setDockMode(BottomDockMode::channelRack);
         return true;
     }
+    if (key.getKeyCode() == 'D' || key.getKeyCode() == 'd')
+    {
+        setDockMode(BottomDockMode::drumSampler);
+        return true;
+    }
+    if (key.getKeyCode() == 'X' || key.getKeyCode() == 'x')
+    {
+        setDockMode(BottomDockMode::routingMatrix);
+        return true;
+    }
     if (key.getKeyCode() == 'A' || key.getKeyCode() == 'a')
     {
         m_timelineView.toggleAutomation();
@@ -1029,7 +1133,7 @@ void MainEditorView::resized()
     }
 
     // 4. Bottom Dock Area (Variable Height, Collapsible, or Maximized)
-    const bool allDockedPanelsDetached = (m_floatingMixer && m_floatingPianoRoll && m_floatingChannelRack);
+    const bool allDockedPanelsDetached = (m_floatingMixer && m_floatingPianoRoll && m_floatingChannelRack && m_floatingDrumSampler && m_floatingRoutingMatrix);
     if (! allDockedPanelsDetached)
     {
         const int actualDockHeight = m_dockMaximized ? (area.getHeight() - 30) : m_dockHeight;
@@ -1039,10 +1143,12 @@ void MainEditorView::resized()
         m_dockSplitter.setBounds(area.removeFromBottom(5));
 
         auto tabHeader = bottomDockArea.removeFromTop(24);
-        m_tabMixerButton.setBounds(tabHeader.removeFromLeft(120).reduced(2, 2));
-        m_tabPianoRollButton.setBounds(tabHeader.removeFromLeft(110).reduced(2, 2));
-        m_tabChannelRackButton.setBounds(tabHeader.removeFromLeft(130).reduced(2, 2));
-        m_tabBrowserButton.setBounds(tabHeader.removeFromLeft(100).reduced(2, 2));
+        m_tabMixerButton.setBounds(tabHeader.removeFromLeft(110).reduced(2, 2));
+        m_tabPianoRollButton.setBounds(tabHeader.removeFromLeft(105).reduced(2, 2));
+        m_tabChannelRackButton.setBounds(tabHeader.removeFromLeft(115).reduced(2, 2));
+        m_tabDrumSamplerButton.setBounds(tabHeader.removeFromLeft(115).reduced(2, 2));
+        m_tabRoutingMatrixButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
+        m_tabBrowserButton.setBounds(tabHeader.removeFromLeft(85).reduced(2, 2));
 
         m_maximizeDockButton.setBounds(tabHeader.removeFromRight(26).reduced(2, 2));
         m_detachDockButton.setBounds(tabHeader.removeFromRight(26).reduced(2, 2));
@@ -1050,6 +1156,8 @@ void MainEditorView::resized()
         if (! m_floatingMixer) m_mixerPanel.setBounds(bottomDockArea);
         if (! m_floatingPianoRoll) m_pianoRollView.setBounds(bottomDockArea);
         if (! m_floatingChannelRack) m_channelRackView.setBounds(bottomDockArea);
+        if (! m_floatingDrumSampler) m_drumSamplerView.setBounds(bottomDockArea);
+        if (! m_floatingRoutingMatrix) m_routingMatrixView.setBounds(bottomDockArea);
     }
     else
     {
