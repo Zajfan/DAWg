@@ -2,6 +2,7 @@
 
 #include <dawg/engine/AudioBufferView.h>
 #include <dawg/engine/ProcessorNode.h>
+#include <dawg/engine/dsp/MusicalScale.h>
 
 #include <algorithm>
 #include <array>
@@ -12,18 +13,6 @@
 #include <vector>
 
 namespace dawg::engine::dsp {
-
-enum class MusicalScale : std::uint8_t
-{
-    chromatic,
-    major,
-    minor,
-    harmonicMinor,
-    dorian,
-    mixolydian,
-    pentatonicMinor,
-    pentatonicMajor
-};
 
 struct DetectedPitchInfo
 {

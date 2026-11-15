@@ -1,6 +1,7 @@
 #pragma once
 
 #include "JuceAudioCallbackAdapter.h"
+#include "LowLatencyAudioDriver.h"
 
 #include <dawg/engine/MidiControllerManager.h>
 #include <juce_audio_devices/juce_audio_devices.h>
@@ -34,6 +35,8 @@ public:
     void triggerAuditionNote(std::uint8_t pitch, std::uint8_t velocity, bool isNoteOn) noexcept;
     [[nodiscard]] dawg::engine::MidiControllerManager& controllerManager() noexcept { return m_controllerManager; }
     [[nodiscard]] ::juce::AudioDeviceManager& deviceManager() noexcept { return m_deviceManager; }
+    [[nodiscard]] LowLatencyAudioDriver& lowLatencyDriver() noexcept { return m_lowLatencyDriver; }
+    [[nodiscard]] const LowLatencyAudioDriver& lowLatencyDriver() const noexcept { return m_lowLatencyDriver; }
 
     [[nodiscard]] bool isDeviceReady() const noexcept;
     [[nodiscard]] double sampleRate() const noexcept;
@@ -54,6 +57,7 @@ private:
     JuceAudioCallbackAdapter m_callbackAdapter;
     ::juce::AudioDeviceManager m_deviceManager;
     dawg::engine::MidiControllerManager m_controllerManager;
+    LowLatencyAudioDriver m_lowLatencyDriver;
     MidiControlCallback m_midiControlCallback;
     MidiNoteCallback m_midiNoteCallback;
 

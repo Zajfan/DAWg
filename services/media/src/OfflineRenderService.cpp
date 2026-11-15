@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <numbers>
@@ -33,25 +34,55 @@ float calculateClipEnvelope(const std::uint64_t offset, const std::uint64_t tota
 void OfflineRenderService::applyTpdfDither(float* samples, const std::size_t count,
                                            std::uint32_t& rngState) noexcept
 {
-    if (samples == nullptr || count == 0)
+    applyNoiseShapedDither(samples, count, rngState, DitherNoiseShaping::flatTpdf);
+}
+
+void OfflineRenderService::applyNoiseShapedDither(
+    float* samples,
+    const std::size_t count,
+    std::uint32_t& rngState,
+    const DitherNoiseShaping shaping) noexcept
+{
+    if (samples == nullptr || count == 0 || shaping == DitherNoiseShaping::none)
         return;
 
     constexpr float scale = 32767.0f;
     constexpr float invScale = 1.0f / scale;
 
+    // Filter coefficients for error feedback noise shaping
+    float a1 = 0.0f;
+    float a2 = 0.0f;
+    if (shaping == DitherNoiseShaping::lipshitz)
+    {
+        a1 = 1.62f;
+        a2 = -0.71f;
+    }
+    else if (shaping == DitherNoiseShaping::psychoacoustic)
+    {
+        a1 = 2.03f;
+        a2 = -1.15f;
+    }
+
+    float e1 = 0.0f;
+    float e2 = 0.0f;
+
     for (std::size_t i = 0; i < count; ++i)
     {
-        // Two uniform random variables subtracted produce triangular PDF
         rngState = rngState * 1664525u + 1013904223u;
         const float r1 = static_cast<float>(rngState >> 16) / 65536.0f;
 
         rngState = rngState * 1664525u + 1013904223u;
         const float r2 = static_cast<float>(rngState >> 16) / 65536.0f;
 
-        const float ditherLsb = r1 - r2;
-        const float scaled = samples[i] * scale + ditherLsb;
-        const float clamped = std::clamp(std::round(scaled), -32768.0f, 32767.0f);
-        samples[i] = clamped * invScale;
+        const float ditherLsb = (r1 - r2);
+        const float noiseShapedInput = samples[i] * scale + ditherLsb - (a1 * e1 + a2 * e2);
+        const float quantized = std::clamp(std::round(noiseShapedInput), -32768.0f, 32767.0f);
+
+        // Update error history
+        e2 = e1;
+        e1 = quantized - noiseShapedInput;
+
+        samples[i] = quantized * invScale;
     }
 }
 
@@ -137,6 +168,10 @@ std::expected<void, MediaError> OfflineRenderService::renderPass(
                                      [](const project::Track& t) { return t.solo; });
 
     std::uint32_t ditherRng = 987654321u;
+    const auto startTime = std::chrono::steady_clock::now();
+    double totalPowerSum = 0.0;
+    float maxRenderPeak = 0.0f;
+
     std::uint64_t currentTimeline = startSample;
     std::uint64_t framesRendered = 0;
 
@@ -282,11 +317,20 @@ std::expected<void, MediaError> OfflineRenderService::renderPass(
             }
         }
 
-        // Apply TPDF dither if 16-bit
+        // Measure block power & peak for LUFS and True Peak verification
+        for (std::size_t f = 0; f < framesToRender; ++f)
+        {
+            const float l = masterLeft[f];
+            const float r = masterRight[f];
+            totalPowerSum += static_cast<double>(l * l + r * r);
+            maxRenderPeak = std::max(maxRenderPeak, std::max(std::abs(l), std::abs(r)));
+        }
+
+        // Apply TPDF / Noise-Shaped dither if 16-bit
         if (options.bitDepth == ExportBitDepth::int16 && options.applyTpdfDither)
         {
-            applyTpdfDither(masterLeft.data(), framesToRender, ditherRng);
-            applyTpdfDither(masterRight.data(), framesToRender, ditherRng);
+            applyNoiseShapedDither(masterLeft.data(), framesToRender, ditherRng, options.ditherNoiseShaping);
+            applyNoiseShapedDither(masterRight.data(), framesToRender, ditherRng, options.ditherNoiseShaping);
         }
 
         // Write block
@@ -319,6 +363,16 @@ std::expected<void, MediaError> OfflineRenderService::renderPass(
             "Failed to finalize output audio file"
         });
     }
+
+    const auto renderDurationSec = std::chrono::duration<float>(std::chrono::steady_clock::now() - startTime).count();
+    const float audioDurationSec = static_cast<float>(totalFrames) / static_cast<float>(options.sampleRate);
+    options.renderSpeedFactor = (renderDurationSec > 0.001f) ? (audioDurationSec / renderDurationSec) : 50.0f;
+    options.measuredIntegratedLufs = (totalFrames > 0 && totalPowerSum > 1e-9)
+        ? static_cast<float>(-0.691 + 10.0 * std::log10(totalPowerSum / static_cast<double>(totalFrames)))
+        : -100.0f;
+    options.measuredTruePeakDb = (maxRenderPeak > 1e-6f)
+        ? static_cast<float>(20.0 * std::log10(maxRenderPeak))
+        : -100.0f;
 
     return {};
 }

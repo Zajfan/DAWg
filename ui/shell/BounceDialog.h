@@ -45,6 +45,9 @@ private:
     juce::Label m_formatLabel {"FormatLabel", "Bit Depth:"};
     juce::ComboBox m_formatCombo;
 
+    juce::Label m_ditherLabel {"DitherLabel", "Mastering Dither:"};
+    juce::ComboBox m_ditherCombo;
+
     juce::Label m_srLabel {"SrLabel", "Sample Rate:"};
     juce::ComboBox m_srCombo;
 
@@ -54,9 +57,14 @@ private:
     juce::TextButton m_startButton {"Start Bounce"};
     juce::TextButton m_cancelButton {"Cancel"};
     juce::Label m_statusLabel {"StatusLabel", "Ready to render"};
+    juce::Label m_lufsVerificationLabel {"LufsLabel", ""};
+    juce::Label m_speedBenchmarkLabel {"SpeedLabel", ""};
 
     double m_progressVal {0.0};
     juce::ProgressBar m_progressBar {m_progressVal};
+
+    std::vector<float> m_renderedWaveform;
+    void drawWaveformPreview(juce::Graphics& g, juce::Rectangle<float> area);
 
     std::atomic<bool> m_cancelToken {false};
     std::atomic<bool> m_isRendering {false};

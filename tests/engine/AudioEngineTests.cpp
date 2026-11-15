@@ -24,10 +24,13 @@
 #include <dawg/engine/dsp/TnhcDelayNode.h>
 #include <dawg/engine/dsp/TnhcReverbNode.h>
 #include <dawg/engine/dsp/TnhcSynthNode.h>
+#include <dawg/engine/dsp/AudioTranscriber.h>
 #include <dawg/engine/dsp/VocalPitchCorrectorNode.h>
 #include <dawg/engine/dsp/DspWireGrid.h>
 #include <dawg/engine/dsp/MasteringMeterNode.h>
 #include <dawg/engine/dsp/ZdfLadderFilter.h>
+#include <dawg/media/OfflineRenderService.h>
+#include <audio/LowLatencyAudioDriver.h>
 #include <dawg/engine/plugins/PluginCrashSupervisor.h>
 #include <dawg/engine/clap/ClapPluginNode.h>
 #include <dawg/engine/MidiControllerManager.h>
@@ -2458,6 +2461,153 @@ void testMasteringSuiteLoudnessRadarAndTruePeak()
     meter.resetIntegrated();
     require(meter.telemetry().maxTruePeakDb < -90.0f, "Reset integrated clears max true peak");
 }
+
+void testLowLatencyAudioDriverRtlAndXruns()
+{
+    using dawg::platform::juce::AudioDriverBackend;
+    using dawg::platform::juce::LowLatencyAudioDriver;
+
+    LowLatencyAudioDriver driver;
+
+    // 1. PipeWire-JACK Ultra-Low Latency configuration
+    driver.setBackend(AudioDriverBackend::pipewireJack);
+    driver.configure(48000.0, 32, 2, 2); // 32 frames @ 48kHz
+
+    const auto tel32 = driver.telemetry();
+    require(tel32.isLowLatencyActive, "32 frames triggers ultra-low latency mode");
+    require(tel32.roundTripLatencyMs < 1.5f, "32 frames @ 48kHz achieves sub-1.5ms RTL");
+
+    // 64 frames (Pro Studio Standard)
+    driver.configure(48000.0, 64, 2, 2);
+    const auto tel64 = driver.telemetry();
+    require(tel64.roundTripLatencyMs <= 2.5f, "64 frames @ 48kHz achieves 2.0ms RTL");
+    require(tel64.dspLatencyMs < 1.5f, "DSP buffer latency is 1.33ms");
+
+    // 2. Direct ALSA MMAP Backend
+    driver.setBackend(AudioDriverBackend::alsaMmap);
+    require(driver.backend() == AudioDriverBackend::alsaMmap, "Backend switched to Direct ALSA MMAP");
+    require(driver.roundTripLatencyMs() < 3.0f, "ALSA MMAP direct ring achieves low RTL");
+
+    // 3. XRUN Glitch Tracking
+    require(driver.xrunCount() == 0, "Initial XRUN count is 0");
+    driver.recordXrun();
+    driver.recordXrun();
+    require(driver.xrunCount() == 2, "XRUN glitch counter accurately records 2 buffer dropouts");
+    driver.resetXrunCount();
+    require(driver.xrunCount() == 0, "XRUN counter resets to 0");
+}
+
+void testNoiseShapedDitherAndOfflineStemRendering()
+{
+    using dawg::media::DitherNoiseShaping;
+    using dawg::media::OfflineRenderService;
+
+    // 1. Noise-Shaped Dither validation
+    std::vector<float> testSamples(512, 0.0f);
+    for (std::size_t i = 0; i < 512; ++i)
+    {
+        testSamples[i] = 0.5f * std::sin(static_cast<float>(i) * 0.1f);
+    }
+
+    std::uint32_t rngState = 123456789;
+
+    // Flat TPDF
+    OfflineRenderService::applyNoiseShapedDither(testSamples.data(), testSamples.size(), rngState, DitherNoiseShaping::flatTpdf);
+    for (const auto s : testSamples)
+    {
+        require(s >= -1.0f && s <= 1.0f, "Flat TPDF dithered samples remain bounded");
+    }
+
+    // Lipshitz High-Pass Noise Shaping
+    OfflineRenderService::applyNoiseShapedDither(testSamples.data(), testSamples.size(), rngState, DitherNoiseShaping::lipshitz);
+    for (const auto s : testSamples)
+    {
+        require(s >= -1.0f && s <= 1.0f, "Lipshitz noise-shaped samples remain bounded");
+    }
+
+    // Psychoacoustic E-Curve Noise Shaping
+    OfflineRenderService::applyNoiseShapedDither(testSamples.data(), testSamples.size(), rngState, DitherNoiseShaping::psychoacoustic);
+    for (const auto s : testSamples)
+    {
+        require(s >= -1.0f && s <= 1.0f, "Psychoacoustic noise-shaped samples remain bounded");
+    }
+}
+
+void testAudioTranscriberMelodyDrumsAndGroove()
+{
+    using dawg::engine::dsp::AudioTranscriber;
+    using dawg::engine::dsp::DrumHitType;
+    using dawg::engine::dsp::MusicalScale;
+
+    constexpr double sampleRate = 48000.0;
+    constexpr std::size_t totalSamples = 48000 * 2; // 2 seconds
+    std::vector<float> audioBuf(totalSamples, 0.0f);
+
+    // 1. Synthesize Drum Break: Kick at 0.0s, Snare at 0.5s, Hi-Hat at 1.0s
+    // Kick: 60Hz low sine thump with exponential decay
+    for (std::size_t i = 0; i < 4800; ++i)
+    {
+        const float t = static_cast<float>(i) / static_cast<float>(sampleRate);
+        const float env = std::exp(-t * 25.0f);
+        audioBuf[i] = 0.9f * std::sin(2.0f * std::numbers::pi_v<float> * 60.0f * t) * env;
+    }
+
+    // Snare: 200Hz + high noise burst at 0.5s (24000 samples)
+    for (std::size_t i = 0; i < 4800; ++i)
+    {
+        const float t = static_cast<float>(i) / static_cast<float>(sampleRate);
+        const float env = std::exp(-t * 20.0f);
+        const float noise = static_cast<float>((i * 1103515245 + 12345) % 65536) / 32768.0f - 1.0f;
+        audioBuf[24000 + i] = 0.85f * (0.4f * std::sin(2.0f * std::numbers::pi_v<float> * 220.0f * t) + 0.6f * noise) * env;
+    }
+
+    // Hi-Hat: pure high-frequency noise at 1.0s (48000 samples)
+    for (std::size_t i = 0; i < 2400; ++i)
+    {
+        const float t = static_cast<float>(i) / static_cast<float>(sampleRate);
+        const float env = std::exp(-t * 80.0f);
+        const float noise = static_cast<float>((i * 1664525 + 1013904223) % 65536) / 32768.0f - 1.0f;
+        audioBuf[48000 + i] = 0.65f * noise * env;
+    }
+
+    // Test Drum Transcription
+    const auto drumNotes = AudioTranscriber::transcribeDrums(audioBuf.data(), audioBuf.size(), sampleRate, 120.0);
+    require(drumNotes.size() >= 3, "AudioTranscriber detects drum onsets");
+    require(drumNotes[0].pitch == 36, "First hit transcribed as Kick (MIDI 36)");
+    require(drumNotes[1].pitch == 38, "Second hit transcribed as Snare (MIDI 38)");
+    require(drumNotes[2].pitch == 42, "Third hit transcribed as Hi-Hat (MIDI 42)");
+
+    // Test Transient Slicing
+    const auto slices = AudioTranscriber::sliceTransients(audioBuf.data(), audioBuf.size(), sampleRate, 16);
+    require(slices.size() >= 3, "Transients sliced into sampler pad segments");
+    require(slices[0].classifiedType == DrumHitType::kick, "First slice classified as kick");
+
+    // Test Groove & Swing Extraction
+    const auto groove = AudioTranscriber::extractGroove(audioBuf.data(), audioBuf.size(), sampleRate, 120.0);
+    require(groove.swingPercent >= 0.0f && groove.swingPercent <= 75.0f, "Groove swing within valid percentage range");
+
+    // 2. Melodic Transcription: 440 Hz (A4 = note 69) and 523.25 Hz (C5 = note 72)
+    std::vector<float> melodyBuf(totalSamples, 0.0f);
+    // Note 1: A4 at 0.0s (attack + sustain)
+    for (std::size_t i = 0; i < 20000; ++i)
+    {
+        const float t = static_cast<float>(i) / static_cast<float>(sampleRate);
+        const float env = std::min(1.0f, static_cast<float>(i) / 200.0f) * std::exp(-t * 2.0f);
+        melodyBuf[i] = 0.8f * std::sin(2.0f * std::numbers::pi_v<float> * 440.0f * t) * env;
+    }
+    // Note 2: C5 at 0.5s (24000 samples)
+    for (std::size_t i = 0; i < 20000; ++i)
+    {
+        const float t = static_cast<float>(i) / static_cast<float>(sampleRate);
+        const float env = std::min(1.0f, static_cast<float>(i) / 200.0f) * std::exp(-t * 2.0f);
+        melodyBuf[24000 + i] = 0.8f * std::sin(2.0f * std::numbers::pi_v<float> * 523.25f * t) * env;
+    }
+
+    const auto melodyNotes = AudioTranscriber::transcribeMelody(melodyBuf.data(), melodyBuf.size(), sampleRate, MusicalScale::chromatic, 0);
+    require(melodyNotes.size() >= 2, "Melody onsets detected and transcribed");
+    require(melodyNotes[0].pitch == 69, "First note transcribed as A4 (MIDI 69)");
+    require(melodyNotes[1].pitch == 72, "Second note transcribed as C5 (MIDI 72)");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -2587,4 +2737,7 @@ int main()
     testVocalPitchCorrectionAndAutoTune();
     testDspWireGridModularAndOscilloscope();
     testMasteringSuiteLoudnessRadarAndTruePeak();
+    testLowLatencyAudioDriverRtlAndXruns();
+    testNoiseShapedDitherAndOfflineStemRendering();
+    testAudioTranscriberMelodyDrumsAndGroove();
 }

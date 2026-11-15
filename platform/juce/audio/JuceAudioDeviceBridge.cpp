@@ -75,6 +75,8 @@ void JuceAudioDeviceBridge::audioDeviceAboutToStart(::juce::AudioIODevice* devic
     m_callbackAdapter.prepare(rate, static_cast<std::size_t>(frames));
     m_sampleRate.store(rate, std::memory_order_relaxed);
     m_blockSize.store(frames, std::memory_order_relaxed);
+    const auto inChannels = device->getActiveInputChannels().countNumberOfSetBits();
+    m_lowLatencyDriver.configure(rate, frames, inChannels, channels);
     m_deviceReady.store(true, std::memory_order_release);
 }
 

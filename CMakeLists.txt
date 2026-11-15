@@ -27,7 +27,8 @@ if(DAWG_BUILD_TESTS)
     enable_testing()
 
     add_executable(dawg_engine_core_tests tests/engine/AudioEngineTests.cpp)
-    target_link_libraries(dawg_engine_core_tests PRIVATE dawg_engine_core)
+    target_include_directories(dawg_engine_core_tests PRIVATE platform/juce services/media/include)
+    target_link_libraries(dawg_engine_core_tests PRIVATE dawg_engine_core dawg_services_media)
     target_compile_features(dawg_engine_core_tests PRIVATE cxx_std_20)
     target_compile_options(dawg_engine_core_tests PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>

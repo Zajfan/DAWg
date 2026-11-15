@@ -14,6 +14,14 @@
 
 namespace dawg::media {
 
+enum class DitherNoiseShaping : std::uint8_t
+{
+    none,
+    flatTpdf,
+    lipshitz,
+    psychoacoustic
+};
+
 struct RenderOptions
 {
     std::string destinationPath;
@@ -22,8 +30,14 @@ struct RenderOptions
     std::uint32_t sampleRate {48000};
     ExportBitDepth bitDepth {ExportBitDepth::float32};
     bool applyTpdfDither {true};
+    DitherNoiseShaping ditherNoiseShaping {DitherNoiseShaping::flatTpdf};
     bool exportStems {false};
     std::vector<project::TrackId> stemTrackIds {}; // empty = all tracks
+
+    // Telemetry output populated during render pass
+    mutable float measuredIntegratedLufs {-100.0f};
+    mutable float measuredTruePeakDb {-100.0f};
+    mutable float renderSpeedFactor {1.0f};
 };
 
 struct RenderProgress
@@ -47,8 +61,9 @@ public:
         std::atomic<bool>* cancelToken = nullptr,
         ProgressCallback progressCallback = {});
 
-    // High quality TPDF (Triangular Probability Density Function) dither
+    // High quality TPDF and Noise-Shaped dither
     static void applyTpdfDither(float* samples, std::size_t count, std::uint32_t& rngState) noexcept;
+    static void applyNoiseShapedDither(float* samples, std::size_t count, std::uint32_t& rngState, DitherNoiseShaping shaping) noexcept;
 
 private:
     [[nodiscard]] std::expected<void, MediaError> renderPass(
