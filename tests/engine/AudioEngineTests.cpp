@@ -16,11 +16,14 @@
 #include <dawg/engine/WorkStealingScheduler.h>
 #include <dawg/engine/dsp/BrickwallLimiterNode.h>
 #include <dawg/engine/dsp/BinauralSpatialPannerNode.h>
+#include <dawg/engine/dsp/ConvolutionReverbNode.h>
 #include <dawg/engine/dsp/DrumPadSamplerNode.h>
 #include <dawg/engine/dsp/DynamicsCompressorNode.h>
 #include <dawg/engine/dsp/ModulatorRack.h>
+#include <dawg/engine/dsp/MultibandCompressorNode.h>
 #include <dawg/engine/dsp/ParametricEQNode.h>
 #include <dawg/engine/dsp/PolyphaseOversampler.h>
+#include <dawg/engine/dsp/SpectralSidechainNode.h>
 #include <dawg/engine/dsp/TnhcDelayNode.h>
 #include <dawg/engine/dsp/TnhcReverbNode.h>
 #include <dawg/engine/dsp/TnhcSynthNode.h>
@@ -2608,6 +2611,255 @@ void testAudioTranscriberMelodyDrumsAndGroove()
     require(melodyNotes[0].pitch == 69, "First note transcribed as A4 (MIDI 69)");
     require(melodyNotes[1].pitch == 72, "Second note transcribed as C5 (MIDI 72)");
 }
+
+void testMcuTwoWayFeedbackAndLaunchpadRgb()
+{
+    using namespace dawg::engine;
+
+    MidiControllerManager mgr;
+    require(mgr.isMcuEnabled(), "MCU enabled");
+
+    // Fader feedback event
+    const auto faderEv = MidiControllerManager::makeFaderFeedback(3, 0.75f);
+    require(faderEv.size == 3, "fader feedback is 3 bytes");
+    require(std::to_integer<int>(faderEv.data[0]) == (0xE0 + 3), "pitch bend on channel 3");
+
+    // V-Pot LED ring event
+    const auto vpotEv = MidiControllerManager::makeVpotRing(1, 0.5f, VpotRingMode::boostCut);
+    require(vpotEv.size == 3, "vpot ring event is 3 bytes");
+    require(std::to_integer<int>(vpotEv.data[0]) == 0xB0, "CC message");
+    require(std::to_integer<int>(vpotEv.data[1]) == (0x30 + 1), "V-pot LED ring CC");
+
+    // Button LED event
+    const auto btnEv = MidiControllerManager::makeButtonLed(94, true);
+    require(btnEv.size == 3, "button LED is 3 bytes");
+    require(std::to_integer<int>(btnEv.data[0]) == 0x90, "Note on");
+    require(std::to_integer<int>(btnEv.data[1]) == 94, "Note 94");
+    require(std::to_integer<int>(btnEv.data[2]) == 127, "Velocity 127");
+
+    // Scribble strip SysEx
+    const auto scribble = MidiControllerManager::makeScribbleStripSysEx(0, "VOX 01", "-3.5dB");
+    require(!scribble.empty(), "scribble strip generated");
+    require(std::to_integer<int>(scribble.front()) == 0xF0, "SysEx start");
+    require(std::to_integer<int>(scribble.back()) == 0xF7, "SysEx end");
+
+    // Timecode display SysEx
+    const auto timecode = MidiControllerManager::makeTimecodeDisplaySysEx(4, 2, 3);
+    require(!timecode.empty(), "timecode display generated");
+    require(std::to_integer<int>(timecode.front()) == 0xF0, "SysEx start");
+    require(std::to_integer<int>(timecode.back()) == 0xF7, "SysEx end");
+
+    // Bank shifting
+    require(mgr.bank() == 0, "default bank 0");
+    mgr.bankUp();
+    require(mgr.bank() == 1, "bank up to 1");
+    mgr.bankDown();
+    require(mgr.bank() == 0, "bank down to 0");
+
+    // Launchpad RGB matrix pad
+    const auto lpPad = MidiControllerManager::makeLaunchpadPad(2, 3, LaunchpadColor::green, LaunchpadLedMode::pulsing);
+    require(lpPad.size == 3, "Launchpad note event is 3 bytes");
+    require(std::to_integer<int>(lpPad.data[0]) == 0x92, "Launchpad pulsing note on channel 3");
+
+    // MIDI Learn persistent serialization & deserialization
+    mgr.startLearn(101, -12.0f, 12.0f);
+    require(mgr.isLearning(), "learning active");
+    require(mgr.learningTargetId() == 101, "target ID 101");
+
+    MidiEvent ccLearn {};
+    ccLearn.size = 3;
+    ccLearn.data[0] = static_cast<std::byte>(0xB0);
+    ccLearn.data[1] = static_cast<std::byte>(74); // Filter Cutoff CC
+    ccLearn.data[2] = static_cast<std::byte>(64);
+    static_cast<void>(mgr.processEvent(ccLearn));
+
+    require(!mgr.isLearning(), "learn finished on receipt");
+    require(mgr.bindingCount() == 1, "1 binding created");
+
+    const auto serialized = mgr.serializeBindings();
+    require(!serialized.empty(), "serialized bindings not empty");
+
+    MidiControllerManager mgr2;
+    require(mgr2.bindingCount() == 0, "mgr2 starts with 0 bindings");
+    const bool ok = mgr2.deserializeBindings(serialized);
+    require(ok, "deserialization succeeded");
+    require(mgr2.bindingCount() == 1, "mgr2 has 1 restored binding");
+    require(mgr2.bindings()[0].targetId == 101, "target ID restored");
+}
+
+void testConvolutionReverbZeroLatencyAndCabinetSim()
+{
+    using namespace dawg::engine::dsp;
+
+    ConvolutionReverbNode reverb;
+    require(reverb.latencySamples() == 0, "reverb guarantees 0 samples latency");
+
+    const double sampleRate = 48000.0;
+    const std::size_t blockSize = 256;
+    require(reverb.prepare(sampleRate, blockSize, 2), "prepare successful");
+
+    // Check all factory presets load and generate impulse response buffers
+    reverb.loadPreset(ConvolutionIrPreset::cathedralHall);
+    require(reverb.irLengthSamples() > 0, "cathedralHall IR generated");
+    require(reverb.currentPreset() == ConvolutionIrPreset::cathedralHall, "preset matches");
+
+    reverb.loadPreset(ConvolutionIrPreset::vintagePlate);
+    require(reverb.irLengthSamples() > 0, "vintagePlate IR generated");
+
+    reverb.loadPreset(ConvolutionIrPreset::springTank);
+    require(reverb.irLengthSamples() > 0, "springTank IR generated");
+
+    reverb.loadPreset(ConvolutionIrPreset::celestionV30Cab);
+    require(reverb.irLengthSamples() > 0, "celestionV30Cab IR generated");
+
+    reverb.loadPreset(ConvolutionIrPreset::customTweedCab);
+    require(reverb.irLengthSamples() > 0, "customTweedCab IR generated");
+
+    // Space shaping parameters
+    reverb.setDryWet(0.5f);
+    require(std::abs(reverb.dryWet() - 0.5f) < 0.001f, "dryWet set");
+
+    reverb.setPreDelayMs(10.0f);
+    require(std::abs(reverb.preDelayMs() - 10.0f) < 0.001f, "preDelay set");
+    reverb.setPreDelayMs(0.0f);
+
+    reverb.setDecayScale(1.5f);
+    require(std::abs(reverb.decayScale() - 1.5f) < 0.001f, "decayScale set");
+
+    reverb.setHiDamping(0.6f);
+    require(std::abs(reverb.hiDamping() - 0.6f) < 0.001f, "hiDamping set");
+
+    reverb.setReverseIr(true);
+    require(reverb.isReverseIr(), "reverse IR enabled");
+    reverb.setReverseIr(false);
+
+    // Cabinet parameters
+    reverb.setMicDistanceInches(3.0f);
+    require(std::abs(reverb.micDistanceInches() - 3.0f) < 0.001f, "micDistance set");
+
+    reverb.setMicOnAxis(0.5f);
+    require(std::abs(reverb.micOnAxis() - 0.5f) < 0.001f, "micOnAxis set");
+
+    // Zero-latency direct FIR head processing test
+    std::vector<float> left(blockSize, 0.0f);
+    std::vector<float> right(blockSize, 0.0f);
+    left[0] = 1.0f; // Unit impulse at sample 0
+    right[0] = 1.0f;
+
+    std::array<float*, 2> channels {left.data(), right.data()};
+    dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+    dawg::engine::AudioBufferView emptySidechain(nullptr, 0, 0);
+    dawg::engine::ProcessContext ctx {.audio = audioView, .midi = {}, .sampleRate = sampleRate, .sidechain = emptySidechain};
+
+    reverb.process(ctx);
+
+    // Verify impulse immediately reverberates without delay (head partition fires at sample 0)
+    require(std::abs(left[0]) > 0.0001f, "head partition produces immediate output at sample 0");
+    require(std::abs(left[10]) > 0.00001f, "reverberation active in block");
+}
+
+void testSpectralSidechainAndMultibandCompression()
+{
+    using namespace dawg::engine::dsp;
+
+    // 1. Spectral Sidechain & Collision Radar
+    {
+        SpectralSidechainNode spectral;
+        require(spectral.latencySamples() == 0, "spectral sidechain 0 samples latency");
+
+        const double sampleRate = 48000.0;
+        const std::size_t blockSize = 256;
+        require(spectral.prepare(sampleRate, blockSize, 2), "spectral prepare");
+
+        spectral.setDuckingAmount(0.9f);
+        require(std::abs(spectral.duckingAmount() - 0.9f) < 0.001f, "ducking amount");
+
+        // Main audio: 1000 Hz sine
+        std::vector<float> mainL(blockSize);
+        std::vector<float> mainR(blockSize);
+        // Sidechain audio: 1000 Hz sine (colliding frequency)
+        std::vector<float> scL(blockSize);
+        std::vector<float> scR(blockSize);
+
+        for (std::size_t i = 0; i < blockSize; ++i)
+        {
+            const float t = static_cast<float>(i) / static_cast<float>(sampleRate);
+            const float sig = std::sin(2.0f * std::numbers::pi_v<float> * 1000.0f * t);
+            mainL[i] = sig * 0.8f;
+            mainR[i] = sig * 0.8f;
+            scL[i] = sig * 0.9f;
+            scR[i] = sig * 0.9f;
+        }
+
+        std::array<float*, 2> mainCh {mainL.data(), mainR.data()};
+        std::array<float*, 2> scCh {scL.data(), scR.data()};
+        dawg::engine::AudioBufferView mainView(mainCh.data(), 2, blockSize);
+        dawg::engine::AudioBufferView scView(scCh.data(), 2, blockSize);
+        dawg::engine::ProcessContext ctx {.audio = mainView, .midi = {}, .sampleRate = sampleRate, .sidechain = scView};
+
+        // Process a few blocks to build ducking envelope and radar
+        for (int b = 0; b < 10; ++b)
+        {
+            spectral.process(ctx);
+        }
+
+        std::array<float, SpectralSidechainNode::numBands> radar {};
+        spectral.getCollisionRadar(radar.data(), radar.size());
+        const float maxRadar = *std::max_element(radar.begin(), radar.end());
+        require(maxRadar > 0.01f, "spectral collision detected on 1000 Hz collision");
+    }
+
+    // 2. Multiband Dynamics Compressor (4-band LR4)
+    {
+        MultibandCompressorNode mbComp;
+        require(mbComp.latencySamples() == 0, "multiband compressor 0 samples latency");
+
+        const double sampleRate = 48000.0;
+        const std::size_t blockSize = 256;
+        require(mbComp.prepare(sampleRate, blockSize, 2), "mbComp prepare");
+
+        mbComp.setCrossoverFrequencies(90.0f, 700.0f, 5000.0f);
+        require(std::abs(mbComp.crossover1Hz() - 90.0f) < 0.01f, "crossover 1 set");
+        require(std::abs(mbComp.crossover2Hz() - 700.0f) < 0.01f, "crossover 2 set");
+        require(std::abs(mbComp.crossover3Hz() - 5000.0f) < 0.01f, "crossover 3 set");
+
+        // Set Band 0 (Sub/Low, <90 Hz) with aggressive compression
+        MultibandBandSettings lowBandSettings {};
+        lowBandSettings.thresholdDb = -30.0f;
+        lowBandSettings.ratio = 8.0f;
+        lowBandSettings.attackMs = 1.0f;
+        lowBandSettings.releaseMs = 50.0f;
+        lowBandSettings.makeupGainDb = 0.0f;
+        mbComp.setBandSettings(0, lowBandSettings);
+
+        // Feed strong 50 Hz sub bass signal (amplitude 0.9)
+        std::vector<float> chL(blockSize);
+        std::vector<float> chR(blockSize);
+
+        for (int blk = 0; blk < 15; ++blk)
+        {
+            for (std::size_t i = 0; i < blockSize; ++i)
+            {
+                const float t = static_cast<float>(blk * blockSize + i) / static_cast<float>(sampleRate);
+                const float s = 0.9f * std::sin(2.0f * std::numbers::pi_v<float> * 50.0f * t);
+                chL[i] = s;
+                chR[i] = s;
+            }
+
+            std::array<float*, 2> chs {chL.data(), chR.data()};
+            dawg::engine::AudioBufferView view(chs.data(), 2, blockSize);
+            dawg::engine::AudioBufferView emptySc(nullptr, 0, 0);
+            dawg::engine::ProcessContext ctx {.audio = view, .midi = {}, .sampleRate = sampleRate, .sidechain = emptySc};
+
+            mbComp.process(ctx);
+        }
+
+        // Band 0 should register strong gain reduction (>3 dB)
+        require(mbComp.gainReductionDb(0) > 3.0f, "Band 0 undergoes substantial gain reduction");
+        // Band 3 (High >5000 Hz) should have 0 gain reduction
+        require(mbComp.gainReductionDb(3) < 0.1f, "Band 3 has no gain reduction on sub bass");
+    }
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -2740,4 +2992,7 @@ int main()
     testLowLatencyAudioDriverRtlAndXruns();
     testNoiseShapedDitherAndOfflineStemRendering();
     testAudioTranscriberMelodyDrumsAndGroove();
+    testMcuTwoWayFeedbackAndLaunchpadRgb();
+    testConvolutionReverbZeroLatencyAndCabinetSim();
+    testSpectralSidechainAndMultibandCompression();
 }

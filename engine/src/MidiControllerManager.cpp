@@ -1,6 +1,8 @@
 #include <dawg/engine/MidiControllerManager.h>
 
 #include <algorithm>
+#include <iomanip>
+#include <sstream>
 
 namespace dawg::engine {
 
@@ -297,8 +299,10 @@ MidiEvent MidiControllerManager::makeButtonLed(const std::uint8_t note, const bo
     return ev;
 }
 
-MidiEvent MidiControllerManager::makeVpotRing(const std::uint8_t trackIndex,
-                                              const float normalizedValue) noexcept
+MidiEvent MidiControllerManager::makeVpotRing(
+    const std::uint8_t trackIndex,
+    const float normalizedValue,
+    const VpotRingMode mode) noexcept
 {
     MidiEvent ev {};
     ev.size = 3;
@@ -306,8 +310,168 @@ MidiEvent MidiControllerManager::makeVpotRing(const std::uint8_t trackIndex,
     ev.data[0] = static_cast<std::byte>(0xB0);
     ev.data[1] = static_cast<std::byte>(0x30 + (trackIndex & 0x07));
     const int val = std::clamp(static_cast<int>(normalizedValue * 11.0f), 0, 11);
-    ev.data[2] = static_cast<std::byte>(val & 0x7F);
+    const int rawByte = static_cast<int>(mode) | (val & 0x0F);
+    ev.data[2] = static_cast<std::byte>(rawByte & 0x7F);
     return ev;
+}
+
+MidiEvent MidiControllerManager::makeLaunchpadPad(
+    const std::uint8_t trackIdx,
+    const std::uint8_t sceneIdx,
+    const LaunchpadColor color,
+    const LaunchpadLedMode mode) noexcept
+{
+    MidiEvent ev {};
+    ev.size = 3;
+    ev.frameOffset = 0;
+
+    // Launchpad note indexing: 11..18 for row 1, 21..28 for row 2, etc. (or row*10 + col)
+    const std::uint8_t note = static_cast<std::uint8_t>((sceneIdx + 1) * 10 + (trackIdx + 1));
+
+    if (mode == LaunchpadLedMode::flashing)
+    {
+        ev.data[0] = static_cast<std::byte>(0x91); // Channel 2 = flashing mode
+    }
+    else if (mode == LaunchpadLedMode::pulsing)
+    {
+        ev.data[0] = static_cast<std::byte>(0x92); // Channel 3 = pulsing mode
+    }
+    else
+    {
+        ev.data[0] = static_cast<std::byte>(0x90); // Channel 1 = static color
+    }
+
+    ev.data[1] = static_cast<std::byte>(note & 0x7F);
+    ev.data[2] = static_cast<std::byte>(static_cast<std::uint8_t>(color) & 0x7F);
+    return ev;
+}
+
+std::vector<std::byte> MidiControllerManager::makeScribbleStripSysEx(
+    const std::uint8_t trackIndex,
+    const std::string& line1,
+    const std::string& line2)
+{
+    // MCU LCD SysEx: F0 00 00 66 14 12 <offset> <char0..char13> F7
+    // Line 1 is at offset (trackIndex * 7), Line 2 is at offset (56 + trackIndex * 7)
+    std::vector<std::byte> sysex;
+    sysex.reserve(24);
+
+    const std::uint8_t offset = (trackIndex & 0x07) * 7;
+    sysex.push_back(std::byte {0xF0});
+    sysex.push_back(std::byte {0x00});
+    sysex.push_back(std::byte {0x00});
+    sysex.push_back(std::byte {0x66});
+    sysex.push_back(std::byte {0x14});
+    sysex.push_back(std::byte {0x12});
+    sysex.push_back(static_cast<std::byte>(offset));
+
+    for (std::size_t i = 0; i < 7; ++i)
+    {
+        const char c = (i < line1.size()) ? line1[i] : ' ';
+        sysex.push_back(static_cast<std::byte>(static_cast<std::uint8_t>(c) & 0x7F));
+    }
+    sysex.push_back(std::byte {0xF7});
+
+    if (!line2.empty())
+    {
+        const std::uint8_t line2Offset = 56 + (trackIndex & 0x07) * 7;
+        sysex.push_back(std::byte {0xF0});
+        sysex.push_back(std::byte {0x00});
+        sysex.push_back(std::byte {0x00});
+        sysex.push_back(std::byte {0x66});
+        sysex.push_back(std::byte {0x14});
+        sysex.push_back(std::byte {0x12});
+        sysex.push_back(static_cast<std::byte>(line2Offset));
+        for (std::size_t i = 0; i < 7; ++i)
+        {
+            const char c = (i < line2.size()) ? line2[i] : ' ';
+            sysex.push_back(static_cast<std::byte>(static_cast<std::uint8_t>(c) & 0x7F));
+        }
+        sysex.push_back(std::byte {0xF7});
+    }
+
+    return sysex;
+}
+
+std::vector<std::byte> MidiControllerManager::makeTimecodeDisplaySysEx(
+    const int bars,
+    const int beats,
+    const int sixteenths)
+{
+    // MCU 7-segment display SysEx or CC message (0xB0 0x40..0x49)
+    std::vector<std::byte> sysex;
+    sysex.reserve(16);
+    sysex.push_back(std::byte {0xF0});
+    sysex.push_back(std::byte {0x00});
+    sysex.push_back(std::byte {0x00});
+    sysex.push_back(std::byte {0x66});
+    sysex.push_back(std::byte {0x14});
+    sysex.push_back(std::byte {0x10}); // Timecode display command
+
+    std::ostringstream ss;
+    ss << std::setfill('0') << std::setw(3) << bars
+       << "." << std::setw(2) << beats
+       << "." << std::setw(2) << sixteenths;
+    const auto str = ss.str();
+
+    for (const char c : str)
+    {
+        sysex.push_back(static_cast<std::byte>(static_cast<std::uint8_t>(c) & 0x7F));
+    }
+
+    sysex.push_back(std::byte {0xF7});
+    return sysex;
+}
+
+std::string MidiControllerManager::serializeBindings() const
+{
+    std::ostringstream ss;
+    for (const auto& b : m_bindings)
+    {
+        if (b.active)
+        {
+            ss << b.bindingId << "," << static_cast<int>(b.channel) << ","
+               << static_cast<int>(b.ccNumber) << "," << b.targetId << ","
+               << b.minValue << "," << b.maxValue << ";";
+        }
+    }
+    return ss.str();
+}
+
+bool MidiControllerManager::deserializeBindings(const std::string& serialized)
+{
+    clearBindings();
+    if (serialized.empty())
+    {
+        return true;
+    }
+
+    std::istringstream stream(serialized);
+    std::string item;
+    while (std::getline(stream, item, ';'))
+    {
+        if (item.empty()) continue;
+        std::istringstream lineStream(item);
+        std::string token;
+
+        std::uint32_t bId = 0;
+        int ch = 0;
+        int cc = 0;
+        std::uint32_t targetId = 0;
+        float minVal = 0.0f;
+        float maxVal = 1.0f;
+
+        if (std::getline(lineStream, token, ',')) bId = static_cast<std::uint32_t>(std::stoul(token));
+        if (std::getline(lineStream, token, ',')) ch = std::stoi(token);
+        if (std::getline(lineStream, token, ',')) cc = std::stoi(token);
+        if (std::getline(lineStream, token, ',')) targetId = static_cast<std::uint32_t>(std::stoul(token));
+        if (std::getline(lineStream, token, ',')) minVal = std::stof(token);
+        if (std::getline(lineStream, token, ',')) maxVal = std::stof(token);
+
+        (void)bId;
+        static_cast<void>(addBinding(static_cast<std::uint8_t>(ch), static_cast<std::uint8_t>(cc), targetId, minVal, maxVal));
+    }
+    return true;
 }
 
 } // namespace dawg::engine

@@ -5,6 +5,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace dawg::engine {
 
@@ -37,6 +39,35 @@ enum class McuButton : std::uint8_t
     solo,
     mute,
     select
+};
+
+enum class VpotRingMode : std::uint8_t
+{
+    singleDot = 0x00,
+    boostCut  = 0x10,
+    wrap      = 0x20,
+    spread    = 0x30
+};
+
+enum class LaunchpadColor : std::uint8_t
+{
+    off = 0,
+    red = 5,
+    orange = 9,
+    yellow = 13,
+    amber = 17,
+    green = 21,
+    cyan = 37,
+    blue = 45,
+    purple = 53,
+    white = 3
+};
+
+enum class LaunchpadLedMode : std::uint8_t
+{
+    staticColor,
+    flashing,
+    pulsing
 };
 
 struct McuEvent
@@ -104,16 +135,34 @@ public:
     // Real-time event parsing (zero heap allocation)
     [[nodiscard]] ProcessedMidiControl processEvent(const MidiEvent& event) noexcept;
 
-    // Hardware Feedback generators for motorized faders and LEDs
+    // Bank navigation (8-channel banks)
+    void setBank(std::uint8_t bank) noexcept { m_activeBank = bank; }
+    [[nodiscard]] std::uint8_t bank() const noexcept { return m_activeBank; }
+    void bankUp() noexcept { ++m_activeBank; }
+    void bankDown() noexcept { if (m_activeBank > 0) --m_activeBank; }
+
+    // Serialization for persistent project mappings
+    [[nodiscard]] std::string serializeBindings() const;
+    bool deserializeBindings(const std::string& serialized);
+
+    // Hardware Feedback generators for motorized faders, LEDs, scribble strips & Launchpad RGB
     [[nodiscard]] static MidiEvent makeFaderFeedback(std::uint8_t trackIndex, float normalizedValue) noexcept;
     [[nodiscard]] static MidiEvent makeButtonLed(std::uint8_t note, bool on) noexcept;
-    [[nodiscard]] static MidiEvent makeVpotRing(std::uint8_t trackIndex, float normalizedValue) noexcept;
+    [[nodiscard]] static MidiEvent makeVpotRing(std::uint8_t trackIndex, float normalizedValue, VpotRingMode mode = VpotRingMode::singleDot) noexcept;
+
+    // Launchpad & APC RGB matrix pad output
+    [[nodiscard]] static MidiEvent makeLaunchpadPad(std::uint8_t trackIdx, std::uint8_t sceneIdx, LaunchpadColor color, LaunchpadLedMode mode = LaunchpadLedMode::staticColor) noexcept;
+
+    // MCU Scribble Strip & Timecode SysEx generators
+    [[nodiscard]] static std::vector<std::byte> makeScribbleStripSysEx(std::uint8_t trackIndex, const std::string& line1, const std::string& line2);
+    [[nodiscard]] static std::vector<std::byte> makeTimecodeDisplaySysEx(int bars, int beats, int sixteenths);
 
 private:
     [[nodiscard]] McuEvent parseMcuEvent(std::uint8_t statusType, std::uint8_t channel,
                                          std::uint8_t byte1, std::uint8_t byte2) const noexcept;
 
     bool m_mcuEnabled {true};
+    std::uint8_t m_activeBank {0};
 
     bool m_learningActive {false};
     std::uint32_t m_learningTargetId {0};
