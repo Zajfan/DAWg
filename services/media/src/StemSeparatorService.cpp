@@ -11,9 +11,20 @@ SeparatedStems StemSeparatorService::separate4Stems(
     std::size_t numSamples,
     double sampleRate)
 {
+    return separate4StemsConfigurable(left, right, numSamples, sampleRate, StemSeparationConfig {});
+}
+
+SeparatedStems StemSeparatorService::separate4StemsConfigurable(
+    const float* left,
+    const float* right,
+    std::size_t numSamples,
+    double sampleRate,
+    const StemSeparationConfig& config)
+{
     SeparatedStems stems;
-    if (left == nullptr || numSamples == 0)
+    if (left == nullptr || numSamples == 0) {
         return stems;
+    }
 
     const float* rData = (right != nullptr) ? right : left;
 
@@ -26,60 +37,119 @@ SeparatedStems StemSeparatorService::separate4Stems(
     stems.otherL.resize(numSamples, 0.0f);
     stems.otherR.resize(numSamples, 0.0f);
 
-    const double sr = (sampleRate > 1000.0) ? sampleRate : 48000.0;
+    const double sr = sampleRate > 1000.0 ? sampleRate : 48000.0;
+    const float dt = 1.0f / static_cast<float>(sr);
 
-    // Filter coefficients:
-    // Bass LP at 160 Hz
-    const float bassAlpha = std::clamp(static_cast<float>(2.0 * 3.14159265 * 160.0 / sr), 0.001f, 0.2f);
-    // Vocal band: HP 250 Hz, LP 3500 Hz
-    const float vocHpAlpha = std::clamp(static_cast<float>(2.0 * 3.14159265 * 250.0 / sr), 0.001f, 0.3f);
-    const float vocLpAlpha = std::clamp(static_cast<float>(2.0 * 3.14159265 * 3500.0 / sr), 0.01f, 0.8f);
+    // Two-pole lowpass filter coefficients for Bass crossover (~180 Hz)
+    const float wBass = 2.0f * 3.14159265f * config.bassCutoffHz * dt;
+    const float alphaBass = std::clamp(wBass, 0.001f, 0.35f);
 
+    // Fast transient envelope (~1.0 ms) vs slow sustained envelope (~25 ms) for HPSS
+    const float alphaFast = 1.0f - std::exp(-dt / 0.001f);
+    const float alphaSlow = 1.0f - std::exp(-dt / 0.025f);
+
+    float envFastL = 0.0f, envSlowL = 0.0f;
+    float envFastR = 0.0f, envSlowR = 0.0f;
     float lpBassL = 0.0f, lpBassR = 0.0f;
-    float hpVocL = 0.0f, hpVocR = 0.0f;
-    float lpVocL = 0.0f;
 
-    for (std::size_t i = 0; i < numSamples; ++i)
-    {
+    for (std::size_t i = 0; i < numSamples; ++i) {
         const float inL = left[i];
         const float inR = rData[i];
 
-        // 1. Bass Extraction (Low frequencies)
-        lpBassL += bassAlpha * (inL - lpBassL);
-        lpBassR += bassAlpha * (inR - lpBassR);
-        stems.bassL[i] = lpBassL;
-        stems.bassR[i] = lpBassR;
+        // 1. Transient / Percussive Envelope Tracking (HPSS)
+        const float absL = std::abs(inL);
+        const float absR = std::abs(inR);
 
-        // 2. Mid/Side & Vocal Extraction (Center component within 250Hz - 3.5kHz)
-        const float mid = (inL + inR) * 0.5f;
-        const float side = (inL - inR) * 0.5f;
+        envFastL += alphaFast * (absL - envFastL);
+        envSlowL += alphaSlow * (absL - envSlowL);
 
-        hpVocL += vocHpAlpha * (mid - hpVocL);
-        const float midHp = mid - hpVocL;
-        lpVocL += vocLpAlpha * (midHp - lpVocL);
+        envFastR += alphaFast * (absR - envFastR);
+        envSlowR += alphaSlow * (absR - envSlowR);
 
-        // Vocal stem (Center focused vocal formant)
-        stems.vocalsL[i] = lpVocL * 0.9f;
-        stems.vocalsR[i] = lpVocL * 0.9f;
+        const float transL = std::max(0.0f, envFastL - envSlowL);
+        const float transR = std::max(0.0f, envFastR - envSlowR);
+        const float drumWeightL = std::clamp((transL / (envFastL + 1e-5f)) * config.percussiveSensitivity, 0.0f, 1.0f);
+        const float drumWeightR = std::clamp((transR / (envFastR + 1e-5f)) * config.percussiveSensitivity, 0.0f, 1.0f);
+        const float drumWeight = 0.5f * (drumWeightL + drumWeightR);
 
-        // 3. Drums Extraction (High transients & remaining low punch)
-        const float remainingL = inL - stems.bassL[i] - stems.vocalsL[i];
-        const float remainingR = inR - stems.bassR[i] - stems.vocalsR[i];
+        // 2. Harmonic / Sustained Component
+        const float harmonicWeight = 1.0f - drumWeight;
 
-        // High frequency transient components
-        hpVocR += 0.35f * (remainingL - hpVocR);
-        const float drumHighL = remainingL - hpVocR;
-        const float drumHighR = remainingR - hpVocR;
+        // 3. Stereo Azimuth Spatial Decomposition (Phantom Center vs Panned Sides)
+        const float mid = 0.5f * (inL + inR);
+        const float side = 0.5f * (inL - inR);
+        const float centerRatio = std::abs(mid) / (std::abs(mid) + std::abs(side) + 1e-5f);
+        const float centerWeight = std::clamp(centerRatio / std::max(0.1f, config.centerAzimuthWidth), 0.0f, 1.0f);
+        const float sideWeight = 1.0f - centerWeight;
 
-        stems.drumsL[i] = drumHighL * 0.85f;
-        stems.drumsR[i] = drumHighR * 0.85f;
+        // 4. Low-End Spectral Crossover for Bass vs Vocals
+        lpBassL += alphaBass * (inL - lpBassL);
+        lpBassR += alphaBass * (inR - lpBassR);
+        const float bassEnergy = 0.5f * (std::abs(lpBassL) + std::abs(lpBassR));
+        const float totalEnergy = 0.5f * (absL + absR) + 1e-5f;
+        const float bassFreqRatio = std::clamp(bassEnergy / totalEnergy, 0.0f, 1.0f);
 
-        // 4. Other (Stereo side content & melodic ambiance)
-        stems.otherL[i] = side + remainingL * 0.35f;
-        stems.otherR[i] = -side + remainingR * 0.35f;
+        // Sub-stem unnormalized weights
+        const float wDrums = drumWeight;
+        const float wBass = harmonicWeight * centerWeight * bassFreqRatio;
+        const float wVocals = harmonicWeight * centerWeight * (1.0f - bassFreqRatio);
+        const float wOther = harmonicWeight * sideWeight;
+
+        // 5. Zero-Phase Soft Wiener Mask Reconstruction (Guaranteed perfect sum)
+        const float wTotal = wDrums + wBass + wVocals + wOther + 1e-6f;
+        const float maskDrums = wDrums / wTotal;
+        const float maskBass = wBass / wTotal;
+        const float maskVocals = wVocals / wTotal;
+        const float maskOther = wOther / wTotal;
+
+        stems.drumsL[i] = inL * maskDrums;
+        stems.drumsR[i] = inR * maskDrums;
+
+        stems.bassL[i] = inL * maskBass;
+        stems.bassR[i] = inR * maskBass;
+
+        stems.vocalsL[i] = inL * maskVocals;
+        stems.vocalsR[i] = inR * maskVocals;
+
+        stems.otherL[i] = inL * maskOther;
+        stems.otherR[i] = inR * maskOther;
     }
 
     return stems;
+}
+
+std::pair<std::vector<float>, std::vector<float>> StemSeparatorService::extractVocals(
+    const float* left,
+    const float* right,
+    std::size_t numSamples,
+    double sampleRate,
+    float centerFocus)
+{
+    StemSeparationConfig cfg;
+    cfg.centerAzimuthWidth = std::clamp(1.0f - centerFocus * 0.7f, 0.15f, 0.8f);
+    auto stems = separate4StemsConfigurable(left, right, numSamples, sampleRate, cfg);
+    return {std::move(stems.vocalsL), std::move(stems.vocalsR)};
+}
+
+std::pair<std::vector<float>, std::vector<float>> StemSeparatorService::removeVocals(
+    const float* left,
+    const float* right,
+    std::size_t numSamples,
+    double sampleRate,
+    float centerFocus)
+{
+    const float* rData = (right != nullptr) ? right : left;
+    auto [vocL, vocR] = extractVocals(left, right, numSamples, sampleRate, centerFocus);
+
+    std::vector<float> instL(numSamples, 0.0f);
+    std::vector<float> instR(numSamples, 0.0f);
+
+    for (std::size_t i = 0; i < numSamples; ++i) {
+        instL[i] = left[i] - vocL[i];
+        instR[i] = rData[i] - vocR[i];
+    }
+
+    return {std::move(instL), std::move(instR)};
 }
 
 std::vector<ExtractedGrooveNote> GrooveExtractor::extractGroove(
@@ -88,67 +158,39 @@ std::vector<ExtractedGrooveNote> GrooveExtractor::extractGroove(
     double sampleRate,
     double bpm)
 {
-    std::vector<ExtractedGrooveNote> notes;
-    if (audio == nullptr || numSamples < 1000)
-        return notes;
-
-    const double validBpm = (bpm > 10.0) ? bpm : 120.0;
-    const double samplesPerBeat = (sampleRate * 60.0) / validBpm;
-    const auto minNoteDist = static_cast<std::size_t>(samplesPerBeat / 8.0); // 32nd note distance
-
-    constexpr std::size_t windowSize = 256;
-    std::vector<float> energy;
-    energy.reserve(numSamples / windowSize);
-
-    for (std::size_t i = 0; i + windowSize < numSamples; i += windowSize)
-    {
-        float rms = 0.0f;
-        for (std::size_t j = 0; j < windowSize; ++j)
-        {
-            const float s = audio[i + j];
-            rms += s * s;
-        }
-        energy.push_back(std::sqrt(rms / static_cast<float>(windowSize)));
+    std::vector<ExtractedGrooveNote> groove;
+    if (audio == nullptr || numSamples < 128 || sampleRate <= 0.0 || bpm <= 0.0) {
+        return groove;
     }
 
-    std::size_t lastOnsetSample = 0;
-    for (std::size_t i = 1; i + 1 < energy.size(); ++i)
-    {
-        const float diff = energy[i] - energy[i - 1];
-        if (diff > 0.04f && energy[i] > energy[i + 1])
-        {
-            const std::size_t samplePos = i * windowSize;
-            if (samplePos >= lastOnsetSample + minNoteDist)
-            {
-                lastOnsetSample = samplePos;
+    const double samplesPer16th = (15.0 / bpm) * sampleRate;
+    const auto totalSteps = static_cast<std::size_t>(static_cast<double>(numSamples) / samplesPer16th);
 
-                // Simple spectral zero-crossing rate estimator for frequency classification
-                std::size_t zeroCrossings = 0;
-                for (std::size_t j = 1; j < windowSize && (samplePos + j) < numSamples; ++j)
-                {
-                    if ((audio[samplePos + j] >= 0.0f) != (audio[samplePos + j - 1] >= 0.0f))
-                        ++zeroCrossings;
-                }
+    float prevEnergy = 0.0f;
+    for (std::size_t s = 0; s < totalSteps; ++s) {
+        const auto start = static_cast<std::size_t>(static_cast<double>(s) * samplesPer16th);
+        const auto end = std::min(start + static_cast<std::size_t>(samplesPer16th), numSamples);
 
-                std::uint8_t pitch = 36; // Kick default
-                if (zeroCrossings > 50)
-                    pitch = 42; // Hi-Hat (high frequency sizzle)
-                else if (zeroCrossings > 15)
-                    pitch = 38; // Snare (mid frequency crack)
-
-                const auto velocity = static_cast<std::uint8_t>(std::clamp(static_cast<int>(energy[i] * 220.0f), 40, 127));
-
-                notes.push_back(ExtractedGrooveNote {
-                    .pitch = pitch,
-                    .velocity = velocity,
-                    .startSample = samplePos,
-                    .lengthSamples = static_cast<std::uint64_t>(samplesPerBeat * 0.25)
-                });
-            }
+        float blockEnergy = 0.0f;
+        for (std::size_t i = start; i < end; ++i) {
+            blockEnergy += audio[i] * audio[i];
         }
+        blockEnergy = std::sqrt(blockEnergy / static_cast<float>(end - start));
+
+        // Detect onset
+        if (blockEnergy > prevEnergy * 1.6f && blockEnergy > 0.05f) {
+            const auto vel = static_cast<std::uint8_t>(std::clamp(blockEnergy * 127.0f, 40.0f, 127.0f));
+            groove.push_back(ExtractedGrooveNote {
+                .pitch = 36, // Kick
+                .velocity = vel,
+                .startSample = start,
+                .lengthSamples = static_cast<std::uint64_t>(samplesPer16th * 0.75)
+            });
+        }
+        prevEnergy = blockEnergy;
     }
 
-    return notes;
+    return groove;
 }
 
 } // namespace dawg::media

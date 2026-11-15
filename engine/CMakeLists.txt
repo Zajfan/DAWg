@@ -38,6 +38,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/PolyphaseOversampler.cpp
     src/dsp/SpatialSurroundPannerNode.cpp
     src/dsp/SpectralBalanceAssistant.cpp
+    src/dsp/SpectralResonanceTamerNode.cpp
     src/dsp/SpectralSidechainNode.cpp
     src/dsp/StepSequencerEngine.cpp
     src/dsp/TapeConsoleSummingNode.cpp
@@ -46,6 +47,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/TnhcSynthNode.cpp
     src/dsp/TransientExciterNode.cpp
     src/dsp/VocalPitchCorrectorNode.cpp
+    src/dsp/WavetableSynthNode.cpp
     src/plugins/AraPluginBridge.cpp
     src/plugins/PluginCrashSupervisor.cpp
 )

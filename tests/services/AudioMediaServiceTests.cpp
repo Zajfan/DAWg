@@ -596,6 +596,26 @@ void testStemSeparatorAndGrooveExtraction()
     require(stems.vocalsL.size() == numSamples, "vocals stem allocated");
     require(stems.otherL.size() == numSamples, "other stem allocated");
 
+    // Pure DSP Zero-Phase Soft Wiener Masking: Perfect Sum Reconstruction
+    for (std::size_t i = 0; i < 1000; ++i)
+    {
+        const float sumL = stems.drumsL[i] + stems.bassL[i] + stems.vocalsL[i] + stems.otherL[i];
+        require(std::abs(sumL - mixL[i]) < 1e-4f, "Pure DSP unmixing preserves 100% perfect sum energy reconstruction without AI");
+    }
+
+    // Pure DSP Vocal Extraction & Instrumental Karaoke Removal
+    auto [vocL, vocR] = StemSeparatorService::extractVocals(mixL.data(), mixR.data(), numSamples, 48000.0, 0.85f);
+    require(vocL.size() == numSamples, "Extracted vocal stem allocated");
+
+    auto [instL, instR] = StemSeparatorService::removeVocals(mixL.data(), mixR.data(), numSamples, 48000.0, 0.85f);
+    require(instL.size() == numSamples, "Instrumental stem without vocals allocated");
+
+    // Verify instrumental plus vocal reconstructs the original mix
+    for (std::size_t i = 0; i < 500; ++i)
+    {
+        require(std::abs((instL[i] + vocL[i]) - mixL[i]) < 1e-4f, "Vocal and instrumental sum transparently to original mix");
+    }
+
     // Groove Extraction test
     const auto grooveNotes = GrooveExtractor::extractGroove(mixL.data(), numSamples, 48000.0, 120.0);
     require(! grooveNotes.empty(), "GrooveExtractor extracts notes from percussive bursts");

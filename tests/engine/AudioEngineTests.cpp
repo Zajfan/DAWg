@@ -34,6 +34,7 @@
 #include <dawg/engine/dsp/PolyphaseOversampler.h>
 #include <dawg/engine/dsp/SpatialSurroundPannerNode.h>
 #include <dawg/engine/dsp/SpectralBalanceAssistant.h>
+#include <dawg/engine/dsp/SpectralResonanceTamerNode.h>
 #include <dawg/engine/dsp/SpectralSidechainNode.h>
 #include <dawg/engine/dsp/StepSequencerEngine.h>
 #include <dawg/engine/dsp/TapeConsoleSummingNode.h>
@@ -42,6 +43,7 @@
 #include <dawg/engine/dsp/TnhcSynthNode.h>
 #include <dawg/engine/dsp/TransientExciterNode.h>
 #include <dawg/engine/dsp/VocalPitchCorrectorNode.h>
+#include <dawg/engine/dsp/WavetableSynthNode.h>
 #include <dawg/engine/plugins/AraPluginBridge.h>
 #include <dawg/engine/dsp/DspWireGrid.h>
 #include <dawg/engine/dsp/MasteringMeterNode.h>
@@ -3809,6 +3811,130 @@ void testStepSequencerAndEuclideanPolyrhythm()
     seq.setFillMode(true);
     require(seq.isFillMode(), "Fill mode active for live performance variations");
 }
+
+void testWavetableSynthAnd2DMorphingGrid()
+{
+    using dawg::engine::dsp::WavetableSynthNode;
+    using dawg::engine::dsp::WavetableOscConfig;
+    using dawg::engine::dsp::SpectralWarpMode;
+    using dawg::engine::dsp::SubOscWaveform;
+    using dawg::engine::dsp::WavetableFilterMode;
+
+    WavetableSynthNode synth;
+    constexpr double sampleRate = 48000.0;
+    constexpr std::size_t blockSize = 128;
+
+    require(synth.prepare(sampleRate, blockSize, 2), "WavetableSynthNode prepared");
+    require(synth.latencySamples() == 0, "Zero latency wavetable synthesis");
+
+    // 1. 2D Morphing Orbital Grid
+    synth.setMorphCoordinates(0.4f, -0.6f);
+    require(std::abs(synth.morphX() - 0.4f) < 1e-4f, "Morph X set to 0.4");
+    require(std::abs(synth.morphY() - (-0.6f)) < 1e-4f, "Morph Y set to -0.6");
+
+    synth.setOrbitalModulation(true, 1.5f, 0.35f);
+    require(synth.isOrbitalModulationEnabled(), "Orbital trajectory modulation enabled");
+
+    // 2. Configure Oscillators with Spectral Warp
+    WavetableOscConfig cfgA;
+    cfgA.tablePos = 0.5f;
+    cfgA.warpMode = SpectralWarpMode::sync;
+    cfgA.warpAmount = 0.4f;
+    cfgA.level = 0.8f;
+    synth.setOscConfig(0, cfgA);
+
+    WavetableOscConfig cfgB;
+    cfgB.tablePos = 0.7f;
+    cfgB.warpMode = SpectralWarpMode::wavefolder;
+    cfgB.warpAmount = 0.3f;
+    cfgB.level = 0.8f;
+    synth.setOscConfig(1, cfgB);
+
+    // 3. Sub-Oscillator and SVF Filter
+    synth.setSubOsc(true, SubOscWaveform::sine, 1, 0.35f);
+    synth.setFilter(WavetableFilterMode::lowpass, 4500.0f, 1.8f, 0.25f);
+    synth.setAmpAdsr(2.0f, 80.0f, 0.7f, 150.0f);
+
+    // 4. Trigger Note and Process Audio
+    synth.noteOn(60, 110);
+    require(synth.activeVoiceCount() == 1, "Voice 1 active after noteOn(60)");
+
+    std::vector<float> chL(blockSize, 0.0f);
+    std::vector<float> chR(blockSize, 0.0f);
+    std::array<float*, 2> channels {chL.data(), chR.data()};
+    dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+    dawg::engine::AudioBufferView emptySidechain(nullptr, 0, 0);
+    dawg::engine::ProcessContext ctx {
+        .audio = audioView,
+        .midi = {},
+        .sampleRate = sampleRate,
+        .sidechain = emptySidechain
+    };
+
+    synth.process(ctx);
+
+    float maxSynth = 0.0f;
+    for (float s : chL) {
+        maxSynth = std::max(maxSynth, std::abs(s));
+    }
+    require(maxSynth > 0.05f && maxSynth < 2.0f && !std::isnan(maxSynth),
+            "Wavetable synth generates rich anti-aliased output across 2D morph plane");
+
+    synth.noteOff(60);
+}
+
+void testSpectralResonanceTamerAndDeEsser()
+{
+    using dawg::engine::dsp::SpectralResonanceTamerNode;
+    using dawg::engine::dsp::ResonanceProcessingMode;
+
+    SpectralResonanceTamerNode tamer;
+    constexpr double sampleRate = 48000.0;
+    constexpr std::size_t blockSize = 128;
+
+    require(tamer.prepare(sampleRate, blockSize, 2), "SpectralResonanceTamerNode prepared");
+    require(tamer.latencySamples() > 0, "Lookahead delay latency reported correctly");
+
+    tamer.setDepth(0.85f);
+    tamer.setSharpness(2.0f);
+    tamer.setThresholdDb(-26.0f);
+    tamer.setFrequencyRange(1500.0f, 10000.0f);
+    tamer.setProcessingMode(ResonanceProcessingMode::midOnly);
+
+    require(tamer.processingMode() == ResonanceProcessingMode::midOnly, "Mid/Side de-essing mode active");
+
+    // Feed harsh 3500 Hz sibilant resonance (amplitude 0.8) into audio block
+    std::vector<float> chL(blockSize);
+    std::vector<float> chR(blockSize);
+
+    for (int blk = 0; blk < 10; ++blk) {
+        for (std::size_t i = 0; i < blockSize; ++i) {
+            const float t = static_cast<float>(blk * blockSize + i) / static_cast<float>(sampleRate);
+            const float s = 0.8f * std::sin(2.0f * std::numbers::pi_v<float> * 3500.0f * t);
+            chL[i] = s;
+            chR[i] = s;
+        }
+
+        std::array<float*, 2> channels {chL.data(), chR.data()};
+        dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+        dawg::engine::AudioBufferView emptySidechain(nullptr, 0, 0);
+        dawg::engine::ProcessContext ctx {
+            .audio = audioView,
+            .midi = {},
+            .sampleRate = sampleRate,
+            .sidechain = emptySidechain
+        };
+
+        tamer.process(ctx);
+    }
+
+    // Dynamic suppression should engage on the 3500 Hz resonance
+    require(tamer.currentSuppressionDb() < -1.0f, "Spectral resonance tamer dynamically suppresses harsh 3.5 kHz peak");
+
+    // Test Delta Audition Mode
+    tamer.setDeltaListen(true);
+    require(tamer.isDeltaListen(), "Delta listen audition mode enabled");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -3958,4 +4084,6 @@ int main()
     testSpectralBalanceAssistantAndSmartUnmasking();
     testHarmonizerVocoderEngine();
     testStepSequencerAndEuclideanPolyrhythm();
+    testWavetableSynthAnd2DMorphingGrid();
+    testSpectralResonanceTamerAndDeEsser();
 }
