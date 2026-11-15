@@ -12,6 +12,7 @@
 #include <dawg/engine/ProcessorNode.h>
 #include <dawg/engine/RecordRingBuffer.h>
 #include <dawg/engine/SubBlockSplitter.h>
+#include <dawg/engine/SessionMatrixEngine.h>
 #include <dawg/engine/TempoMap.h>
 #include <dawg/engine/WorkStealingScheduler.h>
 #include <dawg/engine/dsp/AudioTranscriber.h>
@@ -22,11 +23,13 @@
 #include <dawg/engine/dsp/DrumPadSamplerNode.h>
 #include <dawg/engine/dsp/DynamicsCompressorNode.h>
 #include <dawg/engine/dsp/GranularCloudNode.h>
+#include <dawg/engine/dsp/HarmonicAssistant.h>
 #include <dawg/engine/dsp/ModulatorRack.h>
 #include <dawg/engine/dsp/MultibandCompressorNode.h>
 #include <dawg/engine/dsp/NeuralAmpModelerNode.h>
 #include <dawg/engine/dsp/ParametricEQNode.h>
 #include <dawg/engine/dsp/PolyphaseOversampler.h>
+#include <dawg/engine/dsp/SpatialSurroundPannerNode.h>
 #include <dawg/engine/dsp/SpectralSidechainNode.h>
 #include <dawg/engine/dsp/TnhcDelayNode.h>
 #include <dawg/engine/dsp/TnhcReverbNode.h>
@@ -3073,6 +3076,171 @@ void testGranularCloudSynthesisAndTapeFreeze()
     }
     require(energy > 0.0001f, "granular cloud produces non-zero ambient wet texture");
 }
+
+void testSpatialSurround714AtmosAndAdmExport()
+{
+    using namespace dawg::engine::dsp;
+
+    SpatialSurroundPannerNode panner;
+    require(panner.latencySamples() == 0, "spatial surround panner has 0 samples latency");
+
+    const double sampleRate = 48000.0;
+    const std::size_t blockSize = 128;
+    require(panner.prepare(sampleRate, blockSize, 2), "prepare successful");
+
+    // Position sound in top front left (+X left is -0.707, +Y front is 0.707, +Z ceiling is 0.85)
+    panner.setCoordinates(-0.707f, 0.707f, 0.85f);
+    require(std::abs(panner.x() - (-0.707f)) < 0.001f, "X coordinate set");
+    require(std::abs(panner.y() - 0.707f) < 0.001f, "Y coordinate set");
+    require(std::abs(panner.z() - 0.85f) < 0.001f, "Z coordinate set");
+
+    // Top front left speaker should have highest gain
+    const float tflGain = panner.speakerGain(SurroundChannel714::topFrontLeft);
+    const float rrsGain = panner.speakerGain(SurroundChannel714::rightRearSurround);
+    require(tflGain > rrsGain * 2.0f, "top front left speaker dominant for elevated front-left sound");
+
+    // LFE Subwoofer send
+    panner.setLfeSendDb(-6.0f);
+    require(panner.speakerGain(SurroundChannel714::lfe) > 0.45f, "LFE send active");
+
+    // Binaural downmix processing
+    std::vector<float> chL(blockSize, 0.8f);
+    std::vector<float> chR(blockSize, 0.8f);
+    std::array<float*, 2> chs {chL.data(), chR.data()};
+    dawg::engine::AudioBufferView view(chs.data(), 2, blockSize);
+    dawg::engine::AudioBufferView emptySc(nullptr, 0, 0);
+    dawg::engine::ProcessContext ctx {.audio = view, .midi = {}, .sampleRate = sampleRate, .sidechain = emptySc};
+
+    panner.process(ctx);
+
+    // Left ear should receive more energy than right ear
+    float energyL = 0.0f;
+    float energyR = 0.0f;
+    for (std::size_t i = 0; i < blockSize; ++i)
+    {
+        energyL += chL[i] * chL[i];
+        energyR += chR[i] * chR[i];
+    }
+    require(energyL > energyR, "binaural headphone downmix preserves left-dominant spatial balance");
+
+    // ADM BWF XML Metadata generation
+    const auto xml = panner.generateAdmMetadataXml("Lead_Synth_Object", 180.0);
+    require(!xml.empty(), "ADM XML generated");
+    require(xml.find("ITU-R_BS.2076") != std::string::npos, "ITU-R BS.2076 schema included");
+    require(xml.find("Lead_Synth_Object") != std::string::npos, "object name in ADM XML");
+    require(xml.find("<cartesian>1</cartesian>") != std::string::npos, "cartesian coordinates included");
+}
+
+void testHarmonicAssistantChordTrackAndVoiceLeading()
+{
+    using namespace dawg::engine::dsp;
+
+    HarmonicAssistant harmonic;
+    require(harmonic.chords().empty(), "starts with empty chord progression");
+
+    // 1. Timeline chord progression: C -> G -> Am -> F
+    harmonic.addChord(0.0, 4.0, Chord {.root = 0, .quality = ChordQuality::major}); // C
+    harmonic.addChord(4.0, 4.0, Chord {.root = 7, .quality = ChordQuality::major}); // G
+    harmonic.addChord(8.0, 4.0, Chord {.root = 9, .quality = ChordQuality::minor}); // Am
+    harmonic.addChord(12.0, 4.0, Chord {.root = 5, .quality = ChordQuality::major}); // F
+
+    require(harmonic.chords().size() == 4, "4 chords added");
+    const auto* c1 = harmonic.chordAtBeat(2.0);
+    require(c1 != nullptr && c1->chord.root == 0, "beat 2.0 is C major");
+    const auto* c2 = harmonic.chordAtBeat(6.0);
+    require(c2 != nullptr && c2->chord.root == 7, "beat 6.0 is G major");
+
+    // 2. Roman Numeral Harmonic Analysis
+    require(HarmonicAssistant::getRomanNumeral(Chord {.root = 0, .quality = ChordQuality::major}, 0, MusicalScale::major) == "I", "C in C major is I");
+    require(HarmonicAssistant::getRomanNumeral(Chord {.root = 2, .quality = ChordQuality::minor}, 0, MusicalScale::major) == "ii", "Dm in C major is ii");
+    require(HarmonicAssistant::getRomanNumeral(Chord {.root = 7, .quality = ChordQuality::dom7}, 0, MusicalScale::major) == "V7", "G7 in C major is V7");
+    require(HarmonicAssistant::getRomanNumeral(Chord {.root = 9, .quality = ChordQuality::minor}, 0, MusicalScale::major) == "vi", "Am in C major is vi");
+    require(HarmonicAssistant::getRomanNumeral(Chord {.root = 10, .quality = ChordQuality::major}, 0, MusicalScale::major) == "bVII", "Bb in C major is bVII (modal interchange)");
+
+    // 3. Dynamic Harmonic Snapping
+    // MIDI note 61 (C#) against C major chord (0, 4, 7) snaps to 60 (C)
+    const auto snapped = HarmonicAssistant::snapNote(61, Chord {.root = 0, .quality = ChordQuality::major}, 0, MusicalScale::major, true);
+    require(snapped == 60 || snapped == 64, "C# snaps to chord tone C or E");
+
+    // 4. Smooth Voice-Leading Optimizer
+    // C major voicing: C3 (48), G3 (55), C4 (60), E4 (64)
+    const std::vector<std::uint8_t> prevVoicing = {48, 55, 60, 64};
+    const Chord targetG {.root = 7, .quality = ChordQuality::major}; // G: G, B, D
+    const auto leadVoicing = HarmonicAssistant::optimizeVoiceLeading(targetG, prevVoicing);
+    require(leadVoicing.size() == 4, "4-part voicing generated");
+
+    // Verify minimal voice movement (average travel < 3 semitones)
+    int totalTravel = 0;
+    for (std::size_t i = 0; i < 4; ++i)
+    {
+        totalTravel += std::abs(static_cast<int>(leadVoicing[i]) - static_cast<int>(prevVoicing[i]));
+    }
+    require(totalTravel <= 8, "voice leading minimizes total pitch displacement across transitions");
+
+    // 5. Guitar Strum Generation
+    const auto strumNotes = HarmonicAssistant::generateStrum(leadVoicing, 0.0, 4.0, 120.0, 48000.0, 20.0f, true);
+    require(strumNotes.size() == 4, "4 strummed notes generated");
+    require(strumNotes[1].startSample > strumNotes[0].startSample, "subsequent strings delayed by strum time");
+}
+
+void testSessionMatrixEngineNonLinearLaunching()
+{
+    using namespace dawg::engine;
+
+    SessionMatrixEngine session;
+    require(session.activePlayingCount() == 0, "session starts with 0 playing clips");
+
+    // Configure clip slot at track 0, scene 0
+    SessionClipSlot slot0 {};
+    slot0.state = ClipSlotState::stopped;
+    slot0.name = "Drum_Loop_A";
+    slot0.color = LaunchpadColor::cyan;
+    slot0.lengthBeats = 4.0;
+    slot0.launchQuantize = LaunchQuantize::bar_1;
+    slot0.followAction = FollowAction::nextClip;
+    slot0.followActionBars = 1.0;
+    session.setClip(0, 0, slot0);
+
+    // Configure clip slot at track 0, scene 1
+    SessionClipSlot slot1 {};
+    slot1.state = ClipSlotState::stopped;
+    slot1.name = "Drum_Loop_B";
+    slot1.color = LaunchpadColor::purple;
+    slot1.lengthBeats = 4.0;
+    slot1.launchQuantize = LaunchQuantize::bar_1;
+    session.setClip(0, 1, slot1);
+
+    // 1. Queue clip (0, 0) to fire
+    session.fireClip(0, 0, false);
+    require(session.getClip(0, 0).state == ClipSlotState::queuedToPlay, "clip 0 is queued to play");
+
+    // 2. Advance clock by 3.5 beats (before bar boundary)
+    session.advanceClock(3.5, 3.5, 120.0);
+    require(session.getClip(0, 0).state == ClipSlotState::queuedToPlay, "clip still queued before bar boundary");
+
+    // 3. Advance clock across bar boundary (beat 4.1)
+    session.advanceClock(0.6, 4.1, 120.0);
+    require(session.getClip(0, 0).state == ClipSlotState::playing, "clip starts playing on bar boundary");
+    require(session.activePlayingCount() == 1, "1 active playing clip");
+
+    // 4. Advance clock by 4 beats (completing 1 bar) -> Follow Action triggers next clip (0, 1)
+    session.advanceClock(4.0, 8.1, 120.0);
+    // Follow action should queue scene 1
+    require(session.getClip(0, 1).state == ClipSlotState::queuedToPlay || session.getClip(0, 1).state == ClipSlotState::playing, "follow action queued next clip");
+
+    // 5. Launchpad hardware matrix RGB events
+    const auto lpEvents = session.generateLaunchpadLedEvents();
+    require(lpEvents.size() == SessionMatrixEngine::numTracks * SessionMatrixEngine::numScenes, "64 Launchpad events generated");
+
+    // 6. Handle Launchpad hardware pad press toggle
+    // Slot (0, 1) is currently playing, pressing it queues it to stop
+    session.handleLaunchpadPress(0, 1);
+    require(session.getClip(0, 1).state == ClipSlotState::queuedToStop || session.getClip(0, 1).state == ClipSlotState::stopped, "pressing playing pad triggers stop");
+
+    // Slot (0, 0) is currently stopped, pressing it queues it to play
+    session.handleLaunchpadPress(0, 0);
+    require(session.getClip(0, 0).state == ClipSlotState::queuedToPlay, "pressing stopped pad triggers play");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -3211,4 +3379,7 @@ int main()
     testAudioWarpEngineElasticMarkersAndQuantize();
     testNeuralAmpModelerWaveNetAndPowerSag();
     testGranularCloudSynthesisAndTapeFreeze();
+    testSpatialSurround714AtmosAndAdmExport();
+    testHarmonicAssistantChordTrackAndVoiceLeading();
+    testSessionMatrixEngineNonLinearLaunching();
 }
