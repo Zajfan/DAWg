@@ -21,6 +21,7 @@
 #include <dawg/engine/dsp/BrickwallLimiterNode.h>
 #include <dawg/engine/dsp/ConvolutionReverbNode.h>
 #include <dawg/engine/dsp/DrumPadSamplerNode.h>
+#include <dawg/engine/dsp/DynamicLinearPhaseEQNode.h>
 #include <dawg/engine/dsp/DynamicsCompressorNode.h>
 #include <dawg/engine/dsp/GranularCloudNode.h>
 #include <dawg/engine/dsp/HarmonicAssistant.h>
@@ -34,8 +35,9 @@
 #include <dawg/engine/dsp/TnhcDelayNode.h>
 #include <dawg/engine/dsp/TnhcReverbNode.h>
 #include <dawg/engine/dsp/TnhcSynthNode.h>
-#include <dawg/engine/dsp/AudioTranscriber.h>
+#include <dawg/engine/dsp/TransientExciterNode.h>
 #include <dawg/engine/dsp/VocalPitchCorrectorNode.h>
+#include <dawg/engine/plugins/AraPluginBridge.h>
 #include <dawg/engine/dsp/DspWireGrid.h>
 #include <dawg/engine/dsp/MasteringMeterNode.h>
 #include <dawg/engine/dsp/ZdfLadderFilter.h>
@@ -3241,6 +3243,201 @@ void testSessionMatrixEngineNonLinearLaunching()
     session.handleLaunchpadPress(0, 0);
     require(session.getClip(0, 0).state == ClipSlotState::queuedToPlay, "pressing stopped pad triggers play");
 }
+
+void testAra2PluginBridgeRandomAccessAndBaking()
+{
+    using namespace dawg::engine::plugins;
+
+    AraPluginBridge bridge("Test_Project_ARA");
+    require(bridge.isAra2Supported(), "ARA2 is supported");
+    require(bridge.documentName() == "Test_Project_ARA", "document name matches");
+
+    // 1. Add audio source with synthetic vocal melody (440 Hz = A4, MIDI 69)
+    const double sampleRate = 48000.0;
+    const std::size_t numSamples = 48000;
+    std::vector<float> samples(numSamples, 0.0f);
+    for (std::size_t i = 1000; i < 30000; ++i)
+    {
+        const float t = static_cast<float>(i) / static_cast<float>(sampleRate);
+        samples[i] = 0.8f * std::sin(2.0f * std::numbers::pi_v<float> * 440.0f * t);
+    }
+
+    AraAudioSource source {
+        .id = "src_vocal_01",
+        .name = "Lead_Vocal_Take1.wav",
+        .sampleRate = sampleRate,
+        .channelCount = 1,
+        .sampleCount = numSamples,
+        .sampleData = {samples}
+    };
+    require(bridge.addAudioSource(source), "audio source added");
+
+    // 2. Direct note analysis extraction
+    const auto notes = bridge.analyzeAudioSource("src_vocal_01");
+    require(!notes.empty(), "ARA detected note extracted from audio source");
+    require(std::abs(notes[0].pitchMidi - 69.0f) < 1.0f, "detected pitch is A4 (MIDI 69)");
+
+    // 3. Audio Modification (+2 semitones pitch shift)
+    AraAudioModification mod {
+        .id = "mod_vocal_tune",
+        .audioSourceId = "src_vocal_01",
+        .name = "Melodyne_Tuned",
+        .globalPitchShiftSemitones = 2.0f,
+        .globalFormantShiftSemitones = 0.0f,
+        .isModified = true
+    };
+    require(bridge.addAudioModification(mod), "audio modification added");
+
+    // 4. Playback Region
+    AraPlaybackRegion region {
+        .id = "region_01",
+        .audioModificationId = "mod_vocal_tune",
+        .startInModificationSec = 0.0,
+        .durationInModificationSec = 0.5,
+        .startInPlaybackSec = 2.0,
+        .durationInPlaybackSec = 0.5
+    };
+    require(bridge.addPlaybackRegion(region), "playback region added");
+
+    // 5. Instant sample-accurate offline rendering
+    const auto rendered = bridge.renderPlaybackRegion("region_01", sampleRate);
+    require(!rendered.empty(), "rendered audio channels returned");
+    require(rendered[0].size() == 24000, "0.5s rendered at 48kHz produces exactly 24000 samples");
+
+    // 6. Bake ARA edits directly to new audio buffer
+    const auto baked = bridge.bakeEditsToBuffer("mod_vocal_tune", sampleRate);
+    require(!baked.empty(), "baked buffer generated");
+    require(baked[0].size() == numSamples, "baked buffer matches source sample count");
+}
+
+void testTransientExciterMultiBandAndInflator()
+{
+    using namespace dawg::engine::dsp;
+
+    TransientExciterNode node;
+    require(node.latencySamples() == 0, "transient exciter guarantees 0 samples latency");
+
+    const double sampleRate = 48000.0;
+    const std::size_t blockSize = 128;
+    require(node.prepare(sampleRate, blockSize, 2), "prepare successful");
+
+    // Set Low, Mid, High band transient attacks and sustains
+    node.setBandAttackDb(0, 4.0f);   // Low punch +4 dB
+    node.setBandAttackDb(1, 6.0f);   // Mid snap +6 dB
+    node.setBandSustainDb(1, -3.0f); // Mid sustain -3 dB
+    node.setBandAttackDb(2, 5.0f);   // High bite +5 dB
+
+    require(std::abs(node.bandAttackDb(0) - 4.0f) < 0.01f, "low attack set");
+    require(std::abs(node.bandAttackDb(1) - 6.0f) < 0.01f, "mid attack set");
+    require(std::abs(node.bandSustainDb(1) - (-3.0f)) < 0.01f, "mid sustain set");
+
+    // Exciter modes
+    node.setExciterMode(ExciterHarmonicMode::warmTube);
+    require(node.exciterMode() == ExciterHarmonicMode::warmTube, "warmTube mode set");
+
+    node.setExciterDrive(0.5f);
+    require(std::abs(node.exciterDrive() - 0.5f) < 0.01f, "exciter drive set");
+
+    node.setExciterMix(0.4f);
+    require(std::abs(node.exciterMix() - 0.4f) < 0.01f, "exciter mix set");
+
+    // Inflator headroom expander
+    node.setInflatorCurve(30.0f);
+    require(std::abs(node.inflatorCurve() - 30.0f) < 0.01f, "inflator curve set");
+
+    node.setInflatorAmount(0.6f);
+    require(std::abs(node.inflatorAmount() - 0.6f) < 0.01f, "inflator amount set");
+
+    // Process drum hit transient block
+    std::vector<float> chL(blockSize, 0.0f);
+    std::vector<float> chR(blockSize, 0.0f);
+    chL[0] = 0.95f; // Sharp percussive transient
+    chR[0] = 0.95f;
+
+    std::array<float*, 2> chs {chL.data(), chR.data()};
+    dawg::engine::AudioBufferView view(chs.data(), 2, blockSize);
+    dawg::engine::AudioBufferView emptySc(nullptr, 0, 0);
+    dawg::engine::ProcessContext ctx {.audio = view, .midi = {}, .sampleRate = sampleRate, .sidechain = emptySc};
+
+    node.process(ctx);
+
+    // Verify transient activity is detected in the mid band
+    require(node.bandTransientActivity(1) > 0.01f, "mid transient activity detected on drum hit");
+    // Peak should be constrained and not blow up
+    require(std::abs(chL[0]) <= 1.05f, "transient output well-behaved under tube headroom expander");
+}
+
+void testDynamicLinearPhaseEQAndAutoGain()
+{
+    using namespace dawg::engine::dsp;
+
+    DynamicLinearPhaseEQNode eq;
+    require(eq.latencySamples() == 0, "minimum phase EQ has 0 samples latency");
+
+    const double sampleRate = 48000.0;
+    const std::size_t blockSize = 128;
+    require(eq.prepare(sampleRate, blockSize, 2), "prepare successful");
+
+    // Switch to linear phase mode
+    eq.setPhaseMode(EqPhaseMode::linearPhase);
+    require(eq.phaseMode() == EqPhaseMode::linearPhase, "linear phase mode enabled");
+    require(eq.latencySamples() == DynamicLinearPhaseEQNode::firLatency, "linear phase mode reports FIR group delay latency");
+
+    // Switch back to minimum phase
+    eq.setPhaseMode(EqPhaseMode::minimumPhase);
+    require(eq.latencySamples() == 0, "minimum phase latency restored to 0");
+
+    // Configure Band 2 (450 Hz Bell) as dynamic compressor
+    DynamicEqBandSettings band2 {};
+    band2.enabled = true;
+    band2.type = EqFilterType::bell;
+    band2.frequencyHz = 450.0f;
+    band2.gainDb = 0.0f;
+    band2.q = 1.4f;
+    band2.dynamicEnabled = true;
+    band2.thresholdDb = -20.0f;
+    band2.rangeDb = -8.0f; // 8 dB dynamic gain ducking
+    band2.attackMs = 1.0f;
+    band2.releaseMs = 40.0f;
+    eq.setBandSettings(2, band2);
+
+    // Feed strong 450 Hz resonant tone (0 dBFS) to trigger dynamic EQ compression
+    std::vector<float> chL(blockSize);
+    std::vector<float> chR(blockSize);
+
+    for (int blk = 0; blk < 20; ++blk)
+    {
+        for (std::size_t i = 0; i < blockSize; ++i)
+        {
+            const float t = static_cast<float>(blk * blockSize + i) / static_cast<float>(sampleRate);
+            const float s = 0.9f * std::sin(2.0f * std::numbers::pi_v<float> * 450.0f * t);
+            chL[i] = s;
+            chR[i] = s;
+        }
+
+        std::array<float*, 2> chs {chL.data(), chR.data()};
+        dawg::engine::AudioBufferView view(chs.data(), 2, blockSize);
+        dawg::engine::AudioBufferView emptySc(nullptr, 0, 0);
+        dawg::engine::ProcessContext ctx {.audio = view, .midi = {}, .sampleRate = sampleRate, .sidechain = emptySc};
+
+        eq.process(ctx);
+    }
+
+    // Band 2 should register negative dynamic gain shift (compression)
+    require(eq.dynamicGainShiftDb(2) < -1.0f, "dynamic EQ engages compression on loud resonance");
+
+    // Test Perceived Loudness Auto-Gain Compensation
+    eq.setAutoGain(true);
+    require(eq.isAutoGain(), "auto gain enabled");
+
+    // Heavy boost on mid bell band (+10 dB)
+    band2.dynamicEnabled = false;
+    band2.gainDb = 10.0f;
+    eq.setBandSettings(2, band2);
+
+    // Auto-gain should calculate negative compensation gain
+    require(eq.currentAutoGainDb() < -2.0f, "auto-gain applies negative compensation against heavy EQ boost");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -3382,4 +3579,7 @@ int main()
     testSpatialSurround714AtmosAndAdmExport();
     testHarmonicAssistantChordTrackAndVoiceLeading();
     testSessionMatrixEngineNonLinearLaunching();
+    testAra2PluginBridgeRandomAccessAndBaking();
+    testTransientExciterMultiBandAndInflator();
+    testDynamicLinearPhaseEQAndAutoGain();
 }

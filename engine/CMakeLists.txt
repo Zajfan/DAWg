@@ -25,6 +25,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/DynamicsCompressorNode.cpp
     src/dsp/DrumPadSamplerNode.cpp
     src/dsp/DspWireGrid.cpp
+    src/dsp/DynamicLinearPhaseEQNode.cpp
     src/dsp/GranularCloudNode.cpp
     src/dsp/HarmonicAssistant.cpp
     src/dsp/MasteringMeterNode.cpp
@@ -38,7 +39,9 @@ add_library(dawg_engine_core STATIC
     src/dsp/TnhcDelayNode.cpp
     src/dsp/TnhcReverbNode.cpp
     src/dsp/TnhcSynthNode.cpp
+    src/dsp/TransientExciterNode.cpp
     src/dsp/VocalPitchCorrectorNode.cpp
+    src/plugins/AraPluginBridge.cpp
     src/plugins/PluginCrashSupervisor.cpp
 )
 target_include_directories(dawg_engine_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
