@@ -141,6 +141,7 @@ bool AudioEngine::prepare(const EngineConfig& config) noexcept
 
 void AudioEngine::release() noexcept
 {
+    m_scheduler.shutdown();
     m_prepared = false;
 }
 

@@ -12,6 +12,7 @@
 #include <dawg/engine/RenderSnapshotPublisher.h>
 #include <dawg/engine/TransportSnapshot.h>
 #include <dawg/engine/TransportState.h>
+#include <dawg/engine/WorkStealingScheduler.h>
 #include <dawg/engine/dsp/BrickwallLimiterNode.h>
 
 #include <memory>
@@ -75,6 +76,12 @@ public:
     void setMasterLimiterEnabled(bool enabled) noexcept;
     [[nodiscard]] bool isMasterLimiterEnabled() const noexcept;
 
+    // Multi-Core Topological Work-Stealing Scheduler (Frontier A)
+    bool prepareScheduler(std::size_t workerCount) noexcept { return m_scheduler.prepare(workerCount); }
+    void shutdownScheduler() noexcept { m_scheduler.shutdown(); }
+    [[nodiscard]] WorkStealingScheduler* scheduler() noexcept { return &m_scheduler; }
+    [[nodiscard]] std::size_t schedulerWorkerCount() const noexcept { return m_scheduler.workerCount(); }
+
     // Adopts the latest render snapshot, then applies at most 64 queued commands
     // in FIFO order before rendering.
     // Bounded by queue capacity and supplied view; no allocation, I/O, blocking.
@@ -105,6 +112,7 @@ private:
     std::atomic<std::uint32_t> m_loopTakeCount {0};
     std::atomic<bool> m_masterLimiterEnabled {false};
     dsp::BrickwallLimiterNode m_masterLimiter;
+    WorkStealingScheduler m_scheduler;
     double m_sampleRate {48000.0};
     bool m_prepared {};
 };

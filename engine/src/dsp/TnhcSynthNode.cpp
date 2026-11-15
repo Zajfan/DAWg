@@ -34,6 +34,25 @@ float polyBlep(const double t, const double dt) noexcept
     return 0.0f;
 }
 
+// PolyBLAMP residual for anti-aliasing slope/derivative discontinuities (triangles)
+float polyBlamp(const double t, const double dt) noexcept
+{
+    if (dt <= 0.0)
+        return 0.0f;
+
+    if (t < dt)
+    {
+        const double norm = t / dt;
+        return static_cast<float>(-dt * (norm * norm * norm / 6.0 - norm * norm / 2.0 + norm / 2.0 - 1.0 / 6.0));
+    }
+    if (t > 1.0 - dt)
+    {
+        const double norm = (t - 1.0) / dt;
+        return static_cast<float>(dt * (norm * norm * norm / 6.0 + norm * norm / 2.0 + norm / 2.0 + 1.0 / 6.0));
+    }
+    return 0.0f;
+}
+
 // Simple fast PRNG (LCG)
 float nextNoise(std::uint32_t& state) noexcept
 {
@@ -131,6 +150,7 @@ float TnhcSynthNode::TptsSvf::process(const float in, const float cutoffHz,
     switch (mode)
     {
     case SynthFilterMode::lowpass:
+    case SynthFilterMode::moogLadder:
         return static_cast<float>(v2);
     case SynthFilterMode::bandpass:
         return static_cast<float>(v1);
@@ -312,7 +332,8 @@ float TnhcSynthNode::evaluateOsc(const SynthWaveform wave, const double phase,
     {
         const double saw = 2.0 * phase - 1.0;
         const double tri = 2.0 * std::abs(saw) - 1.0;
-        return static_cast<float>(tri);
+        const double wrapPhaseHalf = std::fmod(phase + 0.5, 1.0);
+        return static_cast<float>(tri) + polyBlamp(phase, phaseInc) - polyBlamp(wrapPhaseHalf, phaseInc);
     }
 
     case SynthWaveform::noise:
@@ -346,8 +367,18 @@ float TnhcSynthNode::renderVoiceSample(Voice& voice, const float lfoVal) noexcep
     const float osc1 = evaluateOsc(m_osc1Wave, voice.osc1Phase, inc1, m_pulseWidth, voice.rngState);
     const float osc2 = evaluateOsc(m_osc2Wave, voice.osc2Phase, inc2, m_pulseWidth, voice.rngState);
 
-    voice.osc1Phase = std::fmod(voice.osc1Phase + inc1, 1.0);
-    voice.osc2Phase = std::fmod(voice.osc2Phase + inc2, 1.0);
+    const double nextOsc1Phase = voice.osc1Phase + inc1;
+    if (m_hardSync && nextOsc1Phase >= 1.0)
+    {
+        // Slave hard-sync reset: calculate fractional sub-sample alignment
+        const double frac = (1.0 - voice.osc1Phase) / inc1;
+        voice.osc2Phase = frac * inc2;
+    }
+    else
+    {
+        voice.osc2Phase = std::fmod(voice.osc2Phase + inc2, 1.0);
+    }
+    voice.osc1Phase = std::fmod(nextOsc1Phase, 1.0);
 
     const float mixedOsc = (1.0f - m_oscMix) * osc1 + m_oscMix * osc2;
 
@@ -357,9 +388,19 @@ float TnhcSynthNode::renderVoiceSample(Voice& voice, const float lfoVal) noexcep
     const float cutoffModOctaves = filterEnvVal * m_filterEnvAmount * 4.0f + lfoVal * m_lfoFilterDepth + timbreOctaves + pressureCutoffOctaves;
     const float targetCutoff = std::clamp(m_filterCutoff * std::pow(2.0f, cutoffModOctaves), 20.0f, 20000.0f);
 
-    // 4-pole cascaded SVF (24 dB/oct)
-    const float s1 = voice.svfStage1.process(mixedOsc, targetCutoff, m_filterResonance, m_sampleRate, m_filterMode);
-    const float filtered = voice.svfStage2.process(s1, targetCutoff, m_filterResonance, m_sampleRate, m_filterMode);
+    float filtered = 0.0f;
+    if (m_filterMode == SynthFilterMode::moogLadder)
+    {
+        // Vadim Zavalishin 4-pole ZDF transistor ladder filter with resonance bass compensation
+        const float kRes = std::clamp((m_filterResonance - 0.5f) / 5.0f, 0.0f, 3.85f);
+        filtered = voice.moogLadder.process(mixedOsc, targetCutoff, kRes, m_sampleRate);
+    }
+    else
+    {
+        // 4-pole cascaded SVF (24 dB/oct)
+        const float s1 = voice.svfStage1.process(mixedOsc, targetCutoff, m_filterResonance, m_sampleRate, m_filterMode);
+        filtered = voice.svfStage2.process(s1, targetCutoff, m_filterResonance, m_sampleRate, m_filterMode);
+    }
 
     const float pressureAmpMod = 1.0f + voice.pressure * 0.5f;
     return filtered * amp * voice.velocity * pressureAmpMod;
@@ -602,6 +643,24 @@ std::vector<SynthPreset> TnhcSynthNode::factoryPresets()
             .lfoRate = 8.0f,
             .lfoPitchDepth = 0.0f,
             .lfoFilterDepth = 2.0f
+        },
+        SynthPreset {
+            .name = "Moog 24dB Bass",
+            .category = "Bass",
+            .osc1Wave = SynthWaveform::saw,
+            .osc2Wave = SynthWaveform::pulse,
+            .oscMix = 0.4f,
+            .osc2DetuneCents = 7.0f,
+            .pulseWidth = 0.5f,
+            .filterMode = SynthFilterMode::moogLadder,
+            .filterCutoff = 800.0f,
+            .filterResonance = 6.0f,
+            .filterEnvAmount = 0.7f,
+            .ampParams = AdsrParams {0.005f, 0.3f, 0.4f, 0.15f},
+            .filterParams = AdsrParams {0.005f, 0.25f, 0.2f, 0.2f},
+            .lfoRate = 0.5f,
+            .lfoPitchDepth = 0.0f,
+            .lfoFilterDepth = 0.2f
         }
     };
 }

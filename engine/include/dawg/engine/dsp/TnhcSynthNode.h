@@ -1,6 +1,7 @@
 #pragma once
 
 #include <dawg/engine/ProcessorNode.h>
+#include <dawg/engine/dsp/ZdfLadderFilter.h>
 
 #include <array>
 #include <atomic>
@@ -25,7 +26,8 @@ enum class SynthFilterMode : std::uint8_t
 {
     lowpass,
     bandpass,
-    highpass
+    highpass,
+    moogLadder
 };
 
 struct AdsrParams
@@ -99,6 +101,8 @@ public:
     void setOscMix(float mix) noexcept { m_oscMix = std::clamp(mix, 0.0f, 1.0f); }
     void setOsc2DetuneCents(float cents) noexcept { m_osc2DetuneCents = cents; }
     void setPulseWidth(float pw) noexcept { m_pulseWidth = std::clamp(pw, 0.05f, 0.95f); }
+    void setHardSync(bool sync) noexcept { m_hardSync = sync; }
+    [[nodiscard]] bool isHardSync() const noexcept { return m_hardSync; }
 
     void setFilterMode(SynthFilterMode mode) noexcept { m_filterMode = mode; }
     void setFilterCutoff(float fc) noexcept { m_filterCutoff = std::clamp(fc, 20.0f, 20000.0f); }
@@ -187,6 +191,7 @@ private:
 
         TptsSvf svfStage1;
         TptsSvf svfStage2;
+        dsp::ZdfLadderFilter moogLadder;
 
         std::uint32_t rngState {12345};
 
@@ -206,6 +211,7 @@ private:
             filterEnv.reset();
             svfStage1.reset();
             svfStage2.reset();
+            moogLadder.reset();
         }
     };
 
@@ -224,6 +230,7 @@ private:
     float m_oscMix {0.5f};
     float m_osc2DetuneCents {7.0f};
     float m_pulseWidth {0.5f};
+    bool m_hardSync {false};
 
     SynthFilterMode m_filterMode {SynthFilterMode::lowpass};
     float m_filterCutoff {2000.0f};

@@ -19,9 +19,12 @@
 #include <dawg/engine/dsp/DynamicsCompressorNode.h>
 #include <dawg/engine/dsp/ModulatorRack.h>
 #include <dawg/engine/dsp/ParametricEQNode.h>
+#include <dawg/engine/dsp/PolyphaseOversampler.h>
 #include <dawg/engine/dsp/TnhcDelayNode.h>
 #include <dawg/engine/dsp/TnhcReverbNode.h>
 #include <dawg/engine/dsp/TnhcSynthNode.h>
+#include <dawg/engine/dsp/ZdfLadderFilter.h>
+#include <dawg/engine/plugins/PluginCrashSupervisor.h>
 #include <dawg/engine/clap/ClapPluginNode.h>
 #include <dawg/engine/MidiControllerManager.h>
 #include <dawg/engine/WsolaTimeStretcher.h>
@@ -1249,7 +1252,7 @@ void testTnhcSynthNodePolyphonyAndMidi()
 
     // Factory presets verification
     const auto presets = TnhcSynthNode::factoryPresets();
-    require(presets.size() == 8, "factory preset library contains exactly 8 studio presets");
+    require(presets.size() == 9, "factory preset library contains 9 studio presets");
     require(presets[0].name == "303 Acid Bass" && presets[0].category == "Bass", "preset 0 is 303 Acid Bass");
     require(presets[5].name == "Cosmic Shimmer" && presets[5].category == "Pad", "preset 5 is Cosmic Shimmer");
 
@@ -1995,6 +1998,189 @@ void testModulatorRackLfoEnvelopeAndStepMod()
     rack.setStepValue(0, 0.9f);
     require(std::abs(rack.stepValue(0) - 0.9f) < 1e-4f, "Step 0 value is stored");
 }
+
+void testAudioEngineSchedulerAndTopologicalPdc()
+{
+    // Frontier A: Multi-core topological scheduler & automatic PDC alignment
+    dawg::engine::AudioEngine engine;
+    require(engine.prepareScheduler(2), "AudioEngine prepared scheduler with 2 worker threads");
+    require(engine.schedulerWorkerCount() == 2, "Scheduler worker count is 2");
+
+    // Build a DspGraph with parallel paths: Path 1 has a 64-sample lookahead delay node.
+    // Graph compiler must insert a 64-sample DelayCompensatorNode on Path 2 so summing is sample-accurate!
+    dawg::engine::DspGraph graph;
+    const auto inNode = graph.addNode(std::make_unique<dawg::engine::GainPanNode>(1.0f, 0.0f), true, false);
+    const auto delayNode = graph.addNode(std::make_unique<dawg::engine::DelayCompensatorNode>(64), false, false);
+    const auto directNode = graph.addNode(std::make_unique<dawg::engine::GainPanNode>(1.0f, 0.0f), false, false);
+    const auto masterNode = graph.addNode(std::make_unique<dawg::engine::GainPanNode>(1.0f, 0.0f), false, true);
+
+    require(graph.addEdge(inNode, delayNode), "Edge in -> delayNode");
+    require(graph.addEdge(inNode, directNode), "Edge in -> directNode (parallel path)");
+    require(graph.addEdge(delayNode, masterNode), "Edge delayNode -> master");
+    require(graph.addEdge(directNode, masterNode), "Edge directNode -> master");
+
+    require(graph.compile(48000.0, 256, 2), "Graph compiled with automatic PDC");
+    require(graph.totalLatencySamples() == 64, "Total graph latency is 64 samples");
+    require(graph.wavefrontCount() >= 3, "Graph grouped into 3+ topological wavefronts");
+
+    // Feed a single impulse at sample 0 into left channel
+    std::vector<float> inL(256, 0.0f);
+    std::vector<float> inR(256, 0.0f);
+    inL[0] = 1.0f;
+    std::array<float*, 2> inChans {inL.data(), inR.data()};
+
+    std::vector<float> outL(256, 0.0f);
+    std::vector<float> outR(256, 0.0f);
+    std::array<float*, 2> outChans {outL.data(), outR.data()};
+
+    // Execute with multi-core work-stealing scheduler
+    graph.process(
+        dawg::engine::AudioBufferView {inChans.data(), 2, 256},
+        dawg::engine::AudioBufferView {outChans.data(), 2, 256},
+        engine.scheduler());
+
+    // Both paths must arrive aligned at sample 64 with sum = 2.0 (1.0 delayed + 1.0 compensated)
+    require(std::abs(outL[0]) < 1e-6f, "Sample 0 is 0 due to 64-sample PDC alignment");
+    require(std::abs(outL[64] - 2.0f) < 1e-4f, "Sample 64 has aligned sum of both parallel paths (2.0)");
+
+    engine.shutdownScheduler();
+    require(engine.schedulerWorkerCount() == 0, "Scheduler shut down cleanly");
+}
+
+void testPolyphaseOversamplingAndZdfMoogLadder()
+{
+    // Frontier B: Polyphase 2x/4x Oversampling, ZDF Moog Ladder & Anti-aliased PolyBLAMP
+    using dawg::engine::dsp::PolyphaseOversampler;
+    using dawg::engine::dsp::OversampleFactor;
+    using dawg::engine::dsp::ZdfLadderFilter;
+    using dawg::engine::TnhcSynthNode;
+    using dawg::engine::SynthWaveform;
+    using dawg::engine::SynthFilterMode;
+
+    // 1. Polyphase Oversampler (2x and 4x)
+    PolyphaseOversampler oversampler(OversampleFactor::x2);
+    require(oversampler.prepare(48000.0, 256, 2), "Polyphase oversampler prepared");
+    require(std::abs(oversampler.oversampledRate() - 96000.0) < 1e-4, "2x oversampled rate is 96 kHz");
+
+    std::vector<float> audioL(256, 0.0f);
+    std::vector<float> audioR(256, 0.0f);
+    // Hard square signal causing extreme harmonic distortion
+    for (std::size_t i = 0; i < 256; ++i)
+    {
+        audioL[i] = (i % 32 < 16) ? 1.5f : -1.5f;
+        audioR[i] = audioL[i];
+    }
+    std::array<float*, 2> chans {audioL.data(), audioR.data()};
+
+    // Apply tanh non-linearity with 2x oversampling
+    oversampler.process(
+        dawg::engine::AudioBufferView {chans.data(), 2, 256},
+        [](float s, double) noexcept { return std::tanh(s * 2.0f); });
+
+    require(std::abs(audioL[0]) > 0.5f, "Oversampled non-linearity processed correctly");
+    require(! std::isnan(audioL[0]) && ! std::isinf(audioL[0]), "Output is numerically stable");
+
+    // Test 4x oversampling factor
+    oversampler.setFactor(OversampleFactor::x4);
+    require(std::abs(oversampler.oversampledRate() - 192000.0) < 1e-4, "4x oversampled rate is 192 kHz");
+    oversampler.process(
+        dawg::engine::AudioBufferView {chans.data(), 2, 256},
+        [](float s, double) noexcept { return std::tanh(s * 2.0f); });
+
+    // 2. Vadim Zavalishin 4-pole ZDF Transistor Ladder Filter
+    ZdfLadderFilter ladder;
+    ladder.setDrive(1.5f);
+    ladder.setResonanceCompensation(0.6f);
+
+    // Filter a test step
+    float y = 0.0f;
+    for (int i = 0; i < 100; ++i)
+    {
+        y = ladder.process(1.0f, 1000.0f, 2.5f, 48000.0);
+    }
+    require(std::isfinite(y), "ZDF ladder filter output is finite and stable");
+    require(y > 0.0f, "ZDF ladder step response reaches steady-state");
+
+    // 3. TnhcSynthNode with Moog Ladder mode, PolyBLAMP triangle, and Hard-Sync
+    TnhcSynthNode synth;
+    require(synth.prepare(48000.0, 256, 2), "TnhcSynth prepared");
+    synth.setFilterMode(SynthFilterMode::moogLadder);
+    synth.setFilterCutoff(1200.0f);
+    synth.setFilterResonance(4.0f);
+    synth.setOsc1Waveform(SynthWaveform::saw);
+    synth.setOsc2Waveform(SynthWaveform::triangle);
+    synth.setHardSync(true);
+    require(synth.isHardSync(), "Hard-sync is enabled on synth");
+
+    synth.noteOn(60, 0.9f);
+    std::vector<float> synthL(256, 0.0f);
+    std::vector<float> synthR(256, 0.0f);
+    std::array<float*, 2> synthPlanes {synthL.data(), synthR.data()};
+    dawg::engine::ProcessContext synthCtx {
+        .audio = dawg::engine::AudioBufferView {synthPlanes.data(), 2, 256},
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+    synth.process(synthCtx);
+
+    float peak = 0.0f;
+    for (const float s : synthL) peak = std::max(peak, std::abs(s));
+    require(peak > 0.01f, "Synth produced audio with Moog ladder & hard-sync");
+    synth.allNotesOff();
+}
+
+void testPluginCrashSupervisorAndAirGappedImmunity()
+{
+    // Frontier C: Air-gapped out-of-process plugin host & crash supervisor
+    using dawg::engine::plugins::PluginCrashSupervisor;
+    using dawg::engine::plugins::PluginHostState;
+
+    PluginCrashSupervisor supervisor("TestAirGappedEQ", 1);
+    supervisor.setSimulatedCrashMode(true); // Deterministic test environment
+    require(supervisor.prepare(48000.0, 256, 2), "Supervisor prepared");
+    require(supervisor.state() == PluginHostState::running, "Supervisor state is running");
+    require(! supervisor.isCrashed(), "Supervisor is not crashed initially");
+
+    // 1. Process normal audio block
+    std::vector<float> bufL(128, 0.5f);
+    std::vector<float> bufR(128, 0.5f);
+    std::array<float*, 2> bufPlanes {bufL.data(), bufR.data()};
+    dawg::engine::ProcessContext ctx {
+        .audio = dawg::engine::AudioBufferView {bufPlanes.data(), 2, 128},
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+    supervisor.process(ctx);
+    require(std::abs(bufL[0] - std::tanh(0.5f)) < 1e-4f, "Audio was processed by air-gapped plugin");
+
+    // 2. Inject intentional crash in plugin
+    supervisor.injectTestWorkerCrash();
+    // Next process cycle catches crash:
+    supervisor.process(ctx);
+    require(supervisor.isCrashed(), "Supervisor detected plugin crash");
+    require(supervisor.state() == PluginHostState::crashed, "State transitioned to crashed");
+    require(supervisor.crashCount() == 1, "Crash count incremented to 1");
+
+    // 3. Audio immunity: Host audio continues playing with 0 delay and no crash propagation
+    std::vector<float> dryL(64, 0.33f);
+    std::vector<float> dryR(64, 0.33f);
+    std::array<float*, 2> dryPlanes {dryL.data(), dryR.data()};
+    dawg::engine::ProcessContext dryCtx {
+        .audio = dawg::engine::AudioBufferView {dryPlanes.data(), 2, 64},
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+    supervisor.process(dryCtx);
+    require(std::abs(dryL[0] - 0.33f) < 1e-6f, "Dry audio passes through untouched while plugin is crashed");
+
+    // 4. 1-Click air-gapped restart
+    require(supervisor.restart(), "Supervisor restarted cleanly");
+    require(! supervisor.isCrashed(), "Plugin is no longer crashed after restart");
+    require(supervisor.state() == PluginHostState::running, "Plugin restored to running state");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -2117,4 +2303,7 @@ int main()
     testDrumPadSamplerNodePadsChokeAndSlicing();
     testInputMonitoringPunchInAndLoopTakeCount();
     testModulatorRackLfoEnvelopeAndStepMod();
+    testAudioEngineSchedulerAndTopologicalPdc();
+    testPolyphaseOversamplingAndZdfMoogLadder();
+    testPluginCrashSupervisorAndAirGappedImmunity();
 }
