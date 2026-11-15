@@ -30,12 +30,15 @@ add_library(dawg_engine_core STATIC
     src/dsp/HarmonicAssistant.cpp
     src/dsp/MasteringMeterNode.cpp
     src/dsp/ModulatorRack.cpp
+    src/dsp/MultiSampleInstrumentNode.cpp
     src/dsp/MultibandCompressorNode.cpp
     src/dsp/NeuralAmpModelerNode.cpp
     src/dsp/ParametricEQNode.cpp
     src/dsp/PolyphaseOversampler.cpp
     src/dsp/SpatialSurroundPannerNode.cpp
+    src/dsp/SpectralBalanceAssistant.cpp
     src/dsp/SpectralSidechainNode.cpp
+    src/dsp/TapeConsoleSummingNode.cpp
     src/dsp/TnhcDelayNode.cpp
     src/dsp/TnhcReverbNode.cpp
     src/dsp/TnhcSynthNode.cpp

@@ -26,12 +26,15 @@
 #include <dawg/engine/dsp/GranularCloudNode.h>
 #include <dawg/engine/dsp/HarmonicAssistant.h>
 #include <dawg/engine/dsp/ModulatorRack.h>
+#include <dawg/engine/dsp/MultiSampleInstrumentNode.h>
 #include <dawg/engine/dsp/MultibandCompressorNode.h>
 #include <dawg/engine/dsp/NeuralAmpModelerNode.h>
 #include <dawg/engine/dsp/ParametricEQNode.h>
 #include <dawg/engine/dsp/PolyphaseOversampler.h>
 #include <dawg/engine/dsp/SpatialSurroundPannerNode.h>
+#include <dawg/engine/dsp/SpectralBalanceAssistant.h>
 #include <dawg/engine/dsp/SpectralSidechainNode.h>
+#include <dawg/engine/dsp/TapeConsoleSummingNode.h>
 #include <dawg/engine/dsp/TnhcDelayNode.h>
 #include <dawg/engine/dsp/TnhcReverbNode.h>
 #include <dawg/engine/dsp/TnhcSynthNode.h>
@@ -3438,6 +3441,208 @@ void testDynamicLinearPhaseEQAndAutoGain()
     // Auto-gain should calculate negative compensation gain
     require(eq.currentAutoGainDb() < -2.0f, "auto-gain applies negative compensation against heavy EQ boost");
 }
+
+void testTapeConsoleSummingAndWowFlutter()
+{
+    using dawg::engine::dsp::TapeConsoleSummingNode;
+    using dawg::engine::dsp::TapeSpeed;
+
+    TapeConsoleSummingNode tape;
+    constexpr double sampleRate = 48000.0;
+    constexpr std::size_t blockSize = 128;
+
+    require(tape.prepare(sampleRate, blockSize, 2), "TapeConsoleSummingNode prepares successfully");
+    require(tape.latencySamples() == 0, "Tape machine has zero latency");
+
+    // 1. Verify tape speed and head bump configuration
+    tape.setTapeSpeed(TapeSpeed::ips15);
+    require(tape.tapeSpeed() == TapeSpeed::ips15, "Tape speed set to 15 IPS");
+    tape.setTapeSpeed(TapeSpeed::ips30);
+    require(tape.tapeSpeed() == TapeSpeed::ips30, "Tape speed set to 30 IPS");
+    tape.setTapeSpeed(TapeSpeed::ips15);
+
+    tape.setDrive(0.8f);
+    tape.setTransformerSaturation(0.5f);
+    tape.setWow(0.2f);
+    tape.setFlutter(0.2f);
+    tape.setCrosstalkDb(-70.0f);
+
+    // 2. Feed hot 50 Hz sine wave into left channel only
+    std::vector<float> chL(blockSize);
+    std::vector<float> chR(blockSize, 0.0f);
+
+    for (std::size_t i = 0; i < blockSize; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(sampleRate);
+        chL[i] = 1.4f * std::sin(2.0f * std::numbers::pi_v<float> * 50.0f * t);
+    }
+
+    std::array<float*, 2> channels {chL.data(), chR.data()};
+    dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+    dawg::engine::AudioBufferView emptySidechain(nullptr, 0, 0);
+    dawg::engine::ProcessContext ctx {
+        .audio = audioView,
+        .midi = {},
+        .sampleRate = sampleRate,
+        .sidechain = emptySidechain
+    };
+
+    tape.process(ctx);
+
+    // Left channel should be smoothly saturated by magnetic hysteresis & transformer
+    float maxL = 0.0f;
+    for (float s : chL) {
+        maxL = std::max(maxL, std::abs(s));
+    }
+    require(maxL > 0.5f && maxL < 1.15f, "Magnetic hysteresis & transformer compress hot signal");
+
+    // Right channel should exhibit analog console crosstalk bleed from Left
+    float maxR = 0.0f;
+    for (float s : chR) {
+        maxR = std::max(maxR, std::abs(s));
+    }
+    require(maxR > 0.0f && maxR < 0.05f, "Console summing introduces subtle inter-channel crosstalk");
+}
+
+void testMultiSampleInstrumentRoundRobinAndSfz()
+{
+    using dawg::engine::dsp::MultiSampleInstrumentNode;
+    using dawg::engine::dsp::MultiSampleRegion;
+
+    MultiSampleInstrumentNode sampler;
+    constexpr double sampleRate = 48000.0;
+    constexpr std::size_t blockSize = 128;
+
+    require(sampler.prepare(sampleRate, blockSize, 2), "MultiSampleInstrumentNode prepares");
+    require(sampler.latencySamples() == 0, "Zero latency instrument playback");
+
+    // 1. Manually add two round-robin regions for middle C (MIDI 60)
+    MultiSampleRegion reg1;
+    reg1.rootNote = 60;
+    reg1.lowNote = 58;
+    reg1.highNote = 62;
+    reg1.lowVel = 1;
+    reg1.highVel = 127;
+    reg1.sampleDataL.resize(512, 0.5f);
+    sampler.addRegion(std::move(reg1));
+
+    MultiSampleRegion reg2;
+    reg2.rootNote = 60;
+    reg2.lowNote = 58;
+    reg2.highNote = 62;
+    reg2.lowVel = 1;
+    reg2.highVel = 127;
+    reg2.sampleDataL.resize(512, 0.4f);
+    sampler.addRegion(std::move(reg2));
+
+    require(sampler.regionCount() == 2, "Instrument has 2 registered regions");
+
+    // Trigger noteOn
+    sampler.noteOn(60, 100);
+    require(sampler.activeVoiceCount() == 1, "Voice active after noteOn");
+    const auto rr0 = sampler.currentRoundRobin(60);
+
+    // Trigger another noteOn: round robin should advance
+    sampler.noteOn(60, 100);
+    require(sampler.activeVoiceCount() == 2, "Two voices active");
+    const auto rr1 = sampler.currentRoundRobin(60);
+    require(rr0 != rr1, "Round robin alternates between sample takes");
+
+    // Process audio block and verify voice playback
+    std::vector<float> chL(blockSize, 0.0f);
+    std::vector<float> chR(blockSize, 0.0f);
+    std::array<float*, 2> channels {chL.data(), chR.data()};
+    dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+    dawg::engine::AudioBufferView emptySidechain(nullptr, 0, 0);
+    dawg::engine::ProcessContext ctx {
+        .audio = audioView,
+        .midi = {},
+        .sampleRate = sampleRate,
+        .sidechain = emptySidechain
+    };
+
+    sampler.process(ctx);
+    require(std::abs(chL[10]) > 0.01f, "Voices produce audio during block processing");
+
+    // Release note
+    sampler.noteOff(60);
+
+    // 2. Test SFZ format descriptor parser
+    const std::string sfzData =
+        "<region> key=36 lovel=1 hivel=64 seq_position=1\n"
+        "<region> key=36 lovel=65 hivel=127 seq_position=1\n"
+        "<region> key=38 lovel=1 hivel=127 seq_position=1\n";
+
+    sampler.clearRegions();
+    require(sampler.regionCount() == 0, "Cleared regions");
+    require(sampler.loadFromSfzString(sfzData), "Loaded SFZ descriptor string");
+    require(sampler.regionCount() == 3, "Parsed 3 regions from SFZ string");
+}
+
+void testSpectralBalanceAssistantAndSmartUnmasking()
+{
+    using dawg::engine::dsp::SpectralBalanceAssistant;
+    using dawg::engine::dsp::GenreProfile;
+
+    SpectralBalanceAssistant assistant;
+    constexpr double sampleRate = 48000.0;
+    assistant.prepare(sampleRate);
+
+    // 1. Verify genre profile curves
+    assistant.setGenreProfile(GenreProfile::pop);
+    require(assistant.genreName() == "Pop", "Pop genre selected");
+
+    assistant.setGenreProfile(GenreProfile::electronic);
+    require(assistant.genreName() == "Electronic / EDM", "Electronic genre selected");
+
+    // Sub-bass in Electronic is higher than mid band
+    const auto& bands = assistant.bandAnalysis();
+    // Band 4 is 50 Hz, Band 17 is 1000 Hz
+    require(bands[4].targetDb > bands[17].targetDb, "EDM profile boosts sub-bass targets over mid-range");
+
+    // 2. Analyze audio block with pure 1000 Hz tone
+    constexpr std::size_t blockSize = 512;
+    std::vector<float> chL(blockSize);
+    std::vector<float> chR(blockSize);
+
+    for (std::size_t i = 0; i < blockSize; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(sampleRate);
+        const float s = 0.5f * std::sin(2.0f * std::numbers::pi_v<float> * 1000.0f * t);
+        chL[i] = s;
+        chR[i] = s;
+    }
+
+    std::array<float*, 2> channels {chL.data(), chR.data()};
+    dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+    for (int rep = 0; rep < 5; ++rep) {
+        assistant.analyzeAudioBlock(audioView);
+    }
+
+    require(assistant.mixBalanceScore() >= 0.0f && assistant.mixBalanceScore() <= 100.0f,
+            "Mix balance score computed in valid percentage range");
+
+    // 3. Multi-track inter-spectral masking collision detection
+    std::array<float, SpectralBalanceAssistant::bandCount> trackA {};
+    std::array<float, SpectralBalanceAssistant::bandCount> trackB {};
+    trackA.fill(-60.0f);
+    trackB.fill(-60.0f);
+
+    // Kick drum peaking at 80 Hz (Band 6) at -10 dBFS
+    trackA[6] = -10.0f;
+    // Sub-bass peaking at 80 Hz (Band 6) at -11 dBFS
+    trackB[6] = -11.0f;
+
+    const auto collisions = assistant.detectCollisions(trackA, trackB, -36.0f);
+    require(!collisions.empty(), "Detected masking collision between Kick and Bass");
+    require(collisions[0].bandIndex == 6, "Collision detected at 80 Hz band");
+    require(collisions[0].collisionSeverity > 0.3f, "High masking severity detected at clashing band");
+
+    // 4. Smart dynamic unmasking filter recommendation
+    const auto unmasking = assistant.calculateSmartUnmasking(collisions);
+    require(!unmasking.empty(), "Generated dynamic unmasking recommendation");
+    require(std::abs(unmasking[0].centerFreqHz - 80.0f) < 1.0f, "Unmasking recommendation centered at 80 Hz");
+    require(unmasking[0].recommendedGainCutDb < -1.0f, "Recommended surgical notch gain cut");
+    require(!unmasking[0].description.empty(), "Unmasking recommendation provides explanatory diagnosis");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -3582,4 +3787,7 @@ int main()
     testAra2PluginBridgeRandomAccessAndBaking();
     testTransientExciterMultiBandAndInflator();
     testDynamicLinearPhaseEQAndAutoGain();
+    testTapeConsoleSummingAndWowFlutter();
+    testMultiSampleInstrumentRoundRobinAndSfz();
+    testSpectralBalanceAssistantAndSmartUnmasking();
 }
