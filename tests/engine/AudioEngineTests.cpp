@@ -14,13 +14,17 @@
 #include <dawg/engine/SubBlockSplitter.h>
 #include <dawg/engine/TempoMap.h>
 #include <dawg/engine/WorkStealingScheduler.h>
-#include <dawg/engine/dsp/BrickwallLimiterNode.h>
+#include <dawg/engine/dsp/AudioTranscriber.h>
+#include <dawg/engine/dsp/AudioWarpEngine.h>
 #include <dawg/engine/dsp/BinauralSpatialPannerNode.h>
+#include <dawg/engine/dsp/BrickwallLimiterNode.h>
 #include <dawg/engine/dsp/ConvolutionReverbNode.h>
 #include <dawg/engine/dsp/DrumPadSamplerNode.h>
 #include <dawg/engine/dsp/DynamicsCompressorNode.h>
+#include <dawg/engine/dsp/GranularCloudNode.h>
 #include <dawg/engine/dsp/ModulatorRack.h>
 #include <dawg/engine/dsp/MultibandCompressorNode.h>
+#include <dawg/engine/dsp/NeuralAmpModelerNode.h>
 #include <dawg/engine/dsp/ParametricEQNode.h>
 #include <dawg/engine/dsp/PolyphaseOversampler.h>
 #include <dawg/engine/dsp/SpectralSidechainNode.h>
@@ -2860,6 +2864,215 @@ void testSpectralSidechainAndMultibandCompression()
         require(mbComp.gainReductionDb(3) < 0.1f, "Band 3 has no gain reduction on sub bass");
     }
 }
+
+void testAudioWarpEngineElasticMarkersAndQuantize()
+{
+    using namespace dawg::engine::dsp;
+
+    AudioWarpEngine warper;
+    require(warper.markerCount() == 0, "starts with 0 markers");
+
+    const double sampleRate = 48000.0;
+    const double bpm = 120.0; // 0.5s per beat, 24000 samples per beat
+
+    // 1. Add markers
+    warper.addMarker(0, 0.0, true);
+    warper.addMarker(24000, 1.0, true);
+    warper.addMarker(48000, 2.0, true);
+    require(warper.markerCount() == 3, "added 3 markers");
+
+    // Coordinate conversion
+    const double samp = warper.beatToSourceSample(1.5, bpm, sampleRate);
+    require(std::abs(samp - 36000.0) < 1.0, "beat 1.5 maps to sample 36000");
+
+    const double beat = warper.sourceSampleToBeat(36000.0, bpm, sampleRate);
+    require(std::abs(beat - 1.5) < 0.001, "sample 36000 maps to beat 1.5");
+
+    // Move marker (warp)
+    // Stretch beat 1.0 to arrive at timeline beat 1.25 (time dilation / compression)
+    warper.moveMarker(1, 1.25);
+    const double sampMoved = warper.beatToSourceSample(1.25, bpm, sampleRate);
+    require(std::abs(sampMoved - 24000.0) < 1.0, "warped beat 1.25 maps to original sample 24000");
+
+    // 2. Quantize markers to 16th note grid (0.25 beats)
+    warper.addMarker(12500, 0.53, false); // slightly off-grid 8th note
+    warper.quantizeMarkers(0.25, 1.0f);
+    const auto* qm = warper.getMarker(1);
+    require(qm != nullptr, "marker exists");
+
+    // 3. Auto-detect transients in a test synthetic drum beat
+    std::vector<float> drumBuf(48000 * 2, 0.0f); // 2 seconds
+    // Spike at 0, 0.5s (24000), 1.0s (48000), 1.5s (72000)
+    drumBuf[0] = 0.9f;
+    drumBuf[24000] = 0.85f;
+    drumBuf[48000] = 0.9f;
+    drumBuf[72000] = 0.85f;
+
+    AudioWarpEngine drumWarper;
+    const auto found = drumWarper.autoDetectTransients(drumBuf.data(), drumBuf.size(), sampleRate, bpm);
+    require(found >= 2, "autoDetectTransients found beats");
+
+    // 4. Render warped output buffer
+    std::vector<float> chL(48000);
+    for (std::size_t i = 0; i < 48000; ++i)
+    {
+        const float t = static_cast<float>(i) / static_cast<float>(sampleRate);
+        chL[i] = 0.5f * std::sin(2.0f * std::numbers::pi_v<float> * 440.0f * t);
+    }
+    std::vector<std::span<const float>> inChans {chL};
+    const auto rendered = drumWarper.renderWarped(inChans, sampleRate, bpm, 0.0, 4.0, WarpMode::complex);
+    require(!rendered.empty(), "rendered warped buffer not empty");
+    require(rendered[0].size() > 0, "rendered frames created");
+}
+
+void testNeuralAmpModelerWaveNetAndPowerSag()
+{
+    using namespace dawg::engine::dsp;
+
+    NeuralAmpModelerNode amp;
+    require(amp.latencySamples() == 0, "NAM has 0 samples latency");
+
+    const double sampleRate = 48000.0;
+    const std::size_t blockSize = 128;
+    require(amp.prepare(sampleRate, blockSize, 2), "prepare successful");
+
+    // Test profile loading
+    amp.loadProfile(NamAmpProfile::highGainMetal);
+    require(amp.currentProfile() == NamAmpProfile::highGainMetal, "high gain profile loaded");
+
+    amp.loadProfile(NamAmpProfile::vintageBritishPlexi);
+    require(amp.currentProfile() == NamAmpProfile::vintageBritishPlexi, "vintage plexi profile loaded");
+
+    amp.loadProfile(NamAmpProfile::classicTweedClean);
+    require(amp.currentProfile() == NamAmpProfile::classicTweedClean, "tweed clean profile loaded");
+
+    amp.loadProfile(NamAmpProfile::legendaryOverdrive);
+    require(amp.currentProfile() == NamAmpProfile::legendaryOverdrive, "legendary overdrive profile loaded");
+
+    // Tone stack & gain controls
+    amp.setInputGainDb(18.0f);
+    require(std::abs(amp.inputGainDb() - 18.0f) < 0.01f, "input gain set");
+
+    amp.setMasterVolumeDb(-3.0f);
+    require(std::abs(amp.masterVolumeDb() - (-3.0f)) < 0.01f, "master volume set");
+
+    amp.setPowerSagAmount(0.8f);
+    require(std::abs(amp.powerSagAmount() - 0.8f) < 0.01f, "sag amount set");
+
+    amp.setDynamicBiasShift(0.6f);
+    require(std::abs(amp.dynamicBiasShift() - 0.6f) < 0.01f, "dynamic bias set");
+
+    amp.setBass(1.2f);
+    amp.setMiddle(0.8f);
+    amp.setTreble(1.4f);
+    amp.setPresence(1.1f);
+    require(std::abs(amp.bass() - 1.2f) < 0.01f, "bass set");
+    require(std::abs(amp.middle() - 0.8f) < 0.01f, "middle set");
+    require(std::abs(amp.treble() - 1.4f) < 0.01f, "treble set");
+    require(std::abs(amp.presence() - 1.1f) < 0.01f, "presence set");
+
+    // Feed heavy guitar signal and verify non-linear saturation & dynamic power-amp sag
+    std::vector<float> chL(blockSize);
+    std::vector<float> chR(blockSize);
+
+    amp.reset();
+    require(std::abs(amp.currentSagVoltage() - 1.0f) < 0.001f, "sag voltage starts at 1.0 (full rail)");
+
+    for (int blk = 0; blk < 30; ++blk)
+    {
+        for (std::size_t i = 0; i < blockSize; ++i)
+        {
+            const float t = static_cast<float>(blk * blockSize + i) / static_cast<float>(sampleRate);
+            const float s = 0.95f * std::sin(2.0f * std::numbers::pi_v<float> * 220.0f * t);
+            chL[i] = s;
+            chR[i] = s;
+        }
+
+        std::array<float*, 2> chs {chL.data(), chR.data()};
+        dawg::engine::AudioBufferView view(chs.data(), 2, blockSize);
+        dawg::engine::AudioBufferView emptySc(nullptr, 0, 0);
+        dawg::engine::ProcessContext ctx {.audio = view, .midi = {}, .sampleRate = sampleRate, .sidechain = emptySc};
+
+        amp.process(ctx);
+    }
+
+    // Power supply voltage sag should have dropped below 1.0 under heavy sustained load
+    require(amp.currentSagVoltage() < 0.98f, "power supply sag engaged under sustained load");
+}
+
+void testGranularCloudSynthesisAndTapeFreeze()
+{
+    using namespace dawg::engine::dsp;
+
+    GranularCloudNode cloud;
+    require(cloud.latencySamples() == 0, "cloud has 0 samples latency");
+
+    const double sampleRate = 48000.0;
+    const std::size_t blockSize = 256;
+    require(cloud.prepare(sampleRate, blockSize, 2), "prepare successful");
+
+    cloud.setGrainSizeMs(40.0f);
+    require(std::abs(cloud.grainSizeMs() - 40.0f) < 0.01f, "grain size set");
+
+    cloud.setDensity(50.0f);
+    require(std::abs(cloud.density() - 50.0f) < 0.01f, "density set");
+
+    cloud.setSpray(0.5f);
+    require(std::abs(cloud.spray() - 0.5f) < 0.01f, "spray set");
+
+    cloud.setPitchShiftSemitones(7.0f); // Perfect 5th up
+    require(std::abs(cloud.pitchShiftSemitones() - 7.0f) < 0.01f, "pitch shift set");
+
+    cloud.setPitchDetuneCents(15.0f);
+    require(std::abs(cloud.pitchDetuneCents() - 15.0f) < 0.01f, "detune cents set");
+
+    cloud.setStereoDispersal(0.9f);
+    require(std::abs(cloud.stereoDispersal() - 0.9f) < 0.01f, "stereo dispersal set");
+
+    cloud.setReverseProbability(0.3f);
+    require(std::abs(cloud.reverseProbability() - 0.3f) < 0.01f, "reverse prob set");
+
+    cloud.setWindowShape(GrainWindowShape::gaussian);
+    require(cloud.windowShape() == GrainWindowShape::gaussian, "gaussian window set");
+
+    // Load custom sample buffer
+    std::vector<float> sampleL(48000);
+    std::vector<float> sampleR(48000);
+    for (std::size_t i = 0; i < 48000; ++i)
+    {
+        const float t = static_cast<float>(i) / static_cast<float>(sampleRate);
+        sampleL[i] = 0.7f * std::sin(2.0f * std::numbers::pi_v<float> * 330.0f * t);
+        sampleR[i] = sampleL[i];
+    }
+    cloud.loadSampleBuffer(sampleL.data(), sampleR.data(), sampleL.size());
+
+    // Tape Freeze mode
+    cloud.setFreeze(true);
+    require(cloud.isFrozen(), "freeze mode enabled");
+
+    // Process blocks and verify grain cloud generates audio
+    std::vector<float> chL(blockSize, 0.0f);
+    std::vector<float> chR(blockSize, 0.0f);
+
+    for (int blk = 0; blk < 20; ++blk)
+    {
+        std::array<float*, 2> chs {chL.data(), chR.data()};
+        dawg::engine::AudioBufferView view(chs.data(), 2, blockSize);
+        dawg::engine::AudioBufferView emptySc(nullptr, 0, 0);
+        dawg::engine::ProcessContext ctx {.audio = view, .midi = {}, .sampleRate = sampleRate, .sidechain = emptySc};
+
+        cloud.process(ctx);
+    }
+
+    require(cloud.activeGrainCount() > 0, "active grains generated in cloud");
+    // Verify wet audio energy is generated
+    float energy = 0.0f;
+    for (std::size_t i = 0; i < blockSize; ++i)
+    {
+        energy += chL[i] * chL[i] + chR[i] * chR[i];
+    }
+    require(energy > 0.0001f, "granular cloud produces non-zero ambient wet texture");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -2995,4 +3208,7 @@ int main()
     testMcuTwoWayFeedbackAndLaunchpadRgb();
     testConvolutionReverbZeroLatencyAndCabinetSim();
     testSpectralSidechainAndMultibandCompression();
+    testAudioWarpEngineElasticMarkersAndQuantize();
+    testNeuralAmpModelerWaveNetAndPowerSag();
+    testGranularCloudSynthesisAndTapeFreeze();
 }

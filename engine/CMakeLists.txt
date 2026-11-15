@@ -16,16 +16,19 @@ add_library(dawg_engine_core STATIC
     src/WorkStealingScheduler.cpp
     src/WsolaTimeStretcher.cpp
     src/clap/ClapPluginNode.cpp
-    src/dsp/BrickwallLimiterNode.cpp
     src/dsp/AudioTranscriber.cpp
+    src/dsp/AudioWarpEngine.cpp
     src/dsp/BinauralSpatialPannerNode.cpp
+    src/dsp/BrickwallLimiterNode.cpp
     src/dsp/ConvolutionReverbNode.cpp
     src/dsp/DynamicsCompressorNode.cpp
     src/dsp/DrumPadSamplerNode.cpp
     src/dsp/DspWireGrid.cpp
+    src/dsp/GranularCloudNode.cpp
     src/dsp/MasteringMeterNode.cpp
     src/dsp/ModulatorRack.cpp
     src/dsp/MultibandCompressorNode.cpp
+    src/dsp/NeuralAmpModelerNode.cpp
     src/dsp/ParametricEQNode.cpp
     src/dsp/PolyphaseOversampler.cpp
     src/dsp/SpectralSidechainNode.cpp
