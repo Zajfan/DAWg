@@ -78,6 +78,7 @@ PianoRollView::PianoRollView(CommandHandler handler, AuditionCallback auditionCb
         m_btnPitch.setColour(juce::TextButton::buttonColourId, m_expressionMode == ExpressionMode::mpePitch ? juce::Colour::fromRGB(180, 70, 200) : juce::Colour::fromRGB(35, 38, 48));
         m_btnPressure.setColour(juce::TextButton::buttonColourId, m_expressionMode == ExpressionMode::mpePressure ? juce::Colour::fromRGB(220, 120, 40) : juce::Colour::fromRGB(35, 38, 48));
         m_btnTimbre.setColour(juce::TextButton::buttonColourId, m_expressionMode == ExpressionMode::mpeTimbre ? juce::Colour::fromRGB(50, 180, 100) : juce::Colour::fromRGB(35, 38, 48));
+        m_btnVocalTune.setColour(juce::TextButton::buttonColourId, m_expressionMode == ExpressionMode::vocalPitchTune ? juce::Colour::fromRGB(240, 60, 100) : juce::Colour::fromRGB(35, 38, 48));
         repaint();
     };
 
@@ -85,11 +86,13 @@ PianoRollView::PianoRollView(CommandHandler handler, AuditionCallback auditionCb
     m_btnPitch.onClick = [this, updateModeButtons] { m_expressionMode = ExpressionMode::mpePitch; updateModeButtons(); };
     m_btnPressure.onClick = [this, updateModeButtons] { m_expressionMode = ExpressionMode::mpePressure; updateModeButtons(); };
     m_btnTimbre.onClick = [this, updateModeButtons] { m_expressionMode = ExpressionMode::mpeTimbre; updateModeButtons(); };
+    m_btnVocalTune.onClick = [this, updateModeButtons] { m_expressionMode = ExpressionMode::vocalPitchTune; updateModeButtons(); };
 
     addAndMakeVisible(m_btnVelocity);
     addAndMakeVisible(m_btnPitch);
     addAndMakeVisible(m_btnPressure);
     addAndMakeVisible(m_btnTimbre);
+    addAndMakeVisible(m_btnVocalTune);
     updateModeButtons();
 }
 
@@ -427,6 +430,8 @@ void PianoRollView::drawVelocityLane(juce::Graphics& g, const juce::Rectangle<in
         title = "MPE PRESSURE";
     else if (m_expressionMode == ExpressionMode::mpeTimbre)
         title = "TIMBRE CC74";
+    else if (m_expressionMode == ExpressionMode::vocalPitchTune)
+        title = "VOCAL PITCH TUNING (MELODYNE / AUTO-TUNE)";
 
     g.setColour(juce::Colour::fromRGB(120, 125, 140));
     g.setFont(juce::FontOptions {10.0f}.withStyle("Bold"));
@@ -512,6 +517,51 @@ void PianoRollView::drawVelocityLane(juce::Graphics& g, const juce::Rectangle<in
                 g.fillEllipse(static_cast<float>(noteX2 - 2), sweepY - 2.0f, 5.0f, 5.0f);
             }
         }
+        else if (m_expressionMode == ExpressionMode::vocalPitchTune)
+        {
+            // Center pitch zero-drift line
+            const float midY = static_cast<float>(bounds.getY() + bounds.getHeight() / 2);
+            g.setColour(juce::Colour::fromRGB(55, 60, 75));
+            g.drawHorizontalLine(static_cast<int>(midY), static_cast<float>(bounds.getX()), static_cast<float>(bounds.getRight()));
+
+            // Retuned pitch target lines (±1 semitone grid)
+            g.setColour(juce::Colour::fromRGB(40, 45, 55));
+            g.drawHorizontalLine(static_cast<int>(midY - 18.0f), static_cast<float>(bounds.getX()), static_cast<float>(bounds.getRight()));
+            g.drawHorizontalLine(static_cast<int>(midY + 18.0f), static_cast<float>(bounds.getX()), static_cast<float>(bounds.getRight()));
+
+            for (const auto& note : clip->notes)
+            {
+                const int noteX1 = m_keyWidth + sampleToPixel(static_cast<std::int64_t>(note.startSample));
+                const int noteX2 = m_keyWidth + sampleToPixel(static_cast<std::int64_t>(note.startSample + note.lengthSamples));
+                const bool isSelected = isNoteSelected(note.id);
+
+                // Draw pitch blob trajectory with vibrato wave and transitions
+                juce::Path p;
+                const float startY = midY + 10.0f;
+                p.startNewSubPath(static_cast<float>(noteX1), startY);
+
+                const int steps = std::max(6, (noteX2 - noteX1) / 4);
+                for (int s = 1; s <= steps; ++s)
+                {
+                    const float t = static_cast<float>(s) / static_cast<float>(steps);
+                    const float currX = static_cast<float>(noteX1) + t * static_cast<float>(noteX2 - noteX1);
+                    // Natural vocal drift + vibrato curve converging to target pitch
+                    const float drift = std::sin(t * 3.14159f) * 6.0f * (1.0f - t);
+                    const float vibrato = (t > 0.35f) ? (std::sin(t * 24.0f) * 4.5f) : 0.0f;
+                    const float currY = midY + drift + vibrato;
+                    p.lineTo(currX, currY);
+                }
+
+                // Pitch Blob Halo & Trace
+                g.setColour(isSelected ? juce::Colour::fromRGB(255, 170, 0) : juce::Colour::fromRGB(240, 60, 100));
+                g.strokePath(p, juce::PathStrokeType(2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+                // Note boundary nodules
+                g.setColour(juce::Colours::white);
+                g.fillEllipse(static_cast<float>(noteX1 - 3), startY - 3.0f, 6.0f, 6.0f);
+                g.fillEllipse(static_cast<float>(noteX2 - 3), midY - 3.0f, 6.0f, 6.0f);
+            }
+        }
     }
 
     g.restoreState();
@@ -557,7 +607,8 @@ void PianoRollView::resized()
     toolbarArea.removeFromLeft(6);
     m_quantizeButton.setBounds(toolbarArea.removeFromLeft(110));
 
-    // MPE sub-lane buttons on the right side
+    // MPE & Tuning sub-lane buttons on the right side
+    m_btnVocalTune.setBounds(toolbarArea.removeFromRight(85).reduced(2, 0));
     m_btnTimbre.setBounds(toolbarArea.removeFromRight(80).reduced(2, 0));
     m_btnPressure.setBounds(toolbarArea.removeFromRight(70).reduced(2, 0));
     m_btnPitch.setBounds(toolbarArea.removeFromRight(75).reduced(2, 0));

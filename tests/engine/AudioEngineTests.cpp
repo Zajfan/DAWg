@@ -24,6 +24,9 @@
 #include <dawg/engine/dsp/TnhcDelayNode.h>
 #include <dawg/engine/dsp/TnhcReverbNode.h>
 #include <dawg/engine/dsp/TnhcSynthNode.h>
+#include <dawg/engine/dsp/VocalPitchCorrectorNode.h>
+#include <dawg/engine/dsp/DspWireGrid.h>
+#include <dawg/engine/dsp/MasteringMeterNode.h>
 #include <dawg/engine/dsp/ZdfLadderFilter.h>
 #include <dawg/engine/plugins/PluginCrashSupervisor.h>
 #include <dawg/engine/clap/ClapPluginNode.h>
@@ -2257,6 +2260,204 @@ void testBinauralSpatialPanner3D()
 
     require(nearBufL[32] > farBufL[32], "Distance attenuation drops audio level at 5m compared to 1m");
 }
+
+void testVocalPitchCorrectionAndAutoTune()
+{
+    using dawg::engine::dsp::MusicalScale;
+    using dawg::engine::dsp::VocalPitchCorrectorNode;
+
+    // 1. Scale Quantization Tests
+    // Chromatic: 60.2 -> 60.0, 60.8 -> 61.0
+    const float snapChrom1 = VocalPitchCorrectorNode::quantizeToScale(60.2f, MusicalScale::chromatic, 0);
+    const float snapChrom2 = VocalPitchCorrectorNode::quantizeToScale(60.8f, MusicalScale::chromatic, 0);
+    require(std::abs(snapChrom1 - 60.0f) < 0.05f, "Chromatic snaps 60.2 to C4 (60)");
+    require(std::abs(snapChrom2 - 61.0f) < 0.05f, "Chromatic snaps 60.8 to C#4 (61)");
+
+    // C Major (intervals 0, 2, 4, 5, 7, 9, 11) - root C (0)
+    // 61.0 (C#) -> nearest note in scale is C (60) or D (62)
+    const float snapMaj = VocalPitchCorrectorNode::quantizeToScale(61.0f, MusicalScale::major, 0);
+    require(std::abs(snapMaj - 60.0f) < 0.05f || std::abs(snapMaj - 62.0f) < 0.05f, "C Major snaps C# to C or D");
+
+    // A Minor Pentatonic (intervals 0, 3, 5, 7, 10 relative to A = 9)
+    // Root 9 -> Notes are A (9), C (0), D (2), E (4), G (7)
+    // MIDI 60 is C4 -> exactly in scale!
+    const float snapPent = VocalPitchCorrectorNode::quantizeToScale(60.0f, MusicalScale::pentatonicMinor, 9);
+    require(std::abs(snapPent - 60.0f) < 0.05f, "A Minor Pentatonic preserves C4 (60)");
+
+    // 2. Engine prepare & process with real-time pitch correction
+    VocalPitchCorrectorNode corrector;
+    require(corrector.prepare(48000.0, 512, 2), "Vocal pitch corrector prepared");
+
+    corrector.setScale(MusicalScale::chromatic);
+    corrector.setRootNote(0);
+    corrector.setRetuneSpeed(0.0f); // Hard-tune instant snap
+    corrector.setCorrectionAmount(1.0f);
+
+    require(corrector.retuneSpeed() < 0.001f, "Retune speed is 0 (Hard-Tune)");
+    require(corrector.scale() == MusicalScale::chromatic, "Scale is chromatic");
+
+    // Generate 440 Hz test sine tone (A4, MIDI 69) with slight +25 cent detune
+    constexpr double sampleRate = 48000.0;
+    const float detunedHz = 440.0f * std::pow(2.0f, 0.25f / 12.0f); // 446.4 Hz
+    std::vector<float> vocalBlockL(512, 0.0f);
+    std::vector<float> vocalBlockR(512, 0.0f);
+    for (std::size_t i = 0; i < 512; ++i)
+    {
+        const float s = std::sin(static_cast<float>(2.0 * std::numbers::pi * detunedHz * static_cast<double>(i) / sampleRate));
+        vocalBlockL[i] = s * 0.8f;
+        vocalBlockR[i] = s * 0.8f;
+    }
+
+    std::array<float*, 2> planes { vocalBlockL.data(), vocalBlockR.data() };
+    dawg::engine::ProcessContext ctx {
+        .audio = dawg::engine::AudioBufferView { planes.data(), 2, 512 },
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+
+    // Warm-up analysis buffer (YIN buffer size 1024)
+    corrector.process(ctx);
+    corrector.process(ctx);
+
+    const auto pitchInfo = corrector.currentPitchInfo();
+    require(pitchInfo.isVoiced, "YIN fundamental pitch tracker detected voiced tone");
+    require(std::abs(pitchInfo.pitchHz - detunedHz) < 20.0f, "Detected fundamental frequency tracks input tone");
+    require(std::abs(pitchInfo.targetMidiPitch - 69.0f) < 0.5f, "Target pitch quantized to A4 (note 69)");
+
+    corrector.reset();
+}
+
+void testDspWireGridModularAndOscilloscope()
+{
+    using dawg::engine::dsp::DspWireGrid;
+    using dawg::engine::dsp::GridModuleType;
+
+    DspWireGrid grid;
+    require(grid.prepare(48000.0, 256, 2), "DspWireGrid prepared");
+
+    // 1. Built-in presets
+    grid.loadPresetAcidBass();
+    require(grid.modules().size() >= 4, "Acid Bass 303 preset loaded modules");
+    require(grid.cables().size() >= 4, "Acid Bass 303 preset patched cables");
+
+    grid.loadPresetAmbientDrone();
+    require(grid.modules().size() >= 4, "Ambient Drone preset loaded");
+
+    grid.loadPresetWestCoastWavefolder();
+    require(grid.modules().size() >= 3, "West Coast Wavefolder preset loaded");
+
+    grid.loadPresetPercussionSynth();
+    require(grid.modules().size() >= 3, "Percussion Synth preset loaded");
+
+    // 2. Audio Processing & Sound Generation
+    grid.loadPresetAcidBass();
+    std::vector<float> outL(256, 0.0f);
+    std::vector<float> outR(256, 0.0f);
+    std::array<float*, 2> planes { outL.data(), outR.data() };
+    dawg::engine::ProcessContext ctx {
+        .audio = dawg::engine::AudioBufferView { planes.data(), 2, 256 },
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+
+    grid.process(ctx);
+
+    float maxEnergy = 0.0f;
+    for (std::size_t i = 0; i < 256; ++i)
+    {
+        maxEnergy = std::max(maxEnergy, std::abs(outL[i]));
+    }
+    require(maxEnergy > 0.01f, "Modular grid generates live synthesized audio signal");
+
+    // 3. Oscilloscope Probe Readout
+    std::array<float, DspWireGrid::probeBufferSize> probeBuf {};
+    grid.getProbeData(probeBuf.data(), probeBuf.size());
+    float probeEnergy = 0.0f;
+    for (const auto s : probeBuf)
+    {
+        probeEnergy = std::max(probeEnergy, std::abs(s));
+    }
+    require(probeEnergy > 0.001f, "Oscilloscope probe receives live signal data");
+
+    // 4. Module & Cable Dynamic Editing
+    const auto newOscId = grid.addModule(GridModuleType::oscillator, 100.0f, 100.0f, "Test Osc");
+    const auto outModId = grid.modules().back().id;
+    const auto cableId = grid.connectCable(newOscId, 0, outModId, 0);
+    require(cableId > 0, "Cables dynamically connectable");
+
+    require(grid.disconnectCable(cableId), "Cable disconnected");
+    require(grid.removeModule(newOscId), "Module removed");
+
+    // 5. Macro Controls
+    grid.setMacro(0, 0.85f);
+    require(std::abs(grid.macro(0) - 0.85f) < 1e-4f, "Macro knob 0 updated");
+}
+
+void testMasteringSuiteLoudnessRadarAndTruePeak()
+{
+    using dawg::engine::dsp::MasteringMeterNode;
+    using dawg::engine::dsp::MasteringTargetProfile;
+
+    MasteringMeterNode meter;
+    require(meter.prepare(48000.0, 512, 2), "MasteringMeterNode prepared");
+
+    // 1. Target profiles
+    meter.setTargetProfile(MasteringTargetProfile::spotify);
+    require(std::abs(meter.currentTargetSpec().targetLufs - (-14.0f)) < 1e-3f, "Spotify target is -14 LUFS");
+
+    meter.setTargetProfile(MasteringTargetProfile::ebuR128);
+    require(std::abs(meter.currentTargetSpec().targetLufs - (-23.0f)) < 1e-3f, "EBU R128 target is -23 LUFS");
+
+    meter.setTargetProfile(MasteringTargetProfile::clubFestival);
+    require(std::abs(meter.currentTargetSpec().targetLufs - (-9.0f)) < 1e-3f, "Club/Festival target is -9 LUFS");
+
+    // 2. Audio Processing: 1kHz test sine tone
+    std::vector<float> testL(512, 0.0f);
+    std::vector<float> testR(512, 0.0f);
+    for (std::size_t i = 0; i < 512; ++i)
+    {
+        const float s = 0.5f * std::sin(static_cast<float>(2.0 * std::numbers::pi * 1000.0 * static_cast<double>(i) / 48000.0));
+        testL[i] = s;
+        testR[i] = s;
+    }
+    std::array<float*, 2> planes { testL.data(), testR.data() };
+    dawg::engine::ProcessContext ctx {
+        .audio = dawg::engine::AudioBufferView { planes.data(), 2, 512 },
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+
+    meter.process(ctx);
+
+    const auto tel = meter.telemetry();
+    require(tel.momentaryLufs > -50.0f, "Momentary LUFS is measured");
+    require(tel.truePeakDb > -30.0f, "True Peak dBTP is measured");
+    require(tel.correlation > 0.95f, "Mono in-phase test tone has stereo correlation +1.0");
+
+    // 3. Out-of-phase correlation test
+    for (std::size_t i = 0; i < 512; ++i)
+    {
+        testR[i] = -testL[i]; // Invert polarity of Right channel
+    }
+    meter.process(ctx);
+    require(meter.telemetry().correlation < -0.90f, "Inverted phase tone has stereo correlation -1.0");
+
+    // 4. Telemetry Buffers
+    std::array<MasteringMeterNode::VectorPoint, MasteringMeterNode::goniometerBufferSize> goniometerPts {};
+    meter.getGoniometerPoints(goniometerPts.data(), goniometerPts.size());
+
+    std::array<float, MasteringMeterNode::spectrumBands> spectrumBands {};
+    meter.getSpectrumMagnitudes(spectrumBands.data(), spectrumBands.size());
+
+    std::array<float, MasteringMeterNode::radarHistorySize> radarHist {};
+    meter.getRadarHistory(radarHist.data(), radarHist.size());
+
+    meter.resetIntegrated();
+    require(meter.telemetry().maxTruePeakDb < -90.0f, "Reset integrated clears max true peak");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -2383,4 +2584,7 @@ int main()
     testPolyphaseOversamplingAndZdfMoogLadder();
     testPluginCrashSupervisorAndAirGappedImmunity();
     testBinauralSpatialPanner3D();
+    testVocalPitchCorrectionAndAutoTune();
+    testDspWireGridModularAndOscilloscope();
+    testMasteringSuiteLoudnessRadarAndTruePeak();
 }

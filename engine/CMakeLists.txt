@@ -20,12 +20,15 @@ add_library(dawg_engine_core STATIC
     src/dsp/BinauralSpatialPannerNode.cpp
     src/dsp/DynamicsCompressorNode.cpp
     src/dsp/DrumPadSamplerNode.cpp
+    src/dsp/DspWireGrid.cpp
+    src/dsp/MasteringMeterNode.cpp
     src/dsp/ModulatorRack.cpp
     src/dsp/ParametricEQNode.cpp
     src/dsp/PolyphaseOversampler.cpp
     src/dsp/TnhcDelayNode.cpp
     src/dsp/TnhcReverbNode.cpp
     src/dsp/TnhcSynthNode.cpp
+    src/dsp/VocalPitchCorrectorNode.cpp
     src/plugins/PluginCrashSupervisor.cpp
 )
 target_include_directories(dawg_engine_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

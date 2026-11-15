@@ -3,8 +3,10 @@
 #include "ChannelRackView.h"
 #include "DragSplitterBar.h"
 #include "DrumPadSamplerView.h"
+#include "DspWireGridView.h"
 #include "EditorViewModel.h"
 #include "FloatingPanelWindow.h"
+#include "MasteringSuiteView.h"
 #include "MixerPanel.h"
 #include "ModulationRackView.h"
 #include "PianoRollView.h"
@@ -70,7 +72,9 @@ public:
         drumSampler,
         routingMatrix,
         modulationRack,
-        spatialRadar
+        spatialRadar,
+        wireGrid,
+        masteringSuite
     };
 
     enum class DetachablePanel : std::uint8_t
@@ -83,6 +87,8 @@ public:
         routingMatrix,
         modulationRack,
         spatialRadar,
+        wireGrid,
+        masteringSuite,
         browser
     };
 
@@ -178,6 +184,8 @@ private:
     juce::TextButton m_tabRoutingMatrixButton {"Patchbay [X]"};
     juce::TextButton m_tabModulationButton {"Modulators [O]"};
     juce::TextButton m_tabSpatialRadarButton {"Spatial 3D [Z]"};
+    juce::TextButton m_tabWireGridButton {"Modular Grid [G]"};
+    juce::TextButton m_tabMasteringButton {"Mastering [U]"};
     juce::TextButton m_tabBrowserButton {"Browser [B]"};
     juce::TextButton m_detachDockButton {"↗"};
     juce::TextButton m_maximizeDockButton {"⛶"};
@@ -189,6 +197,8 @@ private:
     RoutingMatrixView m_routingMatrixView;
     ModulationRackView m_modulationRackView;
     SpatialRadarView m_spatialRadarView;
+    DspWireGridView m_wireGridView;
+    MasteringSuiteView m_masteringSuiteView;
     std::unique_ptr<PluginBrowserPanel> m_pluginBrowser;
     std::unique_ptr<SampleBrowserPanel> m_sampleBrowser;
     juce::TextButton m_sidebarTabPluginsButton {"Plugins"};
@@ -204,6 +214,8 @@ private:
     std::unique_ptr<FloatingPanelWindow> m_floatingRoutingMatrix;
     std::unique_ptr<FloatingPanelWindow> m_floatingModulationRack;
     std::unique_ptr<FloatingPanelWindow> m_floatingSpatialRadar;
+    std::unique_ptr<FloatingPanelWindow> m_floatingWireGrid;
+    std::unique_ptr<FloatingPanelWindow> m_floatingMasteringSuite;
     std::unique_ptr<FloatingPanelWindow> m_floatingBrowser;
     std::unique_ptr<FloatingPanelWindow> m_floatingSessionMatrix;
 

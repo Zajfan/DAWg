@@ -121,6 +121,8 @@ MainEditorView::MainEditorView(EditorViewModel model,
     , m_routingMatrixView(m_commandHandler, nullptr)
     , m_modulationRackView()
     , m_spatialRadarView()
+    , m_wireGridView()
+    , m_masteringSuiteView()
     , m_dockSplitter(DragSplitterBar::Orientation::horizontal, [this](const int delta) {
         if (! m_dockMaximized)
         {
@@ -170,6 +172,14 @@ MainEditorView::MainEditorView(EditorViewModel model,
     m_tabSpatialRadarButton.onClick = [this] { setDockMode(BottomDockMode::spatialRadar); };
     addAndMakeVisible(m_tabSpatialRadarButton);
 
+    m_tabWireGridButton.setClickingTogglesState(false);
+    m_tabWireGridButton.onClick = [this] { setDockMode(BottomDockMode::wireGrid); };
+    addAndMakeVisible(m_tabWireGridButton);
+
+    m_tabMasteringButton.setClickingTogglesState(false);
+    m_tabMasteringButton.onClick = [this] { setDockMode(BottomDockMode::masteringSuite); };
+    addAndMakeVisible(m_tabMasteringButton);
+
     m_tabBrowserButton.setClickingTogglesState(false);
     m_tabBrowserButton.onClick = [this] { togglePluginBrowser(); };
     addAndMakeVisible(m_tabBrowserButton);
@@ -191,6 +201,10 @@ MainEditorView::MainEditorView(EditorViewModel model,
             detachPanel(DetachablePanel::modulationRack);
         else if (m_dockMode == BottomDockMode::spatialRadar)
             detachPanel(DetachablePanel::spatialRadar);
+        else if (m_dockMode == BottomDockMode::wireGrid)
+            detachPanel(DetachablePanel::wireGrid);
+        else if (m_dockMode == BottomDockMode::masteringSuite)
+            detachPanel(DetachablePanel::masteringSuite);
     };
     addAndMakeVisible(m_detachDockButton);
 
@@ -209,6 +223,8 @@ MainEditorView::MainEditorView(EditorViewModel model,
     addChildComponent(m_routingMatrixView);
     addChildComponent(m_modulationRackView);
     addChildComponent(m_spatialRadarView);
+    addChildComponent(m_wireGridView);
+    addChildComponent(m_masteringSuiteView);
 
     m_pluginBrowser = std::make_unique<PluginBrowserPanel>(
         [this](const plugins::PluginDescriptor& plugin, bool createNewTrack) {
@@ -367,6 +383,16 @@ void MainEditorView::setDockMode(BottomDockMode mode)
         m_floatingSpatialRadar->toFront(true);
         return;
     }
+    if (m_dockMode == BottomDockMode::wireGrid && m_floatingWireGrid)
+    {
+        m_floatingWireGrid->toFront(true);
+        return;
+    }
+    if (m_dockMode == BottomDockMode::masteringSuite && m_floatingMasteringSuite)
+    {
+        m_floatingMasteringSuite->toFront(true);
+        return;
+    }
 
     const bool isMixer = (m_dockMode == BottomDockMode::mixer);
     const bool isPianoRoll = (m_dockMode == BottomDockMode::pianoRoll);
@@ -375,6 +401,8 @@ void MainEditorView::setDockMode(BottomDockMode mode)
     const bool isRoutingMatrix = (m_dockMode == BottomDockMode::routingMatrix);
     const bool isModulationRack = (m_dockMode == BottomDockMode::modulationRack);
     const bool isSpatialRadar = (m_dockMode == BottomDockMode::spatialRadar);
+    const bool isWireGrid = (m_dockMode == BottomDockMode::wireGrid);
+    const bool isMastering = (m_dockMode == BottomDockMode::masteringSuite);
 
     if (! m_floatingMixer) m_mixerPanel.setVisible(isMixer);
     if (! m_floatingPianoRoll) m_pianoRollView.setVisible(isPianoRoll);
@@ -383,6 +411,8 @@ void MainEditorView::setDockMode(BottomDockMode mode)
     if (! m_floatingRoutingMatrix) m_routingMatrixView.setVisible(isRoutingMatrix);
     if (! m_floatingModulationRack) m_modulationRackView.setVisible(isModulationRack);
     if (! m_floatingSpatialRadar) m_spatialRadarView.setVisible(isSpatialRadar);
+    if (! m_floatingWireGrid) m_wireGridView.setVisible(isWireGrid);
+    if (! m_floatingMasteringSuite) m_masteringSuiteView.setVisible(isMastering);
 
     m_tabMixerButton.setColour(juce::TextButton::buttonColourId,
                                isMixer ? juce::Colour::fromRGB(45, 95, 145) : juce::Colour::fromRGB(28, 30, 36));
@@ -398,6 +428,10 @@ void MainEditorView::setDockMode(BottomDockMode mode)
                                     isModulationRack ? juce::Colour::fromRGB(45, 120, 95) : juce::Colour::fromRGB(28, 30, 36));
     m_tabSpatialRadarButton.setColour(juce::TextButton::buttonColourId,
                                       isSpatialRadar ? juce::Colour::fromRGB(65, 145, 225) : juce::Colour::fromRGB(28, 30, 36));
+    m_tabWireGridButton.setColour(juce::TextButton::buttonColourId,
+                                  isWireGrid ? juce::Colour::fromRGB(0, 180, 200) : juce::Colour::fromRGB(28, 30, 36));
+    m_tabMasteringButton.setColour(juce::TextButton::buttonColourId,
+                                   isMastering ? juce::Colour::fromRGB(200, 140, 40) : juce::Colour::fromRGB(28, 30, 36));
     resized();
 }
 
@@ -551,6 +585,38 @@ void MainEditorView::detachPanel(DetachablePanel panel)
         }
         break;
 
+    case DetachablePanel::wireGrid:
+        if (! m_floatingWireGrid)
+        {
+            removeChildComponent(&m_wireGridView);
+            m_floatingWireGrid = std::make_unique<FloatingPanelWindow>(
+                "Modular DSP Wire Grid - DAWg",
+                &m_wireGridView,
+                [this] { reDockPanel(DetachablePanel::wireGrid); });
+
+            m_floatingWireGrid->setBounds(220, 220, 860, 540);
+            m_floatingWireGrid->setVisible(true);
+            m_tabWireGridButton.setButtonText("Modular Grid [↙]");
+            setDockMode(m_dockMode == BottomDockMode::wireGrid ? BottomDockMode::mixer : m_dockMode);
+        }
+        break;
+
+    case DetachablePanel::masteringSuite:
+        if (! m_floatingMasteringSuite)
+        {
+            removeChildComponent(&m_masteringSuiteView);
+            m_floatingMasteringSuite = std::make_unique<FloatingPanelWindow>(
+                "Mastering Suite & Loudness Radar - DAWg",
+                &m_masteringSuiteView,
+                [this] { reDockPanel(DetachablePanel::masteringSuite); });
+
+            m_floatingMasteringSuite->setBounds(240, 240, 880, 520);
+            m_floatingMasteringSuite->setVisible(true);
+            m_tabMasteringButton.setButtonText("Mastering [↙]");
+            setDockMode(m_dockMode == BottomDockMode::masteringSuite ? BottomDockMode::mixer : m_dockMode);
+        }
+        break;
+
     case DetachablePanel::browser:
         break;
     }
@@ -641,6 +707,26 @@ void MainEditorView::reDockPanel(DetachablePanel panel)
         }
         break;
 
+    case DetachablePanel::wireGrid:
+        if (m_floatingWireGrid)
+        {
+            m_floatingWireGrid.reset();
+            addChildComponent(m_wireGridView);
+            m_tabWireGridButton.setButtonText("Modular Grid [G]");
+            setDockMode(BottomDockMode::wireGrid);
+        }
+        break;
+
+    case DetachablePanel::masteringSuite:
+        if (m_floatingMasteringSuite)
+        {
+            m_floatingMasteringSuite.reset();
+            addChildComponent(m_masteringSuiteView);
+            m_tabMasteringButton.setButtonText("Mastering [U]");
+            setDockMode(BottomDockMode::masteringSuite);
+        }
+        break;
+
     case DetachablePanel::browser:
         break;
     }
@@ -658,6 +744,8 @@ void MainEditorView::reDockAllPanels()
     reDockPanel(DetachablePanel::routingMatrix);
     reDockPanel(DetachablePanel::modulationRack);
     reDockPanel(DetachablePanel::spatialRadar);
+    reDockPanel(DetachablePanel::wireGrid);
+    reDockPanel(DetachablePanel::masteringSuite);
 }
 
 bool MainEditorView::isPanelDetached(DetachablePanel panel) const noexcept
@@ -672,6 +760,8 @@ bool MainEditorView::isPanelDetached(DetachablePanel panel) const noexcept
     case DetachablePanel::routingMatrix: return m_floatingRoutingMatrix != nullptr;
     case DetachablePanel::modulationRack: return m_floatingModulationRack != nullptr;
     case DetachablePanel::spatialRadar: return m_floatingSpatialRadar != nullptr;
+    case DetachablePanel::wireGrid: return m_floatingWireGrid != nullptr;
+    case DetachablePanel::masteringSuite: return m_floatingMasteringSuite != nullptr;
     case DetachablePanel::browser: return false;
     }
     return false;
@@ -794,6 +884,8 @@ void MainEditorView::setViewModel(EditorViewModel model)
     m_drumSamplerView.setViewModel(m_model);
     m_routingMatrixView.setViewModel(m_model);
     m_spatialRadarView.setViewModel(m_model);
+    m_wireGridView.setViewModel(m_model);
+    m_masteringSuiteView.setViewModel(m_model);
 }
 
 void MainEditorView::setSnapshot(project::ProjectSnapshot snapshot)
@@ -808,6 +900,8 @@ void MainEditorView::setSnapshot(project::ProjectSnapshot snapshot)
     m_drumSamplerView.setViewModel(m_model);
     m_routingMatrixView.setViewModel(m_model);
     m_spatialRadarView.setViewModel(m_model);
+    m_wireGridView.setViewModel(m_model);
+    m_masteringSuiteView.setViewModel(m_model);
 }
 
 void MainEditorView::setWaveformCache(media::WaveformCache* cache)
@@ -1141,6 +1235,16 @@ bool MainEditorView::keyPressed(const juce::KeyPress& key)
         setDockMode(BottomDockMode::spatialRadar);
         return true;
     }
+    if (key.getKeyCode() == 'G' || key.getKeyCode() == 'g')
+    {
+        setDockMode(BottomDockMode::wireGrid);
+        return true;
+    }
+    if (key.getKeyCode() == 'U' || key.getKeyCode() == 'u')
+    {
+        setDockMode(BottomDockMode::masteringSuite);
+        return true;
+    }
     if (key.getKeyCode() == 'A' || key.getKeyCode() == 'a')
     {
         m_timelineView.toggleAutomation();
@@ -1237,7 +1341,7 @@ void MainEditorView::resized()
     }
 
     // 4. Bottom Dock Area (Variable Height, Collapsible, or Maximized)
-    const bool allDockedPanelsDetached = (m_floatingMixer && m_floatingPianoRoll && m_floatingChannelRack && m_floatingDrumSampler && m_floatingRoutingMatrix && m_floatingModulationRack && m_floatingSpatialRadar);
+    const bool allDockedPanelsDetached = (m_floatingMixer && m_floatingPianoRoll && m_floatingChannelRack && m_floatingDrumSampler && m_floatingRoutingMatrix && m_floatingModulationRack && m_floatingSpatialRadar && m_floatingWireGrid && m_floatingMasteringSuite);
     if (! allDockedPanelsDetached)
     {
         const int actualDockHeight = m_dockMaximized ? (area.getHeight() - 30) : m_dockHeight;
@@ -1247,14 +1351,16 @@ void MainEditorView::resized()
         m_dockSplitter.setBounds(area.removeFromBottom(5));
 
         auto tabHeader = bottomDockArea.removeFromTop(24);
-        m_tabMixerButton.setBounds(tabHeader.removeFromLeft(110).reduced(2, 2));
-        m_tabPianoRollButton.setBounds(tabHeader.removeFromLeft(105).reduced(2, 2));
-        m_tabChannelRackButton.setBounds(tabHeader.removeFromLeft(115).reduced(2, 2));
-        m_tabDrumSamplerButton.setBounds(tabHeader.removeFromLeft(115).reduced(2, 2));
-        m_tabRoutingMatrixButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
-        m_tabModulationButton.setBounds(tabHeader.removeFromLeft(105).reduced(2, 2));
-        m_tabSpatialRadarButton.setBounds(tabHeader.removeFromLeft(100).reduced(2, 2));
-        m_tabBrowserButton.setBounds(tabHeader.removeFromLeft(85).reduced(2, 2));
+        m_tabMixerButton.setBounds(tabHeader.removeFromLeft(105).reduced(2, 2));
+        m_tabPianoRollButton.setBounds(tabHeader.removeFromLeft(100).reduced(2, 2));
+        m_tabChannelRackButton.setBounds(tabHeader.removeFromLeft(110).reduced(2, 2));
+        m_tabDrumSamplerButton.setBounds(tabHeader.removeFromLeft(110).reduced(2, 2));
+        m_tabRoutingMatrixButton.setBounds(tabHeader.removeFromLeft(90).reduced(2, 2));
+        m_tabModulationButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
+        m_tabSpatialRadarButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
+        m_tabWireGridButton.setBounds(tabHeader.removeFromLeft(110).reduced(2, 2));
+        m_tabMasteringButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
+        m_tabBrowserButton.setBounds(tabHeader.removeFromLeft(80).reduced(2, 2));
 
         m_maximizeDockButton.setBounds(tabHeader.removeFromRight(26).reduced(2, 2));
         m_detachDockButton.setBounds(tabHeader.removeFromRight(26).reduced(2, 2));
@@ -1266,6 +1372,8 @@ void MainEditorView::resized()
         if (! m_floatingRoutingMatrix) m_routingMatrixView.setBounds(bottomDockArea);
         if (! m_floatingModulationRack) m_modulationRackView.setBounds(bottomDockArea);
         if (! m_floatingSpatialRadar) m_spatialRadarView.setBounds(bottomDockArea);
+        if (! m_floatingWireGrid) m_wireGridView.setBounds(bottomDockArea);
+        if (! m_floatingMasteringSuite) m_masteringSuiteView.setBounds(bottomDockArea);
     }
     else
     {

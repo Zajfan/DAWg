@@ -62,7 +62,8 @@ private:
         velocity,
         mpePitch,
         mpePressure,
-        mpeTimbre
+        mpeTimbre,
+        vocalPitchTune
     };
 
     void drawVelocityLane(juce::Graphics& g, juce::Rectangle<int> bounds);
@@ -106,6 +107,7 @@ private:
     juce::TextButton m_btnPitch {"MPE Pitch"};
     juce::TextButton m_btnPressure {"Pressure"};
     juce::TextButton m_btnTimbre {"Timbre CC74"};
+    juce::TextButton m_btnVocalTune {"Vocal Tune"};
 
     int m_toolbarHeight {28};
     int m_keyWidth {50};

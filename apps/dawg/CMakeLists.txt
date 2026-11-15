@@ -39,6 +39,10 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/PluginWindow.h
     ../../ui/shell/SpatialRadarView.cpp
     ../../ui/shell/SpatialRadarView.h
+    ../../ui/shell/DspWireGridView.cpp
+    ../../ui/shell/DspWireGridView.h
+    ../../ui/shell/MasteringSuiteView.cpp
+    ../../ui/shell/MasteringSuiteView.h
     ../../ui/shell/MidiLearnManager.h
     ../../ui/shell/SessionMatrixView.cpp
     ../../ui/shell/SessionMatrixView.h
