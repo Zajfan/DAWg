@@ -6,6 +6,7 @@
 #include "EditorViewModel.h"
 #include "FloatingPanelWindow.h"
 #include "MixerPanel.h"
+#include "ModulationRackView.h"
 #include "PianoRollView.h"
 #include "PluginBrowserPanel.h"
 #include "RoutingMatrixView.h"
@@ -66,7 +67,8 @@ public:
         pianoRoll,
         channelRack,
         drumSampler,
-        routingMatrix
+        routingMatrix,
+        modulationRack
     };
 
     enum class DetachablePanel : std::uint8_t
@@ -77,6 +79,7 @@ public:
         sessionMatrix,
         drumSampler,
         routingMatrix,
+        modulationRack,
         browser
     };
 
@@ -170,6 +173,7 @@ private:
     juce::TextButton m_tabChannelRackButton {"Channel Rack [R]"};
     juce::TextButton m_tabDrumSamplerButton {"Drum Sampler [D]"};
     juce::TextButton m_tabRoutingMatrixButton {"Patchbay [X]"};
+    juce::TextButton m_tabModulationButton {"Modulators [O]"};
     juce::TextButton m_tabBrowserButton {"Browser [B]"};
     juce::TextButton m_detachDockButton {"↗"};
     juce::TextButton m_maximizeDockButton {"⛶"};
@@ -179,6 +183,7 @@ private:
     ChannelRackView m_channelRackView;
     DrumPadSamplerView m_drumSamplerView;
     RoutingMatrixView m_routingMatrixView;
+    ModulationRackView m_modulationRackView;
     std::unique_ptr<PluginBrowserPanel> m_pluginBrowser;
     std::unique_ptr<SampleBrowserPanel> m_sampleBrowser;
     juce::TextButton m_sidebarTabPluginsButton {"Plugins"};
@@ -192,6 +197,7 @@ private:
     std::unique_ptr<FloatingPanelWindow> m_floatingChannelRack;
     std::unique_ptr<FloatingPanelWindow> m_floatingDrumSampler;
     std::unique_ptr<FloatingPanelWindow> m_floatingRoutingMatrix;
+    std::unique_ptr<FloatingPanelWindow> m_floatingModulationRack;
     std::unique_ptr<FloatingPanelWindow> m_floatingBrowser;
     std::unique_ptr<FloatingPanelWindow> m_floatingSessionMatrix;
 

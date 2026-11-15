@@ -86,6 +86,13 @@ void AudioEngine::setRecording(const bool recording) noexcept
     m_recording.store(recording, std::memory_order_release);
 }
 
+void AudioEngine::setPunchRange(const bool enabled, const std::uint64_t inSample, const std::uint64_t outSample) noexcept
+{
+    m_punchInSample.store(inSample, std::memory_order_relaxed);
+    m_punchOutSample.store(outSample, std::memory_order_relaxed);
+    m_punchEnabled.store(enabled, std::memory_order_release);
+}
+
 bool AudioEngine::isRecording() const noexcept
 {
     return m_recording.load(std::memory_order_acquire);
@@ -154,11 +161,22 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
 {
     if (m_prepared && m_recording.load(std::memory_order_acquire))
     {
-        if (auto* recBuf = m_recordBuffer.load(std::memory_order_acquire);
-            recBuf != nullptr && input.channels != nullptr && input.frameCount > 0)
+        bool inPunch = true;
+        if (m_punchEnabled.load(std::memory_order_relaxed))
         {
-            const std::span<const float* const> inPlanes {input.channels, input.channelCount};
-            static_cast<void>(recBuf->write(inPlanes, input.frameCount));
+            const auto curSample = static_cast<std::uint64_t>(std::max<std::int64_t>(0, m_transportState.samplePosition));
+            inPunch = (curSample >= m_punchInSample.load(std::memory_order_relaxed) &&
+                       curSample < m_punchOutSample.load(std::memory_order_relaxed));
+        }
+
+        if (inPunch)
+        {
+            if (auto* recBuf = m_recordBuffer.load(std::memory_order_acquire);
+                recBuf != nullptr && input.channels != nullptr && input.frameCount > 0)
+            {
+                const std::span<const float* const> inPlanes {input.channels, input.channelCount};
+                static_cast<void>(recBuf->write(inPlanes, input.frameCount));
+            }
         }
     }
 
@@ -215,6 +233,20 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
 
     if (! m_prepared || ! m_transportState.playing)
     {
+        if (m_prepared && m_inputMonitoring.load(std::memory_order_relaxed) && input.channels != nullptr && output.channels != nullptr)
+        {
+            const auto monChans = std::min(input.channelCount, output.channelCount);
+            for (std::size_t ch = 0; ch < monChans; ++ch)
+            {
+                if (input.channels[ch] != nullptr && output.channels[ch] != nullptr)
+                {
+                    for (std::size_t f = 0; f < output.frameCount; ++f)
+                    {
+                        output.channels[ch][f] += input.channels[ch][f];
+                    }
+                }
+            }
+        }
         m_meterPublisher.publish({});
         return;
     }
@@ -387,7 +419,13 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
                     remainingFrames -= untilWrap;
                     currentTimeline += untilWrap;
                     if (currentTimeline == loopEnd)
+                    {
                         currentTimeline = loopStart;
+                        if (m_recording.load(std::memory_order_relaxed))
+                        {
+                            m_loopTakeCount.fetch_add(1, std::memory_order_relaxed);
+                        }
+                    }
                 }
                 else
                 {
@@ -409,6 +447,21 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
     }
 
     publishMasterMeters();
+
+    if (m_inputMonitoring.load(std::memory_order_relaxed) && input.channels != nullptr && output.channels != nullptr)
+    {
+        const auto monChans = std::min(input.channelCount, output.channelCount);
+        for (std::size_t ch = 0; ch < monChans; ++ch)
+        {
+            if (input.channels[ch] != nullptr && output.channels[ch] != nullptr)
+            {
+                for (std::size_t f = 0; f < output.frameCount; ++f)
+                {
+                    output.channels[ch][f] += input.channels[ch][f];
+                }
+            }
+        }
+    }
             m_transportState.samplePosition = static_cast<std::int64_t>(
                 std::min<std::uint64_t>(
                     currentTimeline,
@@ -429,6 +482,21 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
     }
 
     publishMasterMeters();
+
+    if (m_inputMonitoring.load(std::memory_order_relaxed) && input.channels != nullptr && output.channels != nullptr)
+    {
+        const auto monChans = std::min(input.channelCount, output.channelCount);
+        for (std::size_t ch = 0; ch < monChans; ++ch)
+        {
+            if (input.channels[ch] != nullptr && output.channels[ch] != nullptr)
+            {
+                for (std::size_t f = 0; f < output.frameCount; ++f)
+                {
+                    output.channels[ch][f] += input.channels[ch][f];
+                }
+            }
+        }
+    }
         m_transportState.samplePosition = saturatingAdvance(
             m_transportState.samplePosition, output.frameCount);
         return;
@@ -528,6 +596,21 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
     }
 
     publishMasterMeters();
+
+    if (m_inputMonitoring.load(std::memory_order_relaxed) && input.channels != nullptr && output.channels != nullptr)
+    {
+        const auto monChans = std::min(input.channelCount, output.channelCount);
+        for (std::size_t ch = 0; ch < monChans; ++ch)
+        {
+            if (input.channels[ch] != nullptr && output.channels[ch] != nullptr)
+            {
+                for (std::size_t f = 0; f < output.frameCount; ++f)
+                {
+                    output.channels[ch][f] += input.channels[ch][f];
+                }
+            }
+        }
+    }
     m_transportState.samplePosition = saturatingAdvance(
         m_transportState.samplePosition, output.frameCount);
 }

@@ -7,6 +7,7 @@ add_library(dawg_services_media STATIC
     src/AudioWarpService.cpp
     src/DiskStreamPool.cpp
     src/OfflineRenderService.cpp
+    src/StemSeparatorService.cpp
     src/TransientDetector.cpp
     src/WaveformCache.cpp
 )

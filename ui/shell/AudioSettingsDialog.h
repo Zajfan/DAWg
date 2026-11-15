@@ -18,6 +18,9 @@ public:
 
 private:
     juce::AudioDeviceSelectorComponent m_selector;
+    juce::Label m_controllerLabel;
+    juce::ComboBox m_controllerProfileCombo;
+    juce::ToggleButton m_midiClockOutToggle {"Transmit Master MIDI Clock (24 PPQN / DIN Sync)"};
 };
 
 class AudioSettingsWindow final : public juce::DocumentWindow

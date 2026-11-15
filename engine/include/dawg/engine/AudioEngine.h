@@ -64,6 +64,14 @@ public:
     void setRecording(bool recording) noexcept;
     [[nodiscard]] bool isRecording() const noexcept;
 
+    // Input monitoring & Punch In/Out (Option 1)
+    void setInputMonitoring(bool enabled) noexcept { m_inputMonitoring.store(enabled, std::memory_order_relaxed); }
+    [[nodiscard]] bool isInputMonitoring() const noexcept { return m_inputMonitoring.load(std::memory_order_relaxed); }
+    void setPunchRange(bool enabled, std::uint64_t inSample, std::uint64_t outSample) noexcept;
+    [[nodiscard]] bool isPunchEnabled() const noexcept { return m_punchEnabled.load(std::memory_order_relaxed); }
+    [[nodiscard]] std::uint32_t loopTakeCount() const noexcept { return m_loopTakeCount.load(std::memory_order_relaxed); }
+    void resetLoopTakeCount() noexcept { m_loopTakeCount.store(0, std::memory_order_relaxed); }
+
     void setMasterLimiterEnabled(bool enabled) noexcept;
     [[nodiscard]] bool isMasterLimiterEnabled() const noexcept;
 
@@ -90,6 +98,11 @@ private:
     TransportState m_transportState {};
     std::atomic<RecordRingBuffer*> m_recordBuffer {nullptr};
     std::atomic<bool> m_recording {false};
+    std::atomic<bool> m_inputMonitoring {false};
+    std::atomic<bool> m_punchEnabled {false};
+    std::atomic<std::uint64_t> m_punchInSample {0};
+    std::atomic<std::uint64_t> m_punchOutSample {0};
+    std::atomic<std::uint32_t> m_loopTakeCount {0};
     std::atomic<bool> m_masterLimiterEnabled {false};
     dsp::BrickwallLimiterNode m_masterLimiter;
     double m_sampleRate {48000.0};

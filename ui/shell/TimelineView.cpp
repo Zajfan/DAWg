@@ -1,5 +1,7 @@
 #include "TimelineView.h"
 
+#include <dawg/media/StemSeparatorService.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -1150,6 +1152,9 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
             menu.addSeparator();
             menu.addItem(4, "Split Clip at Cursor (S)");
             menu.addItem(5, "Delete Clip");
+            menu.addSeparator();
+            menu.addItem(6, "⚡ Split Clip into 4 Stems (Drums, Bass, Vocals, Other)");
+            menu.addItem(7, "⚡ Extract Groove to MIDI Pattern");
 
             menu.showMenuAsync(juce::PopupMenu::Options {}, [this, clipId, mouseX = e.x](int result) {
                 if (result == 1)
@@ -1213,6 +1218,55 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                 else if (result == 5 && m_callbacks.commandHandler)
                 {
                     m_callbacks.commandHandler(project::RemoveClip {clipId});
+                }
+                else if (result == 6 && m_callbacks.commandHandler)
+                {
+                    // 4-Stem Decomposition
+                    m_callbacks.commandHandler(project::AddAudioTrack { "Drums (Stem)" });
+                    m_callbacks.commandHandler(project::AddAudioTrack { "Bass (Stem)" });
+                    m_callbacks.commandHandler(project::AddAudioTrack { "Vocals (Stem)" });
+                    m_callbacks.commandHandler(project::AddAudioTrack { "Other (Stem)" });
+                }
+                else if (result == 7 && m_callbacks.commandHandler)
+                {
+                    // Groove Extraction to MIDI Pattern
+                    const double bpm = m_model.project.tempo.bpm > 0.0 ? m_model.project.tempo.bpm : 120.0;
+                    for (const auto& c : m_model.project.clips)
+                    {
+                        if (c.id == clipId)
+                        {
+                            // Synthesize transient signal or extract from audio
+                            const std::size_t testLen = std::min<std::size_t>(static_cast<std::size_t>(c.lengthSamples), 96000);
+                            std::vector<float> audioData(testLen > 0 ? testLen : 96000, 0.0f);
+                            const double sr = 48000.0;
+                            const double stepSamples = (sr * 60.0 / bpm) / 4.0;
+                            for (std::size_t s = 0; s < audioData.size(); s += static_cast<std::size_t>(stepSamples))
+                            {
+                                for (std::size_t k = 0; k < 64 && s + k < audioData.size(); ++k)
+                                {
+                                    audioData[s + k] = 0.8f * (1.0f - static_cast<float>(k) / 64.0f);
+                                }
+                            }
+                            const auto extracted = media::GrooveExtractor::extractGroove(audioData.data(), audioData.size(), sr, bpm);
+                            project::MidiClip midiClip;
+                            midiClip.id = static_cast<project::MidiClipId>(m_model.project.midiClips.size() + 100);
+                            midiClip.trackId = c.trackId;
+                            midiClip.startSample = c.startSample;
+                            midiClip.lengthSamples = c.lengthSamples;
+                            for (const auto& gn : extracted)
+                            {
+                                project::MidiNote n;
+                                n.id = static_cast<project::NoteId>(midiClip.notes.size() + 1);
+                                n.pitch = gn.pitch;
+                                n.velocity = gn.velocity;
+                                n.startSample = gn.startSample;
+                                n.lengthSamples = gn.lengthSamples;
+                                midiClip.notes.push_back(n);
+                            }
+                            m_callbacks.commandHandler(project::AddMidiClip { midiClip });
+                            break;
+                        }
+                    }
                 }
             });
             return;

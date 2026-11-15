@@ -31,6 +31,8 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/DrumPadSamplerView.h
     ../../ui/shell/RoutingMatrixView.cpp
     ../../ui/shell/RoutingMatrixView.h
+    ../../ui/shell/ModulationRackView.cpp
+    ../../ui/shell/ModulationRackView.h
     ../../ui/shell/MidiLearnManager.h
     ../../ui/shell/SessionMatrixView.cpp
     ../../ui/shell/SessionMatrixView.h

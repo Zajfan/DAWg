@@ -6,6 +6,7 @@
 #include <dawg/media/AudioWarpService.h>
 #include <dawg/media/DiskStreamPool.h>
 #include <dawg/media/OfflineRenderService.h>
+#include <dawg/media/StemSeparatorService.h>
 #include <dawg/media/TransientDetector.h>
 #include <dawg/media/WaveformCache.h>
 
@@ -561,6 +562,46 @@ void testAudioWarpServiceBeatMatching()
     require(warped[0].size() > 0, "warped audio contains samples");
     require(warped[0].size() < numSamples, "compressing second half reduces total sample length");
 }
+
+void testStemSeparatorAndGrooveExtraction()
+{
+    // Generate synthetic mix with bass tone, vocal mid tone, and percussion clicks
+    constexpr std::size_t numSamples = 48000;
+    std::vector<float> mixL(numSamples, 0.0f);
+    std::vector<float> mixR(numSamples, 0.0f);
+
+    for (std::size_t i = 0; i < numSamples; ++i)
+    {
+        const float t = static_cast<float>(i) / 48000.0f;
+        const float bass = 0.5f * std::sin(2.0f * 3.14159f * 80.0f * t);
+        const float vocal = 0.4f * std::sin(2.0f * 3.14159f * 1000.0f * t);
+        mixL[i] = bass + vocal;
+        mixR[i] = bass + vocal;
+    }
+
+    // Add percussive clicks at beats
+    for (int b = 0; b < 4; ++b)
+    {
+        const std::size_t onset = b * 12000;
+        for (std::size_t j = 0; j < 100 && (onset + j) < numSamples; ++j)
+        {
+            mixL[onset + j] += 0.8f;
+            mixR[onset + j] += 0.8f;
+        }
+    }
+
+    const auto stems = StemSeparatorService::separate4Stems(mixL.data(), mixR.data(), numSamples, 48000.0);
+    require(stems.drumsL.size() == numSamples, "drums stem allocated");
+    require(stems.bassL.size() == numSamples, "bass stem allocated");
+    require(stems.vocalsL.size() == numSamples, "vocals stem allocated");
+    require(stems.otherL.size() == numSamples, "other stem allocated");
+
+    // Groove Extraction test
+    const auto grooveNotes = GrooveExtractor::extractGroove(mixL.data(), numSamples, 48000.0, 120.0);
+    require(! grooveNotes.empty(), "GrooveExtractor extracts notes from percussive bursts");
+    require(grooveNotes[0].pitch == 36 || grooveNotes[0].pitch == 38 || grooveNotes[0].pitch == 42,
+            "Extracted note maps to valid drum pitch");
+}
 } // namespace
 
 int main()
@@ -573,5 +614,6 @@ int main()
     testOfflineRenderServiceMasterBounceStemsAndDither();
     testTransientDetectionOnPercussiveBursts();
     testAudioWarpServiceBeatMatching();
-    std::puts("PASS: 8 media service, resampler, disk pool, record, waveform cache, offline render, transient detection, and warp tests");
+    testStemSeparatorAndGrooveExtraction();
+    std::puts("PASS: 9 media service, resampler, disk pool, record, waveform cache, offline render, transient detection, warp, and stem separation tests");
 }

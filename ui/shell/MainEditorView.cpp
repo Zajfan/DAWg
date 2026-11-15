@@ -118,6 +118,7 @@ MainEditorView::MainEditorView(EditorViewModel model,
     , m_channelRackView(m_commandHandler, m_transportCallbacks.audition)
     , m_drumSamplerView(m_commandHandler, m_transportCallbacks.audition)
     , m_routingMatrixView(m_commandHandler, nullptr)
+    , m_modulationRackView()
     , m_dockSplitter(DragSplitterBar::Orientation::horizontal, [this](const int delta) {
         if (! m_dockMaximized)
         {
@@ -159,6 +160,10 @@ MainEditorView::MainEditorView(EditorViewModel model,
     m_tabRoutingMatrixButton.onClick = [this] { setDockMode(BottomDockMode::routingMatrix); };
     addAndMakeVisible(m_tabRoutingMatrixButton);
 
+    m_tabModulationButton.setClickingTogglesState(false);
+    m_tabModulationButton.onClick = [this] { setDockMode(BottomDockMode::modulationRack); };
+    addAndMakeVisible(m_tabModulationButton);
+
     m_tabBrowserButton.setClickingTogglesState(false);
     m_tabBrowserButton.onClick = [this] { togglePluginBrowser(); };
     addAndMakeVisible(m_tabBrowserButton);
@@ -176,6 +181,8 @@ MainEditorView::MainEditorView(EditorViewModel model,
             detachPanel(DetachablePanel::drumSampler);
         else if (m_dockMode == BottomDockMode::routingMatrix)
             detachPanel(DetachablePanel::routingMatrix);
+        else if (m_dockMode == BottomDockMode::modulationRack)
+            detachPanel(DetachablePanel::modulationRack);
     };
     addAndMakeVisible(m_detachDockButton);
 
@@ -192,6 +199,7 @@ MainEditorView::MainEditorView(EditorViewModel model,
     addChildComponent(m_channelRackView);
     addChildComponent(m_drumSamplerView);
     addChildComponent(m_routingMatrixView);
+    addChildComponent(m_modulationRackView);
 
     m_pluginBrowser = std::make_unique<PluginBrowserPanel>(
         [this](const plugins::PluginDescriptor& plugin, bool createNewTrack) {
@@ -339,18 +347,25 @@ void MainEditorView::setDockMode(BottomDockMode mode)
         m_floatingRoutingMatrix->toFront(true);
         return;
     }
+    if (m_dockMode == BottomDockMode::modulationRack && m_floatingModulationRack)
+    {
+        m_floatingModulationRack->toFront(true);
+        return;
+    }
 
     const bool isMixer = (m_dockMode == BottomDockMode::mixer);
     const bool isPianoRoll = (m_dockMode == BottomDockMode::pianoRoll);
     const bool isChannelRack = (m_dockMode == BottomDockMode::channelRack);
     const bool isDrumSampler = (m_dockMode == BottomDockMode::drumSampler);
     const bool isRoutingMatrix = (m_dockMode == BottomDockMode::routingMatrix);
+    const bool isModulationRack = (m_dockMode == BottomDockMode::modulationRack);
 
     if (! m_floatingMixer) m_mixerPanel.setVisible(isMixer);
     if (! m_floatingPianoRoll) m_pianoRollView.setVisible(isPianoRoll);
     if (! m_floatingChannelRack) m_channelRackView.setVisible(isChannelRack);
     if (! m_floatingDrumSampler) m_drumSamplerView.setVisible(isDrumSampler);
     if (! m_floatingRoutingMatrix) m_routingMatrixView.setVisible(isRoutingMatrix);
+    if (! m_floatingModulationRack) m_modulationRackView.setVisible(isModulationRack);
 
     m_tabMixerButton.setColour(juce::TextButton::buttonColourId,
                                isMixer ? juce::Colour::fromRGB(45, 95, 145) : juce::Colour::fromRGB(28, 30, 36));
@@ -362,6 +377,8 @@ void MainEditorView::setDockMode(BottomDockMode mode)
                                      isDrumSampler ? juce::Colour::fromRGB(210, 140, 40) : juce::Colour::fromRGB(28, 30, 36));
     m_tabRoutingMatrixButton.setColour(juce::TextButton::buttonColourId,
                                        isRoutingMatrix ? juce::Colour::fromRGB(110, 50, 150) : juce::Colour::fromRGB(28, 30, 36));
+    m_tabModulationButton.setColour(juce::TextButton::buttonColourId,
+                                    isModulationRack ? juce::Colour::fromRGB(45, 120, 95) : juce::Colour::fromRGB(28, 30, 36));
     resized();
 }
 
@@ -483,6 +500,22 @@ void MainEditorView::detachPanel(DetachablePanel panel)
         }
         break;
 
+    case DetachablePanel::modulationRack:
+        if (! m_floatingModulationRack)
+        {
+            removeChildComponent(&m_modulationRackView);
+            m_floatingModulationRack = std::make_unique<FloatingPanelWindow>(
+                "Modulation Rack & LFO System - DAWg",
+                &m_modulationRackView,
+                [this] { reDockPanel(DetachablePanel::modulationRack); });
+
+            m_floatingModulationRack->setBounds(180, 180, 840, 420);
+            m_floatingModulationRack->setVisible(true);
+            m_tabModulationButton.setButtonText("Modulators [↙]");
+            setDockMode(m_dockMode == BottomDockMode::modulationRack ? BottomDockMode::mixer : m_dockMode);
+        }
+        break;
+
     case DetachablePanel::browser:
         break;
     }
@@ -553,6 +586,16 @@ void MainEditorView::reDockPanel(DetachablePanel panel)
         }
         break;
 
+    case DetachablePanel::modulationRack:
+        if (m_floatingModulationRack)
+        {
+            m_floatingModulationRack.reset();
+            addChildComponent(m_modulationRackView);
+            m_tabModulationButton.setButtonText("Modulators [O]");
+            setDockMode(BottomDockMode::modulationRack);
+        }
+        break;
+
     case DetachablePanel::browser:
         break;
     }
@@ -568,6 +611,7 @@ void MainEditorView::reDockAllPanels()
     reDockPanel(DetachablePanel::sessionMatrix);
     reDockPanel(DetachablePanel::drumSampler);
     reDockPanel(DetachablePanel::routingMatrix);
+    reDockPanel(DetachablePanel::modulationRack);
 }
 
 bool MainEditorView::isPanelDetached(DetachablePanel panel) const noexcept
@@ -580,6 +624,7 @@ bool MainEditorView::isPanelDetached(DetachablePanel panel) const noexcept
     case DetachablePanel::sessionMatrix: return m_floatingSessionMatrix != nullptr;
     case DetachablePanel::drumSampler: return m_floatingDrumSampler != nullptr;
     case DetachablePanel::routingMatrix: return m_floatingRoutingMatrix != nullptr;
+    case DetachablePanel::modulationRack: return m_floatingModulationRack != nullptr;
     case DetachablePanel::browser: return false;
     }
     return false;
@@ -1037,6 +1082,11 @@ bool MainEditorView::keyPressed(const juce::KeyPress& key)
         setDockMode(BottomDockMode::routingMatrix);
         return true;
     }
+    if (key.getKeyCode() == 'O' || key.getKeyCode() == 'o')
+    {
+        setDockMode(BottomDockMode::modulationRack);
+        return true;
+    }
     if (key.getKeyCode() == 'A' || key.getKeyCode() == 'a')
     {
         m_timelineView.toggleAutomation();
@@ -1133,7 +1183,7 @@ void MainEditorView::resized()
     }
 
     // 4. Bottom Dock Area (Variable Height, Collapsible, or Maximized)
-    const bool allDockedPanelsDetached = (m_floatingMixer && m_floatingPianoRoll && m_floatingChannelRack && m_floatingDrumSampler && m_floatingRoutingMatrix);
+    const bool allDockedPanelsDetached = (m_floatingMixer && m_floatingPianoRoll && m_floatingChannelRack && m_floatingDrumSampler && m_floatingRoutingMatrix && m_floatingModulationRack);
     if (! allDockedPanelsDetached)
     {
         const int actualDockHeight = m_dockMaximized ? (area.getHeight() - 30) : m_dockHeight;
@@ -1148,6 +1198,7 @@ void MainEditorView::resized()
         m_tabChannelRackButton.setBounds(tabHeader.removeFromLeft(115).reduced(2, 2));
         m_tabDrumSamplerButton.setBounds(tabHeader.removeFromLeft(115).reduced(2, 2));
         m_tabRoutingMatrixButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
+        m_tabModulationButton.setBounds(tabHeader.removeFromLeft(105).reduced(2, 2));
         m_tabBrowserButton.setBounds(tabHeader.removeFromLeft(85).reduced(2, 2));
 
         m_maximizeDockButton.setBounds(tabHeader.removeFromRight(26).reduced(2, 2));
@@ -1158,6 +1209,7 @@ void MainEditorView::resized()
         if (! m_floatingChannelRack) m_channelRackView.setBounds(bottomDockArea);
         if (! m_floatingDrumSampler) m_drumSamplerView.setBounds(bottomDockArea);
         if (! m_floatingRoutingMatrix) m_routingMatrixView.setBounds(bottomDockArea);
+        if (! m_floatingModulationRack) m_modulationRackView.setBounds(bottomDockArea);
     }
     else
     {

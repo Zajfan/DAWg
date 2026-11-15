@@ -6,6 +6,7 @@ add_library(dawg_engine_core STATIC
     src/DspGraph.cpp
     src/GraphHandoff.cpp
     src/Metronome.cpp
+    src/MidiClockGenerator.cpp
     src/MidiControllerManager.cpp
     src/PlaybackRingBuffer.cpp
     src/RecordRingBuffer.cpp
@@ -18,6 +19,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/BrickwallLimiterNode.cpp
     src/dsp/DynamicsCompressorNode.cpp
     src/dsp/DrumPadSamplerNode.cpp
+    src/dsp/ModulatorRack.cpp
     src/dsp/ParametricEQNode.cpp
     src/dsp/TnhcDelayNode.cpp
     src/dsp/TnhcReverbNode.cpp

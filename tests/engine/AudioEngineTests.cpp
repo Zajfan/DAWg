@@ -17,6 +17,7 @@
 #include <dawg/engine/dsp/BrickwallLimiterNode.h>
 #include <dawg/engine/dsp/DrumPadSamplerNode.h>
 #include <dawg/engine/dsp/DynamicsCompressorNode.h>
+#include <dawg/engine/dsp/ModulatorRack.h>
 #include <dawg/engine/dsp/ParametricEQNode.h>
 #include <dawg/engine/dsp/TnhcDelayNode.h>
 #include <dawg/engine/dsp/TnhcReverbNode.h>
@@ -1914,6 +1915,86 @@ void testDrumPadSamplerNodePadsChokeAndSlicing()
     require(sampler.isPadActive(0), "MIDI Note 36 activates Pad 0");
     sampler.noteOff(36);
 }
+
+void testInputMonitoringPunchInAndLoopTakeCount()
+{
+    AudioEngine engine;
+    require(engine.prepare({48000.0, 64, 2}), "AudioEngine prepares for recording test");
+
+    // 1. Input Monitoring test
+    engine.setInputMonitoring(true);
+    require(engine.isInputMonitoring(), "Input monitoring is active");
+
+    std::array<float, 64> inL {};
+    std::array<float, 64> inR {};
+    std::fill(inL.begin(), inL.end(), 0.35f);
+    std::fill(inR.begin(), inR.end(), 0.35f);
+    std::array<const float*, 2> inPlanes {inL.data(), inR.data()};
+
+    std::array<float, 64> outL {};
+    std::array<float, 64> outR {};
+    std::array<float*, 2> outPlanes {outL.data(), outR.data()};
+
+    engine.process(
+        dawg::engine::AudioInputBufferView {inPlanes.data(), 2, 64},
+        dawg::engine::AudioBufferView {outPlanes.data(), 2, 64},
+        {},
+        {});
+
+    require(std::abs(outL[0] - 0.35f) < 1e-4f, "Zero-latency input monitoring mixes hardware input into output");
+
+    // 2. Punch-in test
+    dawg::engine::RecordRingBuffer recRing;
+    require(recRing.prepare(2, 4096), "RecordRingBuffer prepares for punch test");
+    engine.setRecordBuffer(&recRing);
+    engine.setPunchRange(true, 1000, 2000);
+    require(engine.isPunchEnabled(), "Punch range is enabled");
+
+    // Outside punch range: 0 to 64
+    engine.setRecording(true);
+    engine.process(
+        dawg::engine::AudioInputBufferView {inPlanes.data(), 2, 64},
+        dawg::engine::AudioBufferView {outPlanes.data(), 2, 64},
+        {},
+        {});
+    require(recRing.availableFrames() == 0, "No frames written outside punch-in range");
+
+    engine.setRecording(false);
+    engine.setRecordBuffer(nullptr);
+}
+
+void testModulatorRackLfoEnvelopeAndStepMod()
+{
+    using dawg::engine::ModulatorRack;
+    using dawg::engine::LfoWaveform;
+    using dawg::engine::ModSyncDivision;
+
+    ModulatorRack rack;
+    rack.prepare(48000.0);
+
+    // 1. Macro knobs
+    rack.setMacroValue(0, 0.75f);
+    require(std::abs(rack.macro(0).value - 0.75f) < 1e-4f, "Macro 0 set to 0.75");
+
+    // 2. LFO
+    rack.setLfoWaveform(0, LfoWaveform::sine);
+    rack.setLfoSyncDivision(0, ModSyncDivision::quarter);
+    rack.setLfoDepth(0, 1.0f);
+
+    std::array<float, 64> inAudio {};
+    std::fill(inAudio.begin(), inAudio.end(), 0.8f);
+    std::array<const float*, 1> inAudioPlanes {inAudio.data()};
+
+    rack.process(inAudioPlanes.data(), 1, 64, 120.0, 0);
+    require(rack.lfoValue(0) >= 0.0f && rack.lfoValue(0) <= 1.0f, "LFO output is bounded");
+
+    // 3. Envelope Follower
+    require(rack.envFollowerValue() > 0.05f, "Envelope follower tracks input audio level");
+
+    // 4. Step Modulator
+    rack.setStepValue(0, 0.9f);
+    require(std::abs(rack.stepValue(0) - 0.9f) < 1e-4f, "Step 0 value is stored");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -2034,4 +2115,6 @@ int main()
     testTnhcDelayNodePingPongAndSync();
     testDspGraphExternalSidechainRoutingWithPdc();
     testDrumPadSamplerNodePadsChokeAndSlicing();
+    testInputMonitoringPunchInAndLoopTakeCount();
+    testModulatorRackLfoEnvelopeAndStepMod();
 }
