@@ -1,4 +1,5 @@
 #include <dawg/project/Project.h>
+#include <dawg/project/TakeLaneComping.h>
 
 #include <algorithm>
 #include <array>
@@ -729,6 +730,69 @@ void testAuxSendsSubmixBusesAndSwipeComping()
     require(project.apply(RemoveTrackSend {vocalTrackId, reverbTrackId}), "remove track send");
     require(project.snapshot().tracks[0].sends.empty(), "send removed");
 }
+
+void testTakeLaneManagerAndEqualPowerCrossfades()
+{
+    TakeCompManager compManager(101);
+    require(compManager.trackId() == 101, "CompManager trackId matches");
+
+    // 1. Add Multiple Take Lanes
+    AudioClip takeClip1;
+    takeClip1.id = 1;
+    takeClip1.assetId = 10;
+    takeClip1.startSample = 0;
+    takeClip1.lengthSamples = 96000; // 2 seconds
+
+    AudioClip takeClip2;
+    takeClip2.id = 2;
+    takeClip2.assetId = 11;
+    takeClip2.startSample = 0;
+    takeClip2.lengthSamples = 96000;
+
+    const auto t1 = compManager.addTake(takeClip1, "Lead Vocal Take 1");
+    const auto t2 = compManager.addTake(takeClip2, "Lead Vocal Take 2");
+
+    require(compManager.takeLanes().size() == 2, "2 take lanes registered");
+    require(compManager.findTake(t1) != nullptr, "Take 1 found");
+    require(compManager.findTake(t2) != nullptr, "Take 2 found");
+
+    // 2. Swipe-Comping Selection: Splice Hero Take from Take 2 in middle [24000, 72000)
+    compManager.selectCompSlice(t2, 24000, 72000, 256);
+
+    const auto slices = compManager.compSlices();
+    require(slices.size() == 3, "Swipe-comping splices into 3 slices: [0, 24k) Take 1, [24k, 72k) Take 2, [72k, 96k) Take 1");
+    require(slices[0].takeId == t1 && slices[0].startSample == 0 && slices[0].endSample == 24000, "Slice 0 is Take 1 head");
+    require(slices[1].takeId == t2 && slices[1].startSample == 24000 && slices[1].endSample == 72000, "Slice 1 is Take 2 mid hero take");
+    require(slices[2].takeId == t1 && slices[2].startSample == 72000 && slices[2].endSample == 96000, "Slice 2 is Take 1 tail");
+
+    // 3. Take Audition Solo
+    compManager.setTakeAuditionSolo(t2, true);
+    require(compManager.soloedTakeId() == t2, "Take 2 soloed for auditioning");
+    require(compManager.findTake(t2)->isAuditionSolo, "Take 2 lane isAuditionSolo is true");
+
+    compManager.setTakeAuditionSolo(t2, false);
+    require(compManager.soloedTakeId() == 0, "Take 2 solo cleared");
+
+    // 4. Equal-Power Crossfade Calculation Verification
+    constexpr std::size_t fadeLen = 128;
+    std::vector<float> outgoing(fadeLen, 1.0f);
+    std::vector<float> incoming(fadeLen, 1.0f);
+
+    TakeCompManager::applyEqualPowerCrossfade(outgoing.data(), incoming.data(), fadeLen);
+
+    // Sum of squared amplitudes should equal 1.0 across entire fade
+    for (std::size_t i = 0; i < fadeLen; ++i) {
+        const float powerSum = (outgoing[i] * outgoing[i]) + (incoming[i] * incoming[i]);
+        require(std::abs(powerSum - 1.0f) < 1e-4f, "Equal-power crossfade preserves constant acoustic power");
+    }
+
+    // 5. Flatten & Merge Comp into Consolidated AudioClip
+    const AudioClip merged = compManager.flattenAndMergeComp(999, 50, "Comp Lead Vocal Master");
+    require(merged.id == 999, "Consolidated clip ID is 999");
+    require(merged.assetId == 50, "Consolidated asset ID is 50");
+    require(merged.startSample == 0, "Consolidated startSample is 0");
+    require(merged.lengthSamples == 96000, "Consolidated length is 96000");
+}
 }
 
 int main()
@@ -748,5 +812,6 @@ int main()
     testMidiTracksClipsAndNotes();
     testAutomationLanesAndPoints();
     testAuxSendsSubmixBusesAndSwipeComping();
-    std::puts("PASS: 15 project behavior tests");
+    testTakeLaneManagerAndEqualPowerCrossfades();
+    std::puts("PASS: 16 project behavior tests");
 }

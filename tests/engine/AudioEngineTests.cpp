@@ -15,6 +15,7 @@
 #include <dawg/engine/SessionMatrixEngine.h>
 #include <dawg/engine/TempoMap.h>
 #include <dawg/engine/WorkStealingScheduler.h>
+#include <dawg/engine/dsp/AnalogLadderRingModSynthNode.h>
 #include <dawg/engine/dsp/AudioTranscriber.h>
 #include <dawg/engine/dsp/AudioWarpEngine.h>
 #include <dawg/engine/dsp/BinauralSpatialPannerNode.h>
@@ -26,6 +27,8 @@
 #include <dawg/engine/dsp/GranularCloudNode.h>
 #include <dawg/engine/dsp/HarmonicAssistant.h>
 #include <dawg/engine/dsp/HarmonizerVocoderNode.h>
+#include <dawg/engine/dsp/MasterTapeVinylCuttingNode.h>
+#include <dawg/engine/dsp/MasteringMeterNode.h>
 #include <dawg/engine/dsp/ModulatorRack.h>
 #include <dawg/engine/dsp/MultiSampleInstrumentNode.h>
 #include <dawg/engine/dsp/MultibandCompressorNode.h>
@@ -3935,6 +3938,151 @@ void testSpectralResonanceTamerAndDeEsser()
     tamer.setDeltaListen(true);
     require(tamer.isDeltaListen(), "Delta listen audition mode enabled");
 }
+
+void testAnalogLadderRingModSynthAndFeedback()
+{
+    using dawg::engine::dsp::AnalogLadderRingModSynthNode;
+    using dawg::engine::dsp::AnalogOscConfig;
+    using dawg::engine::dsp::AnalogOscWaveform;
+    using dawg::engine::dsp::DualFilterRouting;
+
+    AnalogLadderRingModSynthNode synth;
+    constexpr double sampleRate = 48000.0;
+    constexpr std::size_t blockSize = 128;
+
+    require(synth.prepare(sampleRate, blockSize, 2), "AnalogLadderRingModSynthNode prepared");
+    require(synth.latencySamples() == 0, "Zero latency analog synth");
+
+    // 1. Oscillators Configuration
+    AnalogOscConfig osc1 {.waveform = AnalogOscWaveform::sawtooth, .octave = 0, .semitones = 0.0f, .fineTuneCents = 0.0f, .pulseWidth = 0.5f, .level = 0.8f, .syncToOsc1 = false};
+    AnalogOscConfig osc2 {.waveform = AnalogOscWaveform::square,   .octave = 0, .semitones = 7.0f, .fineTuneCents = 2.0f, .pulseWidth = 0.5f, .level = 0.7f, .syncToOsc1 = true};
+    AnalogOscConfig osc3 {.waveform = AnalogOscWaveform::triangle, .octave = -1, .semitones = 0.0f, .fineTuneCents = -2.0f, .pulseWidth = 0.5f, .level = 0.6f, .syncToOsc1 = false};
+    synth.setOscConfig(0, osc1);
+    synth.setOscConfig(1, osc2);
+    synth.setOscConfig(2, osc3);
+
+    // 2. Germanium Diode Ring Modulation
+    synth.setRingModMix(0.65f);
+    synth.setRingModDiodeThreshold(0.5f);
+    require(std::abs(synth.ringModMix() - 0.65f) < 1e-4f, "Ring mod mix set to 0.65");
+    require(std::abs(synth.ringModDiodeThreshold() - 0.5f) < 1e-4f, "Diode threshold set to 0.5");
+
+    // 3. Dual-Filter Architecture & Feedback Loop
+    synth.setTransistorLadder(3000.0f, 2.2f, 0.4f);
+    synth.setDiodeLadder(2200.0f, 1.8f);
+    synth.setFilterRouting(DualFilterRouting::parallel);
+    synth.setFilterBlend(0.5f);
+    require(synth.filterRouting() == DualFilterRouting::parallel, "Parallel dual-filter routing active");
+
+    synth.setFeedbackOverdrive(0.75f);
+    require(std::abs(synth.feedbackOverdrive() - 0.75f) < 1e-4f, "Headphone feedback loop set to 0.75");
+
+    // 4. Note trigger and audio block processing
+    synth.noteOn(48, 120); // C3
+    require(synth.activeVoiceCount() == 1, "Voice 1 active after noteOn(48)");
+
+    std::vector<float> chL(blockSize, 0.0f);
+    std::vector<float> chR(blockSize, 0.0f);
+    std::array<float*, 2> channels {chL.data(), chR.data()};
+    dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+    dawg::engine::AudioBufferView emptySidechain(nullptr, 0, 0);
+    dawg::engine::ProcessContext ctx {
+        .audio = audioView,
+        .midi = {},
+        .sampleRate = sampleRate,
+        .sidechain = emptySidechain
+    };
+
+    synth.process(ctx);
+
+    float maxSynth = 0.0f;
+    for (float s : chL) {
+        maxSynth = std::max(maxSynth, std::abs(s));
+    }
+    require(maxSynth > 0.05f && maxSynth < 2.5f && !std::isnan(maxSynth),
+            "Analog synth with diode ring mod and dual ladder filters generates thick, stable output");
+
+    synth.noteOff(48);
+}
+
+void testMasterTapeVinylCuttingSuite()
+{
+    using dawg::engine::dsp::MasterTapeVinylCuttingNode;
+    using dawg::engine::dsp::EllipticalCrossoverFreq;
+
+    MasterTapeVinylCuttingNode lathe;
+    constexpr double sampleRate = 48000.0;
+    constexpr std::size_t blockSize = 256;
+
+    require(lathe.prepare(sampleRate, blockSize, 2), "MasterTapeVinylCuttingNode prepared");
+    require(lathe.latencySamples() == 0, "Zero latency vinyl cutting suite");
+
+    // 1. Vinyl Cutting Lathe: Elliptical Equalizer (EEQ) & Acceleration Limiter
+    lathe.setVinylLatheEnabled(true);
+    lathe.setEllipticalCrossover(EllipticalCrossoverFreq::hz150);
+    lathe.setHfAccelerationThreshold(-12.0f);
+    lathe.setDryMix(0.0f);
+    lathe.setVinylMix(1.0f);
+    lathe.setTapeFlangeMix(0.0f);
+
+    require(lathe.ellipticalCrossover() == EllipticalCrossoverFreq::hz150, "EEQ crossover set to 150 Hz");
+
+    // Feed completely out-of-phase stereo 50 Hz sub-bass:
+    // Left = +0.8, Right = -0.8 (pure vertical needle-skipping groove excursion)
+    std::vector<float> chL(blockSize);
+    std::vector<float> chR(blockSize);
+
+    for (int rep = 0; rep < 15; ++rep) {
+        for (std::size_t i = 0; i < blockSize; ++i) {
+            const float t = static_cast<float>(rep * blockSize + i) / static_cast<float>(sampleRate);
+            const float s = 0.8f * std::sin(2.0f * std::numbers::pi_v<float> * 50.0f * t);
+            chL[i] = s;
+            chR[i] = -s; // Inverted phase on Right
+        }
+
+        std::array<float*, 2> channels {chL.data(), chR.data()};
+        dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+        dawg::engine::AudioBufferView emptySidechain(nullptr, 0, 0);
+        dawg::engine::ProcessContext ctx {
+            .audio = audioView,
+            .midi = {},
+            .sampleRate = sampleRate,
+            .sidechain = emptySidechain
+        };
+
+        lathe.process(ctx);
+    }
+
+    // Elliptical equalizer sums out-of-phase sub-bass below 150 Hz to mono,
+    // which cancels out out-of-phase side energy (L - R -> 0)!
+    float maxSubStereoDiff = 0.0f;
+    for (std::size_t i = 0; i < blockSize; ++i) {
+        maxSubStereoDiff = std::max(maxSubStereoDiff, std::abs(chL[i] - chR[i]));
+    }
+    require(maxSubStereoDiff < 0.25f, "Elliptical equalizer collapses out-of-phase sub-bass below 150 Hz to mono");
+
+    // 2. Analog Tape Flanging & Through-Zero Phasing (TZF)
+    lathe.setVinylLatheEnabled(false);
+    lathe.setTapeFlangeEnabled(true);
+    lathe.setThroughZeroDepth(0.95f);
+    lathe.setTapeDragSlowdown(0.1f);
+    lathe.setTapeFlangeMix(1.0f);
+
+    require(lathe.isTapeFlangeEnabled(), "Tape flanger & through-zero phasing active");
+
+    std::array<float*, 2> channels {chL.data(), chR.data()};
+    dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+    dawg::engine::AudioBufferView emptySidechain(nullptr, 0, 0);
+    dawg::engine::ProcessContext ctx {
+        .audio = audioView,
+        .midi = {},
+        .sampleRate = sampleRate,
+        .sidechain = emptySidechain
+    };
+
+    lathe.process(ctx);
+    require(!std::isnan(chL[0]) && !std::isinf(chL[0]), "Through-zero tape flange processes cleanly without numerical instability");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -4086,4 +4234,6 @@ int main()
     testStepSequencerAndEuclideanPolyrhythm();
     testWavetableSynthAnd2DMorphingGrid();
     testSpectralResonanceTamerAndDeEsser();
+    testAnalogLadderRingModSynthAndFeedback();
+    testMasterTapeVinylCuttingSuite();
 }

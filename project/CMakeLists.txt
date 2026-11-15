@@ -1,6 +1,7 @@
 add_library(dawg_project_model STATIC
     src/Project.cpp
     src/ProjectCommand.cpp
+    src/TakeLaneComping.cpp
 )
 target_include_directories(dawg_project_model PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(dawg_project_model PUBLIC cxx_std_20)
