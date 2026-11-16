@@ -22,7 +22,11 @@ enum class GridModuleType : std::uint8_t
     lfo,
     envelope,
     delay,
-    audioOut
+    audioOut,
+    unitDelayFeedback, // z^-1 feedback loop operator with DC-blocking and saturation
+    wavefolder,        // Buchla-style wavefolding & diode clipper
+    xyPad,             // 2D macro performance modulator
+    sampleAndHold      // Stepped random / quantized voltage generator
 };
 
 enum class PortSignalType : std::uint8_t
@@ -49,6 +53,16 @@ struct GridCable
     std::uint32_t colorRgba {0x33FFB0FF}; // Vibrant cyan-teal default
 };
 
+struct GridMacroBinding
+{
+    std::size_t macroIndex {0}; // 0..7
+    std::uint32_t moduleId {0};
+    std::size_t paramIndex {0};
+    float minVal {0.0f};
+    float maxVal {1.0f};
+    std::string label;
+};
+
 struct GridModule
 {
     std::uint32_t id {0};
@@ -69,14 +83,28 @@ struct GridModule
     float envValue {0.0f};
     std::vector<float> delayBuffer;
     std::size_t delayWritePos {0};
+
+    // Single-sample feedback state
+    float feedbackSample {0.0f};
+    float dcBlockerPrevX {0.0f};
+    float dcBlockerPrevY {0.0f};
+
+    // Sample & Hold state
+    float shHeldValue {0.0f};
+    float shLastTrigger {0.0f};
+    std::uint32_t rngState {123456789};
 };
 
 // Visual Modular DSP Wire Grid (Bitwig "The Grid" / Max/MSP style)
 // High-performance real-time modular engine with dynamic patch cabling,
-// live probe oscilloscopes, macro controls, and studio presets.
+// single-sample feedback loops, wavefolders, macro surface mapping,
+// live probe oscilloscopes, and studio presets.
 class DspWireGrid final : public ProcessorNode
 {
 public:
+    static constexpr std::size_t numMacros = 8;
+    static constexpr std::size_t probeBufferSize = 256;
+
     DspWireGrid() noexcept;
     ~DspWireGrid() override = default;
 
@@ -89,9 +117,20 @@ public:
     [[nodiscard]] std::uint32_t latencySamples() const noexcept override { return 0; }
     void process(ProcessContext& context) noexcept override;
 
-    // Macro Knobs (0.0 to 1.0)
+    // Macro Controls (0.0 to 1.0)
     void setMacro(std::size_t index, float value) noexcept;
     [[nodiscard]] float macro(std::size_t index) const noexcept;
+
+    // Custom Surface Macro Mapping
+    void bindMacro(
+        std::size_t macroIdx,
+        std::uint32_t moduleId,
+        std::size_t paramIdx,
+        float minVal = 0.0f,
+        float maxVal = 1.0f,
+        const std::string& label = "");
+    void unbindMacro(std::size_t macroIdx, std::uint32_t moduleId, std::size_t paramIdx) noexcept;
+    [[nodiscard]] const std::vector<GridMacroBinding>& macroBindings() const noexcept { return m_macroBindings; }
 
     // Module & Cable Management
     std::uint32_t addModule(GridModuleType type, float x, float y, const std::string& name = "");
@@ -108,7 +147,6 @@ public:
     [[nodiscard]] const std::vector<GridCable>& cables() const noexcept { return m_cables; }
 
     // Probe Oscilloscope readout (ring buffer of latest probed signal samples)
-    static constexpr std::size_t probeBufferSize = 256;
     void getProbeData(float* destination, std::size_t count) const noexcept;
     void setActiveProbeCable(std::uint32_t cableId) noexcept { m_probedCableId = cableId; }
     [[nodiscard]] std::uint32_t activeProbeCable() const noexcept { return m_probedCableId; }
@@ -118,6 +156,7 @@ public:
     void loadPresetAmbientDrone();
     void loadPresetWestCoastWavefolder();
     void loadPresetPercussionSynth();
+    void loadPresetFeedbackResonator();
 
 private:
     double m_sampleRate {48000.0};
@@ -126,7 +165,8 @@ private:
     std::uint32_t m_nextCableId {1};
     std::uint32_t m_probedCableId {0};
 
-    std::array<float, 4> m_macros {0.5f, 0.5f, 0.5f, 0.5f};
+    std::array<float, numMacros> m_macros {};
+    std::vector<GridMacroBinding> m_macroBindings;
     std::vector<GridModule> m_modules;
     std::vector<GridCable> m_cables;
 

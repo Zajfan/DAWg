@@ -793,6 +793,61 @@ void testTakeLaneManagerAndEqualPowerCrossfades()
     require(merged.startSample == 0, "Consolidated startSample is 0");
     require(merged.lengthSamples == 96000, "Consolidated length is 96000");
 }
+
+void testPitchBlobEditorAndGrooveQuantizer()
+{
+    // 1. Zero-Crossing Auto-Snapping in Comping
+    std::vector<float> audioBuffer(1024, 0.0f);
+    for (std::size_t i = 0; i < 1024; ++i) {
+        audioBuffer[i] = std::sin(static_cast<float>(i) * 0.1f);
+    }
+    const auto snapped = TakeCompManager::findNearestZeroCrossing(audioBuffer.data(), 1024, 30);
+    require(std::abs(audioBuffer[snapped]) < 0.15f, "Nearest zero crossing found");
+
+    // 2. Pitch Blob Editor: Note segmentation & scale quantization
+    PitchBlobEditor blobEditor;
+    std::vector<float> vocalSynth(48000, 0.0f); // 1 second vocal simulation
+    // Syllable 1: A4 (440 Hz) for 0.4s
+    for (std::size_t i = 0; i < 19200; ++i) {
+        vocalSynth[i] = 0.6f * std::sin(2.0f * std::numbers::pi_v<float> * 440.0f * (static_cast<float>(i) / 48000.0f));
+    }
+    // Syllable 2: C5 (523.25 Hz) for 0.4s (starting at 0.5s)
+    for (std::size_t i = 24000; i < 43200; ++i) {
+        vocalSynth[i] = 0.6f * std::sin(2.0f * std::numbers::pi_v<float> * 523.25f * (static_cast<float>(i) / 48000.0f));
+    }
+
+    blobEditor.analyzeAudio(vocalSynth.data(), vocalSynth.size(), 48000.0);
+    const auto& blobs = blobEditor.blobs();
+    require(!blobs.empty(), "Vocal syllables segmented into pitch blobs");
+
+    // Scale Quantization (e.g. A Minor: A, B, C, D, E, F, G -> classes 9, 11, 0, 2, 4, 5, 7)
+    blobEditor.quantizeToScale({9, 11, 0, 2, 4, 5, 7}, 1.0f);
+    for (const auto& blob : blobEditor.blobs()) {
+        const int noteClass = (static_cast<int>(std::round(blob.targetMidiPitch)) % 12 + 12) % 12;
+        require(noteClass == 9 || noteClass == 0 || noteClass == 2 || noteClass == 4 || noteClass == 5 || noteClass == 7 || noteClass == 11,
+            "Pitch blob quantized to A Minor scale");
+    }
+
+    // Blob parameter edits
+    if (!blobs.empty()) {
+        const auto firstId = blobs.front().blobId;
+        require(blobEditor.setBlobTuning(firstId, 69.0f, -5.0f), "Tuning updated");
+        require(blobEditor.setBlobVibrato(firstId, 0.5f), "Vibrato updated");
+        require(blobEditor.setBlobFormant(firstId, 2.0f), "Formant shifted");
+    }
+
+    // 3. Groove Quantizer
+    const auto mpcGroove = GrooveQuantizer::mpc60Swing(0.58f);
+    require(mpcGroove.stepTimingOffsets.size() == 16, "MPC 16-step groove template initialized");
+    require(mpcGroove.swingAmount == 0.58f, "Swing amount is 58%");
+
+    std::vector<double> noteBeats = { 0.0, 0.25, 0.50, 0.75, 1.0, 1.25, 1.50, 1.75 };
+    GrooveQuantizer::applyGrooveToBeatTimestamps(noteBeats, mpcGroove, 1.0f);
+    require(noteBeats[1] > 0.25, "Offbeat 16th note shifted forward by MPC swing");
+
+    const auto audioGroove = GrooveQuantizer::extractGrooveFromAudio(vocalSynth.data(), vocalSynth.size(), 48000.0, 120.0);
+    require(audioGroove.stepTimingOffsets.size() == 16, "Extracted groove offsets from audio transient grid");
+}
 }
 
 int main()
@@ -813,5 +868,6 @@ int main()
     testAutomationLanesAndPoints();
     testAuxSendsSubmixBusesAndSwipeComping();
     testTakeLaneManagerAndEqualPowerCrossfades();
-    std::puts("PASS: 16 project behavior tests");
+    testPitchBlobEditorAndGrooveQuantizer();
+    std::puts("PASS: 17 project behavior tests");
 }

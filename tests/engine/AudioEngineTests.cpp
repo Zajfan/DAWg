@@ -2431,9 +2431,28 @@ void testDspWireGridModularAndOscilloscope()
     require(grid.disconnectCable(cableId), "Cable disconnected");
     require(grid.removeModule(newOscId), "Module removed");
 
-    // 5. Macro Controls
+    // 5. Macro Controls & Surface Bindings
     grid.setMacro(0, 0.85f);
     require(std::abs(grid.macro(0) - 0.85f) < 1e-4f, "Macro knob 0 updated");
+
+    // 6. Single-Sample Feedback Loop & Physical Resonator
+    grid.loadPresetFeedbackResonator();
+    require(grid.modules().size() >= 5, "Feedback resonator preset loaded");
+    std::fill(outL.begin(), outL.end(), 0.0f);
+    std::fill(outR.begin(), outR.end(), 0.0f);
+    grid.process(ctx);
+
+    float fdbEnergy = 0.0f;
+    for (float s : outL) { fdbEnergy += s * s; }
+    require(fdbEnergy > 1e-5f, "Unit delay feedback loop generates resonant sound");
+
+    // 7. Custom Macro Surface Binding
+    const auto wavefolderModId = grid.addModule(GridModuleType::wavefolder, 200.0f, 200.0f, "Macro Fold");
+    grid.bindMacro(3, wavefolderModId, 0, 0.2f, 0.95f, "Wavefold Drive");
+    require(grid.macroBindings().size() >= 1, "Macro binding registered");
+    grid.setMacro(3, 1.0f); // 100% -> should map to 0.95f
+    const auto& fldMod = *std::find_if(grid.modules().begin(), grid.modules().end(), [=](const auto& m) { return m.id == wavefolderModId; });
+    require(std::abs(fldMod.params[0] - 0.95f) < 1e-4f, "Macro scaled to custom max range");
 }
 
 void testMasteringSuiteLoudnessRadarAndTruePeak()
@@ -3225,7 +3244,7 @@ void testSessionMatrixEngineNonLinearLaunching()
     slot0.color = LaunchpadColor::cyan;
     slot0.lengthBeats = 4.0;
     slot0.launchQuantize = LaunchQuantize::bar_1;
-    slot0.followAction = FollowAction::nextClip;
+    slot0.followActionA = FollowAction::nextClip;
     slot0.followActionBars = 1.0;
     session.setClip(0, 0, slot0);
 
@@ -3268,6 +3287,52 @@ void testSessionMatrixEngineNonLinearLaunching()
     // Slot (0, 0) is currently stopped, pressing it queues it to play
     session.handleLaunchpadPress(0, 0);
     require(session.getClip(0, 0).state == ClipSlotState::queuedToPlay, "pressing stopped pad triggers play");
+
+    // 7. Test Launch Modes: Gate, Toggle, Repeat
+    SessionClipSlot gateSlot {};
+    gateSlot.state = ClipSlotState::stopped;
+    gateSlot.launchMode = ClipLaunchMode::gate;
+    gateSlot.launchQuantize = LaunchQuantize::none;
+    session.setClip(1, 0, gateSlot);
+
+    session.fireClip(1, 0, true);
+    require(session.getClip(1, 0).state == ClipSlotState::playing, "Gate clip playing while pressed");
+    session.releaseClip(1, 0);
+    require(session.getClip(1, 0).state == ClipSlotState::stopped, "Gate clip stops on release");
+
+    // 8. Test Legato Mode Playhead Transfer
+    SessionClipSlot legatoSlotA {};
+    legatoSlotA.state = ClipSlotState::stopped;
+    legatoSlotA.lengthBeats = 8.0;
+    legatoSlotA.launchQuantize = LaunchQuantize::none;
+    session.setClip(2, 0, legatoSlotA);
+
+    SessionClipSlot legatoSlotB {};
+    legatoSlotB.state = ClipSlotState::stopped;
+    legatoSlotB.lengthBeats = 8.0;
+    legatoSlotB.isLegato = true;
+    legatoSlotB.launchQuantize = LaunchQuantize::none;
+    session.setClip(2, 1, legatoSlotB);
+
+    session.fireClip(2, 0, true);
+    session.advanceClock(3.5, 3.5, 120.0);
+    require(std::abs(session.getClip(2, 0).playbackBeat - 3.5) < 0.01, "Clip A played 3.5 beats");
+
+    session.fireClip(2, 1, true); // Legato switch to Clip B
+    require(std::abs(session.getClip(2, 1).playbackBeat - 3.5) < 0.01, "Legato clip B inherited playhead at beat 3.5");
+
+    // 9. Session Jam Recording & Timeline Consolidation
+    session.startJamRecording(10.0);
+    require(session.isJamRecording(), "Session jam recording active");
+    session.fireClip(3, 0, true);
+    session.recordMacroChange(0, 0.75f);
+    session.advanceClock(4.0, 14.0, 120.0);
+    session.stopClip(3, true);
+    session.stopJamRecording();
+    require(!session.isJamRecording(), "Jam recording stopped");
+
+    const auto consolidated = session.consolidateRecordedClips();
+    require(!consolidated.empty(), "Consolidated jam clips generated for timeline arrangement");
 }
 
 void testAra2PluginBridgeRandomAccessAndBaking()

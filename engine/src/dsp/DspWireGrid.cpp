@@ -38,6 +38,11 @@ void DspWireGrid::reset() noexcept
         mod.filterS2 = 0.0f;
         mod.envStage = 0.0f;
         mod.envValue = 0.0f;
+        mod.feedbackSample = 0.0f;
+        mod.dcBlockerPrevX = 0.0f;
+        mod.dcBlockerPrevY = 0.0f;
+        mod.shHeldValue = 0.0f;
+        mod.shLastTrigger = 0.0f;
         if (! mod.delayBuffer.empty())
         {
             std::fill(mod.delayBuffer.begin(), mod.delayBuffer.end(), 0.0f);
@@ -72,12 +77,49 @@ void DspWireGrid::setMacro(std::size_t index, float value) noexcept
     if (index < m_macros.size())
     {
         m_macros[index] = std::clamp(value, 0.0f, 1.0f);
+
+        for (const auto& binding : m_macroBindings)
+        {
+            if (binding.macroIndex == index)
+            {
+                const float scaled = binding.minVal + m_macros[index] * (binding.maxVal - binding.minVal);
+                setModuleParam(binding.moduleId, binding.paramIndex, scaled);
+            }
+        }
     }
 }
 
 float DspWireGrid::macro(std::size_t index) const noexcept
 {
     return (index < m_macros.size()) ? m_macros[index] : 0.0f;
+}
+
+void DspWireGrid::bindMacro(
+    std::size_t macroIdx,
+    std::uint32_t moduleId,
+    std::size_t paramIdx,
+    float minVal,
+    float maxVal,
+    const std::string& label)
+{
+    if (macroIdx >= numMacros) return;
+    unbindMacro(macroIdx, moduleId, paramIdx);
+    m_macroBindings.push_back(GridMacroBinding{
+        .macroIndex = macroIdx,
+        .moduleId = moduleId,
+        .paramIndex = paramIdx,
+        .minVal = minVal,
+        .maxVal = maxVal,
+        .label = label.empty() ? ("Macro " + std::to_string(macroIdx + 1)) : label
+    });
+    setMacro(macroIdx, m_macros[macroIdx]);
+}
+
+void DspWireGrid::unbindMacro(std::size_t macroIdx, std::uint32_t moduleId, std::size_t paramIdx) noexcept
+{
+    std::erase_if(m_macroBindings, [=](const GridMacroBinding& b) {
+        return b.macroIndex == macroIdx && b.moduleId == moduleId && b.paramIndex == paramIdx;
+    });
 }
 
 std::uint32_t DspWireGrid::addModule(GridModuleType type, float x, float y, const std::string& name)
@@ -145,6 +187,34 @@ std::uint32_t DspWireGrid::addModule(GridModuleType type, float x, float y, cons
         mod.outputs = {};
         mod.params = { 0.8f, 0.5f, 0.0f, 0.0f }; // Gain, Pan
         break;
+
+    case GridModuleType::unitDelayFeedback:
+        mod.name = name.empty() ? "Unit Delay Feedback" : name;
+        mod.inputs = { {"Signal In", PortSignalType::audio, 0.0f, 0.0f} };
+        mod.outputs = { {"Feedback Out", PortSignalType::audio, 0.0f, 0.0f} };
+        mod.params = { 0.75f, 0.0f, 0.0f, 0.0f }; // Gain, DC-Block
+        break;
+
+    case GridModuleType::wavefolder:
+        mod.name = name.empty() ? "Buchla Wavefolder" : name;
+        mod.inputs = { {"Audio In", PortSignalType::audio, 0.0f, 0.0f}, {"Fold CV", PortSignalType::cv, 0.0f, 0.0f} };
+        mod.outputs = { {"Audio Out", PortSignalType::audio, 0.0f, 0.0f} };
+        mod.params = { 0.6f, 0.5f, 0.0f, 0.0f }; // Fold Amount, Symmetry Bias
+        break;
+
+    case GridModuleType::xyPad:
+        mod.name = name.empty() ? "XY Pad Macro" : name;
+        mod.inputs = {};
+        mod.outputs = { {"X CV", PortSignalType::cv, 0.5f, 0.5f}, {"Y CV", PortSignalType::cv, 0.5f, 0.5f} };
+        mod.params = { 0.5f, 0.5f, 0.0f, 0.0f }; // X, Y
+        break;
+
+    case GridModuleType::sampleAndHold:
+        mod.name = name.empty() ? "Sample & Hold" : name;
+        mod.inputs = { {"Signal In", PortSignalType::cv, 0.0f, 0.0f}, {"Clock In", PortSignalType::cv, 0.0f, 0.0f} };
+        mod.outputs = { {"Held Out", PortSignalType::cv, 0.0f, 0.0f} };
+        mod.params = { 0.3f, 0.0f, 0.0f, 0.0f }; // Internal Clock Rate
+        break;
     }
 
     m_modules.push_back(std::move(mod));
@@ -154,9 +224,12 @@ std::uint32_t DspWireGrid::addModule(GridModuleType type, float x, float y, cons
 
 bool DspWireGrid::removeModule(std::uint32_t moduleId)
 {
-    // Remove connected cables
     std::erase_if(m_cables, [moduleId](const GridCable& c) {
         return c.srcModuleId == moduleId || c.dstModuleId == moduleId;
+    });
+
+    std::erase_if(m_macroBindings, [moduleId](const GridMacroBinding& b) {
+        return b.moduleId == moduleId;
     });
 
     const auto it = std::find_if(m_modules.begin(), m_modules.end(), [moduleId](const GridModule& m) {
@@ -189,7 +262,6 @@ std::uint32_t DspWireGrid::connectCable(
     std::uint32_t dstModuleId, std::uint8_t dstPort,
     std::uint32_t colorRgba)
 {
-    // Disconnect any existing cable connected to the same destination input port
     std::erase_if(m_cables, [dstModuleId, dstPort](const GridCable& c) {
         return c.dstModuleId == dstModuleId && c.dstPort == dstPort;
     });
@@ -201,8 +273,8 @@ std::uint32_t DspWireGrid::connectCable(
     cable.dstModuleId = dstModuleId;
     cable.dstPort = dstPort;
     cable.colorRgba = colorRgba;
-    m_cables.push_back(cable);
 
+    m_cables.push_back(cable);
     return cable.id;
 }
 
@@ -214,11 +286,11 @@ bool DspWireGrid::disconnectCable(std::uint32_t cableId)
 
     if (it != m_cables.end())
     {
-        m_cables.erase(it);
         if (m_probedCableId == cableId)
         {
             m_probedCableId = 0;
         }
+        m_cables.erase(it);
         return true;
     }
     return false;
@@ -226,66 +298,63 @@ bool DspWireGrid::disconnectCable(std::uint32_t cableId)
 
 void DspWireGrid::getProbeData(float* destination, std::size_t count) const noexcept
 {
-    if (destination == nullptr || count == 0)
-    {
-        return;
-    }
-
+    if (destination == nullptr || count == 0) return;
     const auto copyCount = std::min(count, probeBufferSize);
     for (std::size_t i = 0; i < copyCount; ++i)
     {
-        const auto idx = (m_probeWritePos + probeBufferSize - copyCount + i) % probeBufferSize;
+        const std::size_t idx = (m_probeWritePos + probeBufferSize - copyCount + i) % probeBufferSize;
         destination[i] = m_probeRingBuffer[idx];
     }
 }
 
 void DspWireGrid::process(ProcessContext& context) noexcept
 {
-    if (context.audio.channels == nullptr || context.audio.frameCount == 0 || context.audio.channelCount == 0)
-    {
-        return;
-    }
+    if (context.audio.channelCount == 0 || context.audio.frameCount == 0) return;
 
-    const auto frameCount = std::min(context.audio.frameCount, m_maxBlockSize);
+    const auto frameCount = context.audio.frameCount;
     auto* ch0 = context.audio.channels[0];
     auto* ch1 = (context.audio.channelCount >= 2) ? context.audio.channels[1] : ch0;
 
-    if (ch0 == nullptr)
+    if (ch0 == nullptr) return;
+
+    if (m_moduleScratchBuffers.size() != m_modules.size() ||
+        (m_moduleScratchBuffers.size() > 0 && m_moduleScratchBuffers[0].size() < frameCount))
     {
-        return;
+        reallocateScratchBuffers();
     }
 
-    // Zero scratch buffers
-    for (auto& buf : m_moduleScratchBuffers)
-    {
-        std::fill(buf.begin(), buf.begin() + frameCount, 0.0f);
-    }
-
-    // Process modules
     const float dt = 1.0f / static_cast<float>(m_sampleRate);
 
+    // Evaluate each module in sequence
     for (std::size_t modIdx = 0; modIdx < m_modules.size(); ++modIdx)
     {
         auto& mod = m_modules[modIdx];
         auto& outBuf = m_moduleScratchBuffers[modIdx];
 
-        // Gather inputs from connected cables
+        // Gather static input values from connected cables if any
         float inSample0 = 0.0f;
         float inSample1 = 0.0f;
+        const float* inAudio0 = nullptr;
+        const float* inAudio1 = nullptr;
 
         for (const auto& cable : m_cables)
         {
             if (cable.dstModuleId == mod.id)
             {
-                // Find source module index
                 for (std::size_t srcIdx = 0; srcIdx < m_modules.size(); ++srcIdx)
                 {
                     if (m_modules[srcIdx].id == cable.srcModuleId)
                     {
-                        // Use latest value from src scratch buffer
-                        const float val = m_moduleScratchBuffers[srcIdx][0];
-                        if (cable.dstPort == 0) inSample0 += val;
-                        else if (cable.dstPort == 1) inSample1 += val;
+                        if (cable.dstPort == 0)
+                        {
+                            inAudio0 = m_moduleScratchBuffers[srcIdx].data();
+                            inSample0 = inAudio0[0];
+                        }
+                        else if (cable.dstPort == 1)
+                        {
+                            inAudio1 = m_moduleScratchBuffers[srcIdx].data();
+                            inSample1 = inAudio1[0];
+                        }
                         break;
                     }
                 }
@@ -296,33 +365,33 @@ void DspWireGrid::process(ProcessContext& context) noexcept
         {
         case GridModuleType::oscillator:
         {
-            const float note = mod.params[1] + inSample0 * 12.0f; // 1V/Oct CV
-            const float freq = 440.0f * std::pow(2.0f, (note - 69.0f) / 12.0f);
-            const float phaseInc = std::clamp(freq * dt, 0.0001f, 0.45f);
+            const float note = mod.params[1] + inSample0 * 12.0f;
+            const float freqHz = 440.0f * std::pow(2.0f, (note - 69.0f) / 12.0f);
+            const float phaseInc = freqHz * dt;
+            const auto waveform = static_cast<int>(mod.params[0]);
 
             for (std::size_t i = 0; i < frameCount; ++i)
             {
-                float sig = 0.0f;
-                const int wave = static_cast<int>(mod.params[0]);
-                if (wave == 0) // Sine
+                float val = 0.0f;
+                if (waveform == 0) // Sine
                 {
-                    sig = std::sin(mod.phase * 2.0f * std::numbers::pi_v<float>);
+                    val = std::sin(mod.phase * 2.0f * std::numbers::pi_v<float>);
                 }
-                else if (wave == 1) // Triangle
+                else if (waveform == 1) // Triangle
                 {
-                    sig = 4.0f * std::abs(mod.phase - 0.5f) - 1.0f;
+                    val = 2.0f * std::abs(2.0f * (mod.phase - std::floor(mod.phase + 0.5f))) - 1.0f;
                 }
-                else if (wave == 2) // Saw
+                else if (waveform == 2) // Saw
                 {
-                    sig = 2.0f * mod.phase - 1.0f;
+                    val = 2.0f * mod.phase - 1.0f;
                 }
-                else // Pulse
+                else // Pulse / Square
                 {
                     const float pw = std::clamp(mod.params[3], 0.05f, 0.95f);
-                    sig = (mod.phase < pw) ? 0.9f : -0.9f;
+                    val = (mod.phase < pw) ? 1.0f : -1.0f;
                 }
 
-                outBuf[i] = sig;
+                outBuf[i] = val;
                 mod.phase += phaseInc;
                 if (mod.phase >= 1.0f) mod.phase -= 1.0f;
             }
@@ -331,40 +400,17 @@ void DspWireGrid::process(ProcessContext& context) noexcept
 
         case GridModuleType::noise:
         {
-            // Simple fast PRNG
-            static std::uint32_t seed = 0x12345678;
-            const float level = mod.params[1];
             for (std::size_t i = 0; i < frameCount; ++i)
             {
-                seed = seed * 1664525u + 1013904223u;
-                const float white = static_cast<float>(seed) / 4294967296.0f * 2.0f - 1.0f;
-                // Simple low-pass smoothing for pink color
-                mod.filterS1 = 0.8f * mod.filterS1 + 0.2f * white;
-                outBuf[i] = (mod.params[0] * mod.filterS1 + (1.0f - mod.params[0]) * white) * level;
+                mod.rngState = mod.rngState * 1664525u + 1013904223u;
+                const float white = static_cast<float>(static_cast<std::int32_t>(mod.rngState)) * 4.6566129e-10f;
+                outBuf[i] = white * mod.params[1];
             }
             break;
         }
 
         case GridModuleType::svfFilter:
         {
-            // Find input audio source buffer
-            const float* inAudio = nullptr;
-            for (const auto& cable : m_cables)
-            {
-                if (cable.dstModuleId == mod.id && cable.dstPort == 0)
-                {
-                    for (std::size_t srcIdx = 0; srcIdx < m_modules.size(); ++srcIdx)
-                    {
-                        if (m_modules[srcIdx].id == cable.srcModuleId)
-                        {
-                            inAudio = m_moduleScratchBuffers[srcIdx].data();
-                            break;
-                        }
-                    }
-                    break;
-                }
-            }
-
             const float cutoffNorm = std::clamp(mod.params[0] + inSample1 * 0.5f, 0.01f, 0.98f);
             const float cutoffHz = 20.0f * std::pow(1000.0f, cutoffNorm);
             const float resonance = std::clamp(mod.params[1], 0.05f, 0.95f);
@@ -373,14 +419,13 @@ void DspWireGrid::process(ProcessContext& context) noexcept
 
             for (std::size_t i = 0; i < frameCount; ++i)
             {
-                const float x = (inAudio != nullptr) ? inAudio[i] : inSample0;
+                const float x = (inAudio0 != nullptr) ? inAudio0[i] : inSample0;
                 const float v1 = (x - mod.filterS1 * (g + k) - mod.filterS2) / (1.0f + g * (g + k));
                 const float v0 = g * v1;
                 const float lp = v0 + mod.filterS1;
                 mod.filterS1 = lp + v0;
                 const float bp = g * lp + mod.filterS2;
                 mod.filterS2 = bp + g * lp;
-
                 outBuf[i] = lp;
             }
             break;
@@ -389,27 +434,96 @@ void DspWireGrid::process(ProcessContext& context) noexcept
         case GridModuleType::mathSaturation:
         {
             const float drive = 1.0f + mod.params[0] * 12.0f;
-            const float* inAudio = nullptr;
-            for (const auto& cable : m_cables)
+            for (std::size_t i = 0; i < frameCount; ++i)
             {
-                if (cable.dstModuleId == mod.id && cable.dstPort == 0)
-                {
-                    for (std::size_t srcIdx = 0; srcIdx < m_modules.size(); ++srcIdx)
-                    {
-                        if (m_modules[srcIdx].id == cable.srcModuleId)
-                        {
-                            inAudio = m_moduleScratchBuffers[srcIdx].data();
-                            break;
-                        }
-                    }
-                    break;
-                }
+                const float x = (inAudio0 != nullptr) ? inAudio0[i] : inSample0;
+                outBuf[i] = std::tanh(x * drive);
             }
+            break;
+        }
+
+        case GridModuleType::unitDelayFeedback:
+        {
+            const float gain = 1.0f + mod.params[0] * 2.5f;
+            for (std::size_t i = 0; i < frameCount; ++i)
+            {
+                // Output previous feedback sample
+                outBuf[i] = mod.feedbackSample;
+
+                // Process current input through DC-blocker and soft-limiter for next step
+                const float x = (inAudio0 != nullptr) ? inAudio0[i] : inSample0;
+                const float dcBlocked = x - mod.dcBlockerPrevX + 0.995f * mod.dcBlockerPrevY;
+                mod.dcBlockerPrevX = x;
+                mod.dcBlockerPrevY = dcBlocked;
+
+                mod.feedbackSample = std::tanh(dcBlocked * gain);
+            }
+            break;
+        }
+
+        case GridModuleType::wavefolder:
+        {
+            const float foldAmount = 1.0f + (mod.params[0] + inSample1 * 0.5f) * 8.0f;
+            const float bias = (mod.params[1] - 0.5f) * 0.4f;
 
             for (std::size_t i = 0; i < frameCount; ++i)
             {
-                const float x = (inAudio != nullptr) ? inAudio[i] : inSample0;
-                outBuf[i] = std::tanh(x * drive);
+                float x = ((inAudio0 != nullptr) ? inAudio0[i] : inSample0) * foldAmount + bias;
+                // Buchla 3-stage wavefolding
+                for (int stage = 0; stage < 3; ++stage)
+                {
+                    if (x > 1.0f) { x = 2.0f - x; }
+                    else if (x < -1.0f) { x = -2.0f - x; }
+                }
+                outBuf[i] = std::tanh(x);
+            }
+            break;
+        }
+
+        case GridModuleType::xyPad:
+        {
+            const float x = mod.params[0];
+            for (std::size_t i = 0; i < frameCount; ++i)
+            {
+                outBuf[i] = x;
+            }
+            break;
+        }
+
+        case GridModuleType::sampleAndHold:
+        {
+            const float clockInc = (0.5f + mod.params[0] * 40.0f) * dt;
+            for (std::size_t i = 0; i < frameCount; ++i)
+            {
+                bool trigger = false;
+                if (inAudio1 != nullptr)
+                {
+                    if (inAudio1[i] > 0.5f && mod.shLastTrigger <= 0.5f) { trigger = true; }
+                    mod.shLastTrigger = inAudio1[i];
+                }
+                else
+                {
+                    mod.phase += clockInc;
+                    if (mod.phase >= 1.0f)
+                    {
+                        mod.phase -= 1.0f;
+                        trigger = true;
+                    }
+                }
+
+                if (trigger)
+                {
+                    if (inAudio0 != nullptr)
+                    {
+                        mod.shHeldValue = inAudio0[i];
+                    }
+                    else
+                    {
+                        mod.rngState = mod.rngState * 1664525u + 1013904223u;
+                        mod.shHeldValue = static_cast<float>(static_cast<std::int32_t>(mod.rngState)) * 4.6566129e-10f;
+                    }
+                }
+                outBuf[i] = mod.shHeldValue;
             }
             break;
         }
@@ -434,7 +548,6 @@ void DspWireGrid::process(ProcessContext& context) noexcept
         {
             for (std::size_t i = 0; i < frameCount; ++i)
             {
-                // Auto-cycling envelope for demonstration
                 mod.envValue += 0.002f;
                 if (mod.envValue > 1.0f) mod.envValue = 0.0f;
                 outBuf[i] = 1.0f - std::abs(mod.envValue * 2.0f - 1.0f);
@@ -444,76 +557,42 @@ void DspWireGrid::process(ProcessContext& context) noexcept
 
         case GridModuleType::delay:
         {
-            const float* inAudio = nullptr;
-            for (const auto& cable : m_cables)
+            const std::size_t delaySamples = std::clamp(
+                static_cast<std::size_t>(mod.params[0] * m_sampleRate * 0.8),
+                std::size_t(1), mod.delayBuffer.size() - 1);
+            const float feedback = std::clamp(mod.params[1], 0.0f, 0.95f);
+            const float mix = mod.params[2];
+
+            for (std::size_t i = 0; i < frameCount; ++i)
             {
-                if (cable.dstModuleId == mod.id && cable.dstPort == 0)
-                {
-                    for (std::size_t srcIdx = 0; srcIdx < m_modules.size(); ++srcIdx)
-                    {
-                        if (m_modules[srcIdx].id == cable.srcModuleId)
-                        {
-                            inAudio = m_moduleScratchBuffers[srcIdx].data();
-                            break;
-                        }
-                    }
-                    break;
-                }
-            }
+                const float x = (inAudio0 != nullptr) ? inAudio0[i] : inSample0;
+                const std::size_t readPos = (mod.delayWritePos + mod.delayBuffer.size() - delaySamples) % mod.delayBuffer.size();
+                const float delayed = mod.delayBuffer[readPos];
 
-            if (! mod.delayBuffer.empty())
-            {
-                const auto delaySamples = static_cast<std::size_t>(std::clamp(mod.params[0] * 0.5f * static_cast<float>(m_sampleRate), 10.0f, static_cast<float>(mod.delayBuffer.size() - 1)));
-                const float fb = std::clamp(mod.params[1], 0.0f, 0.85f);
-                const float mix = std::clamp(mod.params[2], 0.0f, 1.0f);
-                const auto bufSize = mod.delayBuffer.size();
+                mod.delayBuffer[mod.delayWritePos] = x + delayed * feedback;
+                mod.delayWritePos = (mod.delayWritePos + 1) % mod.delayBuffer.size();
 
-                for (std::size_t i = 0; i < frameCount; ++i)
-                {
-                    const float inSig = (inAudio != nullptr) ? inAudio[i] : inSample0;
-                    const auto readPos = (mod.delayWritePos + bufSize - delaySamples) % bufSize;
-                    const float delayed = mod.delayBuffer[readPos];
-
-                    mod.delayBuffer[mod.delayWritePos] = inSig + delayed * fb;
-                    mod.delayWritePos = (mod.delayWritePos + 1) % bufSize;
-
-                    outBuf[i] = inSig * (1.0f - mix) + delayed * mix;
-                }
+                outBuf[i] = (1.0f - mix) * x + mix * delayed;
             }
             break;
         }
 
         case GridModuleType::audioOut:
         {
-            // Sum connected signals to master output
-            const float gain = mod.params[0];
-            const float* inL = nullptr;
-            const float* inR = nullptr;
-
-            for (const auto& cable : m_cables)
-            {
-                if (cable.dstModuleId == mod.id)
-                {
-                    for (std::size_t srcIdx = 0; srcIdx < m_modules.size(); ++srcIdx)
-                    {
-                        if (m_modules[srcIdx].id == cable.srcModuleId)
-                        {
-                            if (cable.dstPort == 0) inL = m_moduleScratchBuffers[srcIdx].data();
-                            else if (cable.dstPort == 1) inR = m_moduleScratchBuffers[srcIdx].data();
-                            break;
-                        }
-                    }
-                }
-            }
+            const float masterGain = mod.params[0];
+            const float pan = mod.params[1];
+            const float panL = std::cos(pan * 0.5f * std::numbers::pi_v<float>);
+            const float panR = std::sin(pan * 0.5f * std::numbers::pi_v<float>);
 
             for (std::size_t i = 0; i < frameCount; ++i)
             {
-                const float l = (inL != nullptr) ? inL[i] * gain : 0.0f;
-                const float r = (inR != nullptr) ? inR[i] * gain : l;
-                ch0[i] += l;
+                const float leftIn = (inAudio0 != nullptr) ? inAudio0[i] : 0.0f;
+                const float rightIn = (inAudio1 != nullptr) ? inAudio1[i] : leftIn;
+
+                ch0[i] = leftIn * masterGain * panL;
                 if (ch1 != nullptr)
                 {
-                    ch1[i] += r;
+                    ch1[i] = rightIn * masterGain * panR;
                 }
             }
             break;
@@ -521,7 +600,7 @@ void DspWireGrid::process(ProcessContext& context) noexcept
         }
     }
 
-    // Write probed cable data to probe ring buffer
+    // Write probed signal to oscilloscope ring buffer
     if (m_probedCableId != 0)
     {
         for (const auto& cable : m_cables)
@@ -538,7 +617,7 @@ void DspWireGrid::process(ProcessContext& context) noexcept
                             m_probeRingBuffer[m_probeWritePos] = buf[i];
                             m_probeWritePos = (m_probeWritePos + 1) % probeBufferSize;
                         }
-                        break;
+                        return;
                     }
                 }
                 break;
@@ -560,120 +639,138 @@ void DspWireGrid::loadPresetAcidBass()
 {
     m_modules.clear();
     m_cables.clear();
-    m_nextModuleId = 1;
-    m_nextCableId = 1;
+    m_macroBindings.clear();
 
-    // 1. Oscillator (Saw wave, Bass C2)
-    const auto oscId = addModule(GridModuleType::oscillator, 40.0f, 60.0f, "Bass 303 Saw");
+    const auto oscId = addModule(GridModuleType::oscillator, 80.0f, 100.0f, "Bass Osc");
+    const auto lfoId = addModule(GridModuleType::lfo, 80.0f, 260.0f, "Wobble LFO");
+    const auto fltId = addModule(GridModuleType::svfFilter, 280.0f, 100.0f, "Acid Filter");
+    const auto satId = addModule(GridModuleType::mathSaturation, 480.0f, 100.0f, "Overdrive");
+    const auto outId = addModule(GridModuleType::audioOut, 680.0f, 100.0f, "Master Out");
+
     setModuleParam(oscId, 0, 2.0f); // Saw
     setModuleParam(oscId, 1, 36.0f); // C2
+    setModuleParam(fltId, 0, 0.35f); // Cutoff
+    setModuleParam(fltId, 1, 0.85f); // High resonance
+    setModuleParam(satId, 0, 0.65f); // Drive
+    setModuleParam(lfoId, 0, 0.2f); // Rate
+    setModuleParam(lfoId, 1, 0.5f); // Depth
 
-    // 2. LFO
-    const auto lfoId = addModule(GridModuleType::lfo, 40.0f, 260.0f, "Filter LFO");
-    setModuleParam(lfoId, 0, 0.35f);
-    setModuleParam(lfoId, 1, 0.45f);
+    const auto c1 = connectCable(oscId, 0, fltId, 0);
+    connectCable(lfoId, 0, fltId, 1);
+    connectCable(fltId, 0, satId, 0);
+    connectCable(satId, 0, outId, 0);
 
-    // 3. SVF Filter
-    const auto fltId = addModule(GridModuleType::svfFilter, 260.0f, 60.0f, "Resonant SVF");
-    setModuleParam(fltId, 0, 0.38f);
-    setModuleParam(fltId, 1, 0.82f);
+    m_probedCableId = c1;
 
-    // 4. Tanh Saturation
-    const auto satId = addModule(GridModuleType::mathSaturation, 480.0f, 60.0f, "Acid Drive");
-    setModuleParam(satId, 0, 0.65f);
-
-    // 5. Master Out
-    const auto outId = addModule(GridModuleType::audioOut, 700.0f, 60.0f, "Main Output");
-    setModuleParam(outId, 0, 0.75f);
-
-    // Connections
-    connectCable(oscId, 0, fltId, 0, 0x00E5FFFF); // Osc Out -> Filter Audio In
-    connectCable(lfoId, 0, fltId, 1, 0xFF9100FF); // LFO Out -> Filter Cutoff CV
-    connectCable(fltId, 0, satId, 0, 0x00E5FFFF); // Filter LP -> Saturation In
-    connectCable(satId, 0, outId, 0, 0x33FF66FF); // Saturation Out -> Master Left
-    connectCable(satId, 0, outId, 1, 0x33FF66FF); // Saturation Out -> Master Right
-
-    m_probedCableId = 1; // Probe Osc Out cable
+    bindMacro(0, fltId, 0, 0.1f, 0.9f, "Filter Cutoff");
+    bindMacro(1, fltId, 1, 0.2f, 0.95f, "Resonance");
+    bindMacro(2, satId, 0, 0.0f, 1.0f, "Drive");
 }
 
 void DspWireGrid::loadPresetAmbientDrone()
 {
     m_modules.clear();
     m_cables.clear();
-    m_nextModuleId = 1;
-    m_nextCableId = 1;
+    m_macroBindings.clear();
 
-    const auto oscId = addModule(GridModuleType::oscillator, 40.0f, 60.0f, "Drone Tri");
-    setModuleParam(oscId, 0, 1.0f); // Tri
-    setModuleParam(oscId, 1, 48.0f); // C3
+    const auto osc1 = addModule(GridModuleType::oscillator, 80.0f, 80.0f, "Drone Osc 1");
+    const auto osc2 = addModule(GridModuleType::oscillator, 80.0f, 240.0f, "Drone Osc 2");
+    const auto fltId = addModule(GridModuleType::svfFilter, 280.0f, 160.0f, "Warm Filter");
+    const auto dlyId = addModule(GridModuleType::delay, 480.0f, 160.0f, "Space Echo");
+    const auto outId = addModule(GridModuleType::audioOut, 680.0f, 160.0f, "Master Out");
 
-    const auto noiseId = addModule(GridModuleType::noise, 40.0f, 240.0f, "Pink Air");
-    setModuleParam(noiseId, 0, 0.6f);
-    setModuleParam(noiseId, 1, 0.3f);
+    setModuleParam(osc1, 0, 0.0f); // Sine
+    setModuleParam(osc1, 1, 48.0f); // C3
+    setModuleParam(osc2, 0, 1.0f); // Triangle
+    setModuleParam(osc2, 1, 55.0f); // G3
+    setModuleParam(fltId, 0, 0.40f);
+    setModuleParam(dlyId, 0, 0.55f);
+    setModuleParam(dlyId, 1, 0.65f);
+    setModuleParam(dlyId, 2, 0.50f);
 
-    const auto delayId = addModule(GridModuleType::delay, 260.0f, 100.0f, "Space Delay");
-    setModuleParam(delayId, 0, 0.45f);
-    setModuleParam(delayId, 1, 0.75f);
-    setModuleParam(delayId, 2, 0.5f);
+    connectCable(osc1, 0, fltId, 0);
+    connectCable(fltId, 0, dlyId, 0);
+    connectCable(dlyId, 0, outId, 0);
 
-    const auto fltId = addModule(GridModuleType::svfFilter, 480.0f, 100.0f, "Warm Filter");
-    setModuleParam(fltId, 0, 0.5f);
-    setModuleParam(fltId, 1, 0.4f);
-
-    const auto outId = addModule(GridModuleType::audioOut, 700.0f, 100.0f, "Main Output");
-
-    connectCable(oscId, 0, delayId, 0, 0x00E5FFFF);
-    connectCable(delayId, 0, fltId, 0, 0xFF9100FF);
-    connectCable(fltId, 0, outId, 0, 0x33FF66FF);
-    connectCable(fltId, 0, outId, 1, 0x33FF66FF);
+    bindMacro(0, fltId, 0, 0.1f, 0.8f, "Space Warmth");
+    bindMacro(1, dlyId, 1, 0.0f, 0.9f, "Delay Feedback");
 }
 
 void DspWireGrid::loadPresetWestCoastWavefolder()
 {
     m_modules.clear();
     m_cables.clear();
-    m_nextModuleId = 1;
-    m_nextCableId = 1;
+    m_macroBindings.clear();
 
-    const auto oscId = addModule(GridModuleType::oscillator, 40.0f, 60.0f, "Sine Complex");
-    setModuleParam(oscId, 0, 0.0f); // Sine
-    setModuleParam(oscId, 1, 40.0f); // E2
+    const auto oscId = addModule(GridModuleType::oscillator, 80.0f, 100.0f, "Sine Carrier");
+    const auto fldId = addModule(GridModuleType::wavefolder, 280.0f, 100.0f, "Complex Wavefolder");
+    const auto lfoId = addModule(GridModuleType::lfo, 80.0f, 260.0f, "Fold Modulator");
+    const auto outId = addModule(GridModuleType::audioOut, 500.0f, 100.0f, "Master Out");
 
-    const auto lfoId = addModule(GridModuleType::lfo, 40.0f, 240.0f, "Wavefold Mod");
-    setModuleParam(lfoId, 0, 0.2f);
-    setModuleParam(lfoId, 1, 0.8f);
+    setModuleParam(oscId, 0, 0.0f); // Pure Sine
+    setModuleParam(oscId, 1, 38.0f); // D2
+    setModuleParam(fldId, 0, 0.70f); // High folding harmonics
+    setModuleParam(lfoId, 0, 0.15f);
 
-    const auto foldId = addModule(GridModuleType::mathSaturation, 260.0f, 100.0f, "Wavefolder");
-    setModuleParam(foldId, 0, 0.85f);
+    connectCable(oscId, 0, fldId, 0);
+    connectCable(lfoId, 0, fldId, 1);
+    connectCable(fldId, 0, outId, 0);
 
-    const auto outId = addModule(GridModuleType::audioOut, 500.0f, 100.0f, "Main Output");
-
-    connectCable(oscId, 0, foldId, 0, 0x00E5FFFF);
-    connectCable(foldId, 0, outId, 0, 0x33FF66FF);
-    connectCable(foldId, 0, outId, 1, 0x33FF66FF);
+    bindMacro(0, fldId, 0, 0.1f, 1.0f, "Fold Harmonics");
+    bindMacro(1, fldId, 1, 0.0f, 1.0f, "Symmetry Bias");
 }
 
 void DspWireGrid::loadPresetPercussionSynth()
 {
     m_modules.clear();
     m_cables.clear();
-    m_nextModuleId = 1;
-    m_nextCableId = 1;
+    m_macroBindings.clear();
 
-    const auto noiseId = addModule(GridModuleType::noise, 40.0f, 60.0f, "Snare Noise");
-    const auto oscId = addModule(GridModuleType::oscillator, 40.0f, 240.0f, "Kick Body");
-    setModuleParam(oscId, 0, 0.0f); // Sine
-    setModuleParam(oscId, 1, 33.0f); // A1
+    const auto nseId = addModule(GridModuleType::noise, 80.0f, 100.0f, "Transient Noise");
+    const auto fltId = addModule(GridModuleType::svfFilter, 280.0f, 100.0f, "Tight Resonator");
+    const auto satId = addModule(GridModuleType::mathSaturation, 480.0f, 100.0f, "Punch Clipper");
+    const auto outId = addModule(GridModuleType::audioOut, 680.0f, 100.0f, "Master Out");
 
-    const auto fltId = addModule(GridModuleType::svfFilter, 260.0f, 100.0f, "Snappy SVF");
-    setModuleParam(fltId, 0, 0.7f);
-    setModuleParam(fltId, 1, 0.5f);
+    setModuleParam(nseId, 1, 0.9f);
+    setModuleParam(fltId, 0, 0.65f);
+    setModuleParam(fltId, 1, 0.92f);
+    setModuleParam(satId, 0, 0.50f);
 
-    const auto outId = addModule(GridModuleType::audioOut, 500.0f, 100.0f, "Main Output");
+    connectCable(nseId, 0, fltId, 0);
+    connectCable(fltId, 0, satId, 0);
+    connectCable(satId, 0, outId, 0);
+}
 
-    connectCable(noiseId, 0, fltId, 0, 0x00E5FFFF);
-    connectCable(fltId, 0, outId, 0, 0x33FF66FF);
-    connectCable(oscId, 0, outId, 1, 0xFF9100FF);
+void DspWireGrid::loadPresetFeedbackResonator()
+{
+    m_modules.clear();
+    m_cables.clear();
+    m_macroBindings.clear();
+
+    const auto nseId = addModule(GridModuleType::noise, 60.0f, 120.0f, "Exciter Burst");
+    const auto fltId = addModule(GridModuleType::svfFilter, 240.0f, 120.0f, "Body Resonator");
+    const auto fdbId = addModule(GridModuleType::unitDelayFeedback, 440.0f, 260.0f, "Unit Delay Feedback");
+    const auto fldId = addModule(GridModuleType::wavefolder, 440.0f, 120.0f, "Non-Linear Stage");
+    const auto outId = addModule(GridModuleType::audioOut, 660.0f, 120.0f, "Master Out");
+
+    setModuleParam(nseId, 1, 0.6f);
+    setModuleParam(fltId, 0, 0.45f);
+    setModuleParam(fltId, 1, 0.70f);
+    setModuleParam(fdbId, 0, 0.85f); // High feedback loop gain
+
+    // Exciter into resonator
+    connectCable(nseId, 0, fltId, 0);
+    // Resonator output into non-linear wavefolder
+    connectCable(fltId, 0, fldId, 0);
+    // Non-linear stage into unit delay feedback loop
+    connectCable(fldId, 0, fdbId, 0);
+    // Feedback output returns to resonator cutoff modulation port!
+    connectCable(fdbId, 0, fltId, 1);
+    // Main output
+    connectCable(fldId, 0, outId, 0);
+
+    bindMacro(0, fdbId, 0, 0.2f, 0.98f, "Feedback Resonance");
+    bindMacro(1, fltId, 0, 0.1f, 0.85f, "Resonator Pitch");
 }
 
 } // namespace dawg::engine::dsp

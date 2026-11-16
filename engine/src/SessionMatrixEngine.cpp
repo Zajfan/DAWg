@@ -1,6 +1,7 @@
 #include <dawg/engine/SessionMatrixEngine.h>
 
 #include <cmath>
+#include <map>
 
 namespace dawg::engine {
 namespace {
@@ -75,23 +76,94 @@ void SessionMatrixEngine::fireClip(const std::size_t trackIdx, const std::size_t
         return;
     }
 
+    // Toggle mode: If already playing or queued to play, stop it instead
+    if (target.launchMode == ClipLaunchMode::toggle &&
+        (target.state == ClipSlotState::playing || target.state == ClipSlotState::queuedToPlay))
+    {
+        stopClip(trackIdx, immediate);
+        return;
+    }
+
+    // Capture currently playing clip's playhead position for Legato transfer
+    double currentPlayingBeat = 0.0;
+    bool hadPlayingClip = false;
+    for (std::size_t s = 0; s < numScenes; ++s)
+    {
+        if (m_grid[trackIdx][s].state == ClipSlotState::playing)
+        {
+            currentPlayingBeat = m_grid[trackIdx][s].playbackBeat;
+            hadPlayingClip = true;
+            break;
+        }
+    }
+
     if (immediate || target.launchQuantize == LaunchQuantize::none)
     {
         for (std::size_t s = 0; s < numScenes; ++s)
         {
             if (s != sceneIdx && m_grid[trackIdx][s].state != ClipSlotState::empty)
             {
+                if (m_grid[trackIdx][s].state == ClipSlotState::playing && m_isJamRecording)
+                {
+                    m_jamEvents.push_back(RecordedJamEvent{
+                        .songBeat = m_currentSongBeat,
+                        .trackIdx = trackIdx,
+                        .sceneIdx = s,
+                        .type = RecordedJamEvent::Type::clipStopped,
+                        .clipName = m_grid[trackIdx][s].name,
+                        .durationBeats = 0.0,
+                        .macroValue = 0.0f,
+                        .macroIndex = 0
+                    });
+                }
                 m_grid[trackIdx][s].state = ClipSlotState::stopped;
                 m_grid[trackIdx][s].playbackBeat = 0.0;
             }
         }
+
         target.state = ClipSlotState::playing;
-        target.playbackBeat = 0.0;
+        if (target.isLegato && hadPlayingClip && target.lengthBeats > 0.0)
+        {
+            target.playbackBeat = std::fmod(currentPlayingBeat, target.lengthBeats);
+        }
+        else
+        {
+            target.playbackBeat = 0.0;
+        }
         target.barsPlayed = 0.0;
+
+        if (m_isJamRecording)
+        {
+            m_jamEvents.push_back(RecordedJamEvent{
+                .songBeat = m_currentSongBeat,
+                .trackIdx = trackIdx,
+                .sceneIdx = sceneIdx,
+                .type = RecordedJamEvent::Type::clipFired,
+                .clipName = target.name,
+                .durationBeats = target.lengthBeats,
+                .macroValue = 0.0f,
+                .macroIndex = 0
+            });
+        }
     }
     else
     {
         target.state = ClipSlotState::queuedToPlay;
+    }
+}
+
+void SessionMatrixEngine::releaseClip(const std::size_t trackIdx, const std::size_t sceneIdx) noexcept
+{
+    if (trackIdx >= numTracks || sceneIdx >= numScenes)
+    {
+        return;
+    }
+
+    const auto& slot = m_grid[trackIdx][sceneIdx];
+    // Gate mode: releases and stops playback
+    if (slot.launchMode == ClipLaunchMode::gate || slot.launchMode == ClipLaunchMode::repeat)
+    {
+        stopClip(trackIdx, slot.launchQuantize == LaunchQuantize::none);
     }
 }
 
@@ -109,8 +181,22 @@ void SessionMatrixEngine::stopClip(const std::size_t trackIdx, const bool immedi
         {
             if (immediate)
             {
+                if (slot.state == ClipSlotState::playing && m_isJamRecording)
+                {
+                    m_jamEvents.push_back(RecordedJamEvent{
+                        .songBeat = m_currentSongBeat,
+                        .trackIdx = trackIdx,
+                        .sceneIdx = s,
+                        .type = RecordedJamEvent::Type::clipStopped,
+                        .clipName = slot.name,
+                        .durationBeats = 0.0,
+                        .macroValue = 0.0f,
+                        .macroIndex = 0
+                    });
+                }
                 slot.state = ClipSlotState::stopped;
                 slot.playbackBeat = 0.0;
+                slot.barsPlayed = 0.0;
             }
             else
             {
@@ -127,6 +213,20 @@ void SessionMatrixEngine::fireScene(const std::size_t sceneIdx, const bool immed
         return;
     }
 
+    if (m_isJamRecording)
+    {
+        m_jamEvents.push_back(RecordedJamEvent{
+            .songBeat = m_currentSongBeat,
+            .trackIdx = 0,
+            .sceneIdx = sceneIdx,
+            .type = RecordedJamEvent::Type::sceneFired,
+            .clipName = "Scene " + std::to_string(sceneIdx + 1),
+            .durationBeats = 0.0,
+            .macroValue = 0.0f,
+            .macroIndex = 0
+        });
+    }
+
     for (std::size_t t = 0; t < numTracks; ++t)
     {
         if (m_grid[t][sceneIdx].state != ClipSlotState::empty)
@@ -138,6 +238,20 @@ void SessionMatrixEngine::fireScene(const std::size_t sceneIdx, const bool immed
 
 void SessionMatrixEngine::stopAllClips(const bool immediate) noexcept
 {
+    if (m_isJamRecording)
+    {
+        m_jamEvents.push_back(RecordedJamEvent{
+            .songBeat = m_currentSongBeat,
+            .trackIdx = 0,
+            .sceneIdx = 0,
+            .type = RecordedJamEvent::Type::stopAll,
+            .clipName = "Stop All",
+            .durationBeats = 0.0,
+            .macroValue = 0.0f,
+            .macroIndex = 0
+        });
+    }
+
     for (std::size_t t = 0; t < numTracks; ++t)
     {
         stopClip(t, immediate);
@@ -155,14 +269,22 @@ bool SessionMatrixEngine::isQuantizeBoundaryCrossed(
         return true;
     case LaunchQuantize::beat_1_16:
         return std::floor(prevBeat * 4.0) != std::floor(nextBeat * 4.0);
+    case LaunchQuantize::beat_1_8:
+        return std::floor(prevBeat * 2.0) != std::floor(nextBeat * 2.0);
     case LaunchQuantize::beat_1_4:
         return std::floor(prevBeat) != std::floor(nextBeat);
+    case LaunchQuantize::beat_1_2:
+        return std::floor(prevBeat * 0.5) != std::floor(nextBeat * 0.5);
     case LaunchQuantize::bar_1:
         return std::floor(prevBeat * 0.25) != std::floor(nextBeat * 0.25);
     case LaunchQuantize::bars_2:
         return std::floor(prevBeat * 0.125) != std::floor(nextBeat * 0.125);
     case LaunchQuantize::bars_4:
         return std::floor(prevBeat * 0.0625) != std::floor(nextBeat * 0.0625);
+    case LaunchQuantize::triplet_1_4:
+        return std::floor(prevBeat * 1.5) != std::floor(nextBeat * 1.5);
+    case LaunchQuantize::triplet_1_8:
+        return std::floor(prevBeat * 3.0) != std::floor(nextBeat * 3.0);
     }
     return true;
 }
@@ -170,7 +292,12 @@ bool SessionMatrixEngine::isQuantizeBoundaryCrossed(
 void SessionMatrixEngine::triggerFollowAction(const std::size_t trackIdx, const std::size_t currentSceneIdx) noexcept
 {
     auto& currentSlot = m_grid[trackIdx][currentSceneIdx];
-    const auto action = currentSlot.followAction;
+
+    // Dual probabilistic follow action resolution
+    const float roll = nextRandFloat(m_randState);
+    const bool useActionA = (roll < currentSlot.chanceA);
+    const auto action = useActionA ? currentSlot.followActionA : currentSlot.followActionB;
+    const auto jumpTarget = useActionA ? currentSlot.jumpSceneA : currentSlot.jumpSceneB;
 
     std::size_t nextScene = currentSceneIdx;
 
@@ -199,6 +326,9 @@ void SessionMatrixEngine::triggerFollowAction(const std::size_t trackIdx, const 
         nextScene = std::clamp(r, std::size_t(0), numScenes - 1);
         break;
     }
+    case FollowAction::jumpToScene:
+        nextScene = std::clamp(jumpTarget, std::size_t(0), numScenes - 1);
+        break;
     }
 
     if (m_grid[trackIdx][nextScene].state != ClipSlotState::empty)
@@ -217,6 +347,19 @@ void SessionMatrixEngine::advanceClock(
 
     for (std::size_t t = 0; t < numTracks; ++t)
     {
+        // Check if there was a playing clip to transfer legato playhead
+        double lastPlayingBeat = 0.0;
+        bool hasActivePlaying = false;
+        for (std::size_t s = 0; s < numScenes; ++s)
+        {
+            if (m_grid[t][s].state == ClipSlotState::playing)
+            {
+                lastPlayingBeat = m_grid[t][s].playbackBeat;
+                hasActivePlaying = true;
+                break;
+            }
+        }
+
         for (std::size_t s = 0; s < numScenes; ++s)
         {
             auto& slot = m_grid[t][s];
@@ -230,19 +373,67 @@ void SessionMatrixEngine::advanceClock(
                     {
                         if (other != s && m_grid[t][other].state != ClipSlotState::empty)
                         {
+                            if (m_grid[t][other].state == ClipSlotState::playing && m_isJamRecording)
+                            {
+                                m_jamEvents.push_back(RecordedJamEvent{
+                                    .songBeat = songBeat,
+                                    .trackIdx = t,
+                                    .sceneIdx = other,
+                                    .type = RecordedJamEvent::Type::clipStopped,
+                                    .clipName = m_grid[t][other].name,
+                                    .durationBeats = 0.0,
+                                    .macroValue = 0.0f,
+                                    .macroIndex = 0
+                                });
+                            }
                             m_grid[t][other].state = ClipSlotState::stopped;
                             m_grid[t][other].playbackBeat = 0.0;
                         }
                     }
+
                     slot.state = ClipSlotState::playing;
-                    slot.playbackBeat = 0.0;
+                    if (slot.isLegato && hasActivePlaying && slot.lengthBeats > 0.0)
+                    {
+                        slot.playbackBeat = std::fmod(lastPlayingBeat, slot.lengthBeats);
+                    }
+                    else
+                    {
+                        slot.playbackBeat = 0.0;
+                    }
                     slot.barsPlayed = 0.0;
+
+                    if (m_isJamRecording)
+                    {
+                        m_jamEvents.push_back(RecordedJamEvent{
+                            .songBeat = songBeat,
+                            .trackIdx = t,
+                            .sceneIdx = s,
+                            .type = RecordedJamEvent::Type::clipFired,
+                            .clipName = slot.name,
+                            .durationBeats = slot.lengthBeats,
+                            .macroValue = 0.0f,
+                            .macroIndex = 0
+                        });
+                    }
                 }
             }
             else if (slot.state == ClipSlotState::queuedToStop)
             {
                 if (isQuantizeBoundaryCrossed(slot.launchQuantize, prevBeat, songBeat))
                 {
+                    if (m_isJamRecording)
+                    {
+                        m_jamEvents.push_back(RecordedJamEvent{
+                            .songBeat = songBeat,
+                            .trackIdx = t,
+                            .sceneIdx = s,
+                            .type = RecordedJamEvent::Type::clipStopped,
+                            .clipName = slot.name,
+                            .durationBeats = 0.0,
+                            .macroValue = 0.0f,
+                            .macroIndex = 0
+                        });
+                    }
                     slot.state = ClipSlotState::stopped;
                     slot.playbackBeat = 0.0;
                     slot.barsPlayed = 0.0;
@@ -253,14 +444,153 @@ void SessionMatrixEngine::advanceClock(
                 slot.playbackBeat += deltaBeats;
                 slot.barsPlayed += deltaBeats * 0.25;
 
+                // Handle repeat launch mode: re-trigger clip periodically at quantize rate
+                if (slot.launchMode == ClipLaunchMode::repeat)
+                {
+                    if (isQuantizeBoundaryCrossed(slot.launchQuantize, prevBeat, songBeat))
+                    {
+                        slot.playbackBeat = 0.0;
+                    }
+                }
+
                 // Check Follow Action threshold
-                if (slot.followAction != FollowAction::none && slot.barsPlayed >= slot.followActionBars)
+                if ((slot.followActionA != FollowAction::none || slot.followActionB != FollowAction::none) &&
+                    slot.barsPlayed >= slot.followActionBars)
                 {
                     triggerFollowAction(t, s);
                 }
             }
         }
     }
+}
+
+void SessionMatrixEngine::startJamRecording(const double currentSongBeat) noexcept
+{
+    m_isJamRecording = true;
+    m_jamRecordingStartBeat = currentSongBeat;
+
+    // Snapshot currently playing clips into the recording stream
+    for (std::size_t t = 0; t < numTracks; ++t)
+    {
+        for (std::size_t s = 0; s < numScenes; ++s)
+        {
+            if (m_grid[t][s].state == ClipSlotState::playing)
+            {
+                m_jamEvents.push_back(RecordedJamEvent{
+                    .songBeat = currentSongBeat,
+                    .trackIdx = t,
+                    .sceneIdx = s,
+                    .type = RecordedJamEvent::Type::clipFired,
+                    .clipName = m_grid[t][s].name,
+                    .durationBeats = m_grid[t][s].lengthBeats,
+                    .macroValue = 0.0f,
+                    .macroIndex = 0
+                });
+            }
+        }
+    }
+}
+
+void SessionMatrixEngine::stopJamRecording() noexcept
+{
+    m_isJamRecording = false;
+}
+
+void SessionMatrixEngine::recordMacroChange(const std::size_t macroIdx, const float value) noexcept
+{
+    if (m_isJamRecording)
+    {
+        m_jamEvents.push_back(RecordedJamEvent{
+            .songBeat = m_currentSongBeat,
+            .trackIdx = 0,
+            .sceneIdx = 0,
+            .type = RecordedJamEvent::Type::macroChanged,
+            .clipName = "",
+            .durationBeats = 0.0,
+            .macroValue = value,
+            .macroIndex = macroIdx
+        });
+    }
+}
+
+std::vector<ConsolidatedJamClip> SessionMatrixEngine::consolidateRecordedClips() const
+{
+    std::vector<ConsolidatedJamClip> result;
+    // Map of active (trackIdx) -> start event
+    std::map<std::size_t, RecordedJamEvent> activeTrackClips;
+
+    for (const auto& ev : m_jamEvents)
+    {
+        if (ev.type == RecordedJamEvent::Type::clipFired)
+        {
+            if (activeTrackClips.contains(ev.trackIdx))
+            {
+                const auto& prior = activeTrackClips[ev.trackIdx];
+                const double len = std::max(0.25, ev.songBeat - prior.songBeat);
+                result.push_back(ConsolidatedJamClip{
+                    .trackIdx = prior.trackIdx,
+                    .clipName = prior.clipName,
+                    .startBeat = prior.songBeat,
+                    .lengthBeats = len,
+                    .sourceSceneIdx = prior.sceneIdx
+                });
+            }
+            activeTrackClips[ev.trackIdx] = ev;
+        }
+        else if (ev.type == RecordedJamEvent::Type::clipStopped)
+        {
+            if (activeTrackClips.contains(ev.trackIdx))
+            {
+                const auto& prior = activeTrackClips[ev.trackIdx];
+                const double len = std::max(0.25, ev.songBeat - prior.songBeat);
+                result.push_back(ConsolidatedJamClip{
+                    .trackIdx = prior.trackIdx,
+                    .clipName = prior.clipName,
+                    .startBeat = prior.songBeat,
+                    .lengthBeats = len,
+                    .sourceSceneIdx = prior.sceneIdx
+                });
+                activeTrackClips.erase(ev.trackIdx);
+            }
+        }
+        else if (ev.type == RecordedJamEvent::Type::stopAll)
+        {
+            for (const auto& [trackIdx, prior] : activeTrackClips)
+            {
+                const double len = std::max(0.25, ev.songBeat - prior.songBeat);
+                result.push_back(ConsolidatedJamClip{
+                    .trackIdx = prior.trackIdx,
+                    .clipName = prior.clipName,
+                    .startBeat = prior.songBeat,
+                    .lengthBeats = len,
+                    .sourceSceneIdx = prior.sceneIdx
+                });
+            }
+            activeTrackClips.clear();
+        }
+    }
+
+    // Close any still active at end of recording
+    for (const auto& [trackIdx, prior] : activeTrackClips)
+    {
+        const double len = std::max(prior.durationBeats, 4.0);
+        result.push_back(ConsolidatedJamClip{
+            .trackIdx = prior.trackIdx,
+            .clipName = prior.clipName,
+            .startBeat = prior.songBeat,
+            .lengthBeats = len,
+            .sourceSceneIdx = prior.sceneIdx
+        });
+    }
+
+    return result;
+}
+
+void SessionMatrixEngine::clearJamRecording() noexcept
+{
+    m_jamEvents.clear();
+    m_isJamRecording = false;
+    m_jamRecordingStartBeat = 0.0;
 }
 
 std::vector<MidiEvent> SessionMatrixEngine::generateLaunchpadLedEvents() const
@@ -332,6 +662,11 @@ void SessionMatrixEngine::handleLaunchpadPress(const std::size_t trackIdx, const
     {
         fireClip(trackIdx, sceneIdx, false);
     }
+}
+
+void SessionMatrixEngine::handleLaunchpadRelease(const std::size_t trackIdx, const std::size_t sceneIdx) noexcept
+{
+    releaseClip(trackIdx, sceneIdx);
 }
 
 std::size_t SessionMatrixEngine::activePlayingCount() const noexcept
