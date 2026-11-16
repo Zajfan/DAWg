@@ -19,6 +19,7 @@ add_library(dawg_engine_core STATIC
     src/WsolaTimeStretcher.cpp
     src/clap/ClapPluginNode.cpp
     src/dsp/AcousticDrumBleedCancellationNode.cpp
+    src/dsp/AmbisonicsProcessorNode.cpp
     src/dsp/AnalogLadderRingModSynthNode.cpp
     src/dsp/AudioTranscriber.cpp
     src/dsp/AudioWarpEngine.cpp
@@ -27,6 +28,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/ConvolutionReverbNode.cpp
     src/dsp/DynamicsCompressorNode.cpp
     src/dsp/DrumPadSamplerNode.cpp
+    src/dsp/DynamicCabinetSimulatorNode.cpp
     src/dsp/DspWireGrid.cpp
     src/dsp/DynamicLinearPhaseEQNode.cpp
     src/dsp/GranularCloudNode.cpp
@@ -52,6 +54,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/SpectralMorphCrossSynthNode.cpp
     src/dsp/SpectralResonanceTamerNode.cpp
     src/dsp/SpectralSidechainNode.cpp
+    src/dsp/SpectralVocoderNode.cpp
     src/dsp/SpringReverbMagneticDrumEchoNode.cpp
     src/dsp/StepSequencerEngine.cpp
     src/dsp/StudioControlRoomSimulatorNode.cpp

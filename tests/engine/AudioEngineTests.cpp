@@ -44,6 +44,8 @@
 #include <dawg/engine/dsp/TnhcDelayNode.h>
 #include <dawg/engine/HardwareControlSurfaceEngine.h>
 #include <dawg/engine/dsp/AcousticDrumBleedCancellationNode.h>
+#include <dawg/engine/dsp/AmbisonicsProcessorNode.h>
+#include <dawg/engine/dsp/DynamicCabinetSimulatorNode.h>
 #include <dawg/engine/dsp/LiveLooperNode.h>
 #include <dawg/engine/dsp/MacroModulationMatrix.h>
 #include <dawg/engine/dsp/MicrotonalTuningEngine.h>
@@ -51,6 +53,7 @@
 #include <dawg/engine/dsp/PhysicalModelingSynthNode.h>
 #include <dawg/engine/dsp/SpatialHeadTrackerBridge.h>
 #include <dawg/engine/dsp/SpectralMorphCrossSynthNode.h>
+#include <dawg/engine/dsp/SpectralVocoderNode.h>
 #include <dawg/engine/dsp/SpringReverbMagneticDrumEchoNode.h>
 #include <dawg/engine/dsp/MasteringStemExportEngine.h>
 #include <dawg/engine/dsp/StudioControlRoomSimulatorNode.h>
@@ -5261,6 +5264,237 @@ void testEnhancedVocalPitchCorrectionSuite()
     require(voicedInfo.isVoiced, "Voiced tone tracked successfully with vibrato protection");
     require(std::abs(voicedInfo.targetMidiPitch - 69.0f) < 0.5f, "Target pitch quantized to A4 (note 69)");
 }
+
+void testSpectralVocoderSuite()
+{
+    using dawg::engine::dsp::SpectralVocoderNode;
+    using dawg::engine::dsp::SpectralVocoderCarrierSource;
+
+    SpectralVocoderNode node;
+    require(node.prepare(48000.0, 512, 2), "SpectralVocoderNode prepared");
+    require(node.latencySamples() == 0, "Vocoder is zero latency");
+
+    // Configure carrier oscillator
+    node.setCarrierSource(SpectralVocoderCarrierSource::internalPulse);
+    node.setCarrierFrequencyHz(130.81f); // C3
+    node.setCarrierPulseWidth(0.40f);
+    node.setCarrierDetuneCents(10.0f);
+    node.setCarrierSubLevel(0.30f);
+    node.setFormantShiftSemitones(2.0f);
+    node.setBandQ(6.0f);
+    node.setBandSpacing(1.1f);
+    node.setEnvelopeAttackMs(2.5f);
+    node.setEnvelopeReleaseMs(20.0f);
+    node.setMix(1.0f);
+
+    require(std::abs(node.carrierFrequencyHz() - 130.81f) < 0.01f, "Carrier freq set");
+    require(std::abs(node.formantShiftSemitones() - 2.0f) < 0.01f, "Formant shift set");
+    require(std::abs(node.bandQ() - 6.0f) < 0.01f, "Band Q set");
+
+    // 1. Process voiced speech simulation (harmonic fundamental + formants)
+    std::vector<float> speechL(512, 0.0f);
+    std::vector<float> speechR(512, 0.0f);
+    for (std::size_t i = 0; i < 512; ++i)
+    {
+        const float t = static_cast<float>(i) / 48000.0f;
+        const float s = 0.5f * std::sin(2.0f * static_cast<float>(std::numbers::pi) * 220.0f * t)
+                      + 0.3f * std::sin(2.0f * static_cast<float>(std::numbers::pi) * 880.0f * t);
+        speechL[i] = s;
+        speechR[i] = s;
+    }
+
+    std::array<float*, 2> channels { speechL.data(), speechR.data() };
+    dawg::engine::ProcessContext ctx {
+        .audio = dawg::engine::AudioBufferView { channels.data(), 2, 512 },
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+
+    node.process(ctx);
+
+    // Verify non-zero output produced
+    float energy = 0.0f;
+    for (float sample : speechL)
+    {
+        energy += sample * sample;
+    }
+    require(energy > 1e-4f, "Vocoded voiced speech produces audio output");
+
+    // Telemetry band levels
+    std::array<float, SpectralVocoderNode::numBands> bandLevels {};
+    node.getBandLevels(bandLevels.data(), bandLevels.size());
+    float sumLevels = 0.0f;
+    for (float lvl : bandLevels) { sumLevels += lvl; }
+    require(sumLevels > 0.0f, "Band envelope levels reported via telemetry");
+
+    // 2. Unvoiced Consonant / Sibilance test
+    float val = 0.6f;
+    for (std::size_t i = 0; i < 512; ++i)
+    {
+        val = -val;
+        speechL[i] = val;
+        speechR[i] = val;
+    }
+    node.process(ctx);
+    require(node.isSibilantActive(), "Aperiodic high zero-crossing frame triggers sibilant detector");
+
+    // 3. External Sidechain carrier mode
+    node.setCarrierSource(SpectralVocoderCarrierSource::externalSidechain);
+    std::vector<float> extL(512, 0.4f);
+    std::vector<float> extR(512, 0.4f);
+    std::array<float*, 2> sidechainChannels { extL.data(), extR.data() };
+    ctx.sidechain = dawg::engine::AudioBufferView { sidechainChannels.data(), 2, 512 };
+
+    node.process(ctx);
+    require(node.carrierSource() == SpectralVocoderCarrierSource::externalSidechain, "External sidechain carrier routed");
+}
+
+void testDynamicCabinetSimulatorSuite()
+{
+    using dawg::engine::dsp::DynamicCabinetSimulatorNode;
+    using dawg::engine::dsp::CabinetModel;
+
+    DynamicCabinetSimulatorNode node;
+    require(node.prepare(48000.0, 512, 2), "DynamicCabinetSimulatorNode prepared");
+    require(node.latencySamples() == 0, "Cabinet sim is zero latency");
+
+    // Test model switching
+    node.setCabinetModel(CabinetModel::vintage4x12);
+    require(node.cabinetModel() == CabinetModel::vintage4x12, "Model set to vintage 4x12");
+
+    node.setCabinetModel(CabinetModel::openBack2x12);
+    require(node.cabinetModel() == CabinetModel::openBack2x12, "Model set to open back 2x12");
+
+    node.setCabinetModel(CabinetModel::bass4x10);
+    require(node.cabinetModel() == CabinetModel::bass4x10, "Model set to bass 4x10");
+
+    // Parameter setters
+    node.setMicrophoneDistance(0.25f);
+    node.setMicrophoneAxis(0.30f);
+    node.setTubeSag(0.60f);
+    node.setSpeakerBreakup(0.40f);
+    node.setImpedanceResonanceAmount(4.5f);
+    node.setImpedanceInductiveAmount(5.0f);
+    node.setOutputLevelDb(-1.0f);
+    node.setMix(1.0f);
+
+    require(std::abs(node.microphoneDistance() - 0.25f) < 0.01f, "Mic distance set");
+    require(std::abs(node.microphoneAxis() - 0.30f) < 0.01f, "Mic axis set");
+    require(std::abs(node.tubeSag() - 0.60f) < 0.01f, "Tube sag set");
+    require(std::abs(node.speakerBreakup() - 0.40f) < 0.01f, "Speaker breakup set");
+
+    // Process guitar-like transient burst
+    std::vector<float> bufL(512, 0.0f);
+    std::vector<float> bufR(512, 0.0f);
+    for (std::size_t i = 0; i < 512; ++i)
+    {
+        const float t = static_cast<float>(i) / 48000.0f;
+        bufL[i] = 1.2f * std::sin(2.0f * static_cast<float>(std::numbers::pi) * 110.0f * t);
+        bufR[i] = bufL[i];
+    }
+
+    std::array<float*, 2> channels { bufL.data(), bufR.data() };
+    dawg::engine::ProcessContext ctx {
+        .audio = dawg::engine::AudioBufferView { channels.data(), 2, 512 },
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+
+    node.process(ctx);
+
+    require(node.currentTubeSag() > 0.0f, "Power amp tube sag dynamically activated on high signal");
+    require(node.currentConeExcursion() > 0.0f, "Speaker cone excursion dynamically measured");
+
+    // Verify output integrity (no NaNs, no infinities)
+    for (float sample : bufL)
+    {
+        require(!std::isnan(sample) && !std::isinf(sample), "Cabinet output samples are finite");
+    }
+}
+
+void testAmbisonicsProcessorSuite()
+{
+    using dawg::engine::dsp::AmbisonicsProcessorNode;
+    using dawg::engine::dsp::AmbisonicsDecoderMode;
+
+    AmbisonicsProcessorNode node;
+    require(node.prepare(48000.0, 512, 2), "AmbisonicsProcessorNode prepared");
+    require(node.latencySamples() == 0, "Ambisonics processor is zero latency");
+
+    // 1. Verify Spherical Harmonic Encoding weights (AmbiX SN3D)
+    std::array<float, AmbisonicsProcessorNode::numHoaChannels> weights {};
+    // Center-Front: Azimuth 0, Elevation 0 -> W = 1, X = 1, Y = 0, Z = 0
+    AmbisonicsProcessorNode::computeHarmonics(0.0f, 0.0f, weights.data());
+    require(std::abs(weights[0] - 1.0f) < 1e-4f, "W monopole is 1.0 at front");
+    require(std::abs(weights[1] - 0.0f) < 1e-4f, "Y dipole is 0.0 at center");
+    require(std::abs(weights[2] - 0.0f) < 1e-4f, "Z dipole is 0.0 at horizon");
+    require(std::abs(weights[3] - 1.0f) < 1e-4f, "X dipole is 1.0 at front");
+
+    // Left: Azimuth +pi/2, Elevation 0 -> Y = 1, X = 0
+    AmbisonicsProcessorNode::computeHarmonics(static_cast<float>(std::numbers::pi * 0.5), 0.0f, weights.data());
+    require(std::abs(weights[1] - 1.0f) < 1e-4f, "Y dipole is 1.0 at 90 deg left");
+    require(std::abs(weights[3] - 0.0f) < 1e-4f, "X dipole is 0.0 at 90 deg left");
+
+    // 2. Head Rotation and Directional Panning
+    node.setSourceAzimuthDeg(-90.0f); // Panned to right
+    node.setSourceElevationDeg(0.0f);
+    node.setSourceSpread(0.1f);
+    node.setHeadRotation(0.0f, 0.0f, 0.0f);
+    node.setDecoderMode(AmbisonicsDecoderMode::binauralHeadphones);
+
+    require(std::abs(node.sourceAzimuthDeg() - (-90.0f)) < 0.01f, "Azimuth set to -90 deg");
+    require(node.decoderMode() == AmbisonicsDecoderMode::binauralHeadphones, "Decoder set to binaural headphones");
+
+    // Process audio buffer
+    std::vector<float> testL(512, 0.0f);
+    std::vector<float> testR(512, 0.0f);
+    for (std::size_t i = 0; i < 512; ++i)
+    {
+        const float t = static_cast<float>(i) / 48000.0f;
+        const float s = 0.8f * std::sin(2.0f * static_cast<float>(std::numbers::pi) * 440.0f * t);
+        testL[i] = s;
+        testR[i] = s;
+    }
+
+    std::array<float*, 2> channels { testL.data(), testR.data() };
+    dawg::engine::ProcessContext ctx {
+        .audio = dawg::engine::AudioBufferView { channels.data(), 2, 512 },
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+
+    node.process(ctx);
+
+    // Energy at right ear should exceed left ear because sound source is at -90 deg (Right)
+    float energyL = 0.0f;
+    float energyR = 0.0f;
+    for (std::size_t i = 0; i < 512; ++i)
+    {
+        energyL += testL[i] * testL[i];
+        energyR += testR[i] * testR[i];
+    }
+    require(energyR > energyL, "Binaural decoding places right source primarily in right headphone channel");
+
+    // Telemetry: 16-channel HOA energies
+    std::array<float, AmbisonicsProcessorNode::numHoaChannels> hoaLevels {};
+    node.getHoaChannelLevels(hoaLevels.data(), hoaLevels.size());
+    require(hoaLevels[0] > 0.0f, "HOA channel 0 (W) active in telemetry");
+
+    // Multichannel decode test into 12-channel Atmos array
+    std::vector<std::vector<float>> hoaInputs(16, std::vector<float>(64, 0.2f));
+    std::vector<std::vector<float>> spkOutputs(12, std::vector<float>(64, 0.0f));
+
+    std::vector<const float*> hoaPtrs(16);
+    std::vector<float*> spkPtrs(12);
+    for (std::size_t h = 0; h < 16; ++h) { hoaPtrs[h] = hoaInputs[h].data(); }
+    for (std::size_t s = 0; s < 12; ++s) { spkPtrs[s] = spkOutputs[s].data(); }
+
+    node.decodeMultichannel(hoaPtrs.data(), spkPtrs.data(), 12, 64);
+    require(std::abs(spkOutputs[0][0]) > 0.0f, "Multichannel 7.1.4 decoder generates speaker outputs from HOA B-format");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -5429,4 +5663,7 @@ int main()
     testSpringReverbMagneticDrumEchoSuite();
     testMasteringStemExportSuite();
     testEnhancedVocalPitchCorrectionSuite();
+    testSpectralVocoderSuite();
+    testDynamicCabinetSimulatorSuite();
+    testAmbisonicsProcessorSuite();
 }
