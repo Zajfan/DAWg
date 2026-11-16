@@ -5,6 +5,7 @@ add_library(dawg_engine_core STATIC
     src/AutomationCurveEvaluator.cpp
     src/DspGraph.cpp
     src/GraphHandoff.cpp
+    src/HardwareControlSurfaceEngine.cpp
     src/Metronome.cpp
     src/MidiClockGenerator.cpp
     src/MidiControllerManager.cpp
@@ -30,6 +31,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/GranularCloudNode.cpp
     src/dsp/HarmonicAssistant.cpp
     src/dsp/HarmonizerVocoderNode.cpp
+    src/dsp/LiveLooperNode.cpp
     src/dsp/MasterTapeVinylCuttingNode.cpp
     src/dsp/MasteringMeterNode.cpp
     src/dsp/MacroModulationMatrix.cpp
@@ -53,6 +55,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/TnhcReverbNode.cpp
     src/dsp/TnhcSynthNode.cpp
     src/dsp/TransientExciterNode.cpp
+    src/dsp/TransientSplitGranularResynthesizerNode.cpp
     src/dsp/VocalPitchCorrectorNode.cpp
     src/dsp/WavetableSynthNode.cpp
     src/plugins/AraPluginBridge.cpp

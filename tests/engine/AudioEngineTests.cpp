@@ -42,6 +42,8 @@
 #include <dawg/engine/dsp/StepSequencerEngine.h>
 #include <dawg/engine/dsp/TapeConsoleSummingNode.h>
 #include <dawg/engine/dsp/TnhcDelayNode.h>
+#include <dawg/engine/HardwareControlSurfaceEngine.h>
+#include <dawg/engine/dsp/LiveLooperNode.h>
 #include <dawg/engine/dsp/MacroModulationMatrix.h>
 #include <dawg/engine/dsp/MicrotonalTuningEngine.h>
 #include <dawg/engine/dsp/OpticalVariMuCompressorNode.h>
@@ -50,6 +52,7 @@
 #include <dawg/engine/dsp/TnhcReverbNode.h>
 #include <dawg/engine/dsp/TnhcSynthNode.h>
 #include <dawg/engine/dsp/TransientExciterNode.h>
+#include <dawg/engine/dsp/TransientSplitGranularResynthesizerNode.h>
 #include <dawg/engine/dsp/VocalPitchCorrectorNode.h>
 #include <dawg/engine/dsp/WavetableSynthNode.h>
 #include <dawg/engine/plugins/AraPluginBridge.h>
@@ -4572,6 +4575,240 @@ void testMacroModulationMatrixSuite()
     require(matrix.getSourceValue(ModSource::mpePressure) > 0.7f, "MPE Pressure updated via MIDI event");
     require(matrix.getSourceValue(ModSource::mpePitchBend) > 0.1f, "MPE Pitch Bend updated via MIDI event");
 }
+
+void testLiveLooperSuite()
+{
+    using dawg::engine::dsp::LiveLooperNode;
+    using dawg::engine::dsp::LooperState;
+    using dawg::engine::dsp::OverdubMode;
+
+    LiveLooperNode looper;
+    constexpr double sampleRate = 48000.0;
+    constexpr std::size_t blockSize = 256;
+
+    require(looper.prepare(sampleRate, blockSize, 2), "LiveLooperNode prepared");
+    require(looper.latencySamples() == 0, "Zero latency looper node");
+
+    // 1. Initial Loop Recording
+    looper.triggerRecord();
+    require(looper.state() == LooperState::recording, "Looper in recording state");
+
+    std::vector<float> chL(blockSize, 0.0f);
+    std::vector<float> chR(blockSize, 0.0f);
+    std::array<float*, 2> channels {chL.data(), chR.data()};
+    dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+    dawg::engine::AudioBufferView emptySidechain(nullptr, 0, 0);
+    dawg::engine::ProcessContext ctx {
+        .audio = audioView,
+        .midi = {},
+        .sampleRate = sampleRate,
+        .sidechain = emptySidechain
+    };
+
+    // Feed 4 blocks (1024 samples) of a 400 Hz test tone
+    for (int b = 0; b < 4; ++b) {
+        for (std::size_t i = 0; i < blockSize; ++i) {
+            const float t = static_cast<float>(b * blockSize + i) / static_cast<float>(sampleRate);
+            chL[i] = 0.7f * std::sin(2.0f * std::numbers::pi_v<float> * 400.0f * t);
+            chR[i] = chL[i];
+        }
+        looper.process(ctx);
+    }
+
+    // 2. Close Loop and enter Playback
+    looper.triggerPlay();
+    require(looper.state() == LooperState::playing, "Looper switched to playing state");
+    require(looper.loopLengthSamples() == 1024, "Loop length is exactly 1024 samples");
+    require(looper.canUndo(), "Undo available for first recorded layer");
+
+    // Feed silence: output should play back loop audio
+    std::fill(chL.begin(), chL.end(), 0.0f);
+    std::fill(chR.begin(), chR.end(), 0.0f);
+    looper.process(ctx);
+
+    float peakLoop = 0.0f;
+    for (std::size_t i = 0; i < blockSize; ++i) {
+        peakLoop = std::max(peakLoop, std::abs(chL[i]));
+    }
+    require(peakLoop > 0.4f, "Looper reproduces recorded audio from buffer");
+
+    // 3. Sound-on-Sound Overdubbing
+    looper.setOverdubMode(OverdubMode::add);
+    looper.setTapeDecay(0.9f);
+    looper.triggerOverdub();
+    require(looper.state() == LooperState::overdubbing, "Looper in overdubbing state");
+
+    // Add high frequency 2 kHz layer
+    for (std::size_t i = 0; i < blockSize; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(sampleRate);
+        chL[i] = 0.5f * std::sin(2.0f * std::numbers::pi_v<float> * 2000.0f * t);
+        chR[i] = chL[i];
+    }
+    looper.process(ctx);
+    looper.triggerPlay();
+
+    // 4. Undo and Redo
+    require(looper.canUndo(), "Undo available after overdub layer");
+    looper.undo();
+    require(looper.canRedo(), "Redo available after undo");
+    looper.redo();
+    require(!looper.canRedo(), "Redo consumed");
+
+    // 5. Variable Speed, Reverse & Freeze
+    looper.setSpeed(0.5f);
+    require(looper.speed() == 0.5f, "Half-speed playback active");
+    looper.setSpeed(-1.0f);
+    require(looper.speed() == -1.0f, "Reverse playback active");
+    looper.setFreeze(true);
+    require(looper.isFrozen(), "Buffer freeze active");
+
+    looper.clear();
+    require(looper.state() == LooperState::stopped, "Looper cleared and stopped");
+    require(looper.loopLengthSamples() == 0, "Loop length 0 after clear");
+}
+
+void testTransientSplitGranularResynthesizerSuite()
+{
+    using dawg::engine::dsp::TransientSplitGranularResynthesizerNode;
+    using dawg::engine::dsp::GranularWindowType;
+    using dawg::engine::dsp::PitchScatterMode;
+
+    TransientSplitGranularResynthesizerNode gran;
+    constexpr double sampleRate = 48000.0;
+    constexpr std::size_t blockSize = 256;
+
+    require(gran.prepare(sampleRate, blockSize, 2), "TransientSplitGranularResynthesizerNode prepared");
+    require(gran.latencySamples() == 0, "Zero latency granular resynthesizer");
+
+    // 1. Parameter configuration
+    gran.setTransientSensitivity(0.7f);
+    gran.setGrainSizeMs(40.0f);
+    gran.setGrainDensity(45.0f);
+    gran.setPitchScatterMode(PitchScatterMode::fifthsAndOctaves);
+    gran.setPitchScatterAmount(0.8f);
+    gran.setSpatialPanJitter(0.6f);
+    gran.setWindowShape(GranularWindowType::blackman);
+    gran.setFeedback(0.35f);
+    gran.setMix(1.0f);
+
+    require(gran.transientSensitivity() == 0.7f, "Transient sensitivity set");
+    require(gran.grainSizeMs() == 40.0f, "Grain size set to 40 ms");
+    require(gran.windowShape() == GranularWindowType::blackman, "Window set to Blackman");
+
+    // 2. Processing with audio input
+    std::vector<float> chL(blockSize, 0.0f);
+    std::vector<float> chR(blockSize, 0.0f);
+    std::array<float*, 2> channels {chL.data(), chR.data()};
+    dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+    dawg::engine::AudioBufferView emptySidechain(nullptr, 0, 0);
+    dawg::engine::ProcessContext ctx {
+        .audio = audioView,
+        .midi = {},
+        .sampleRate = sampleRate,
+        .sidechain = emptySidechain
+    };
+
+    // Feed a sharp percussive spike followed by sustained tone
+    for (int b = 0; b < 10; ++b) {
+        for (std::size_t i = 0; i < blockSize; ++i) {
+            const float t = static_cast<float>(b * blockSize + i) / static_cast<float>(sampleRate);
+            float s = 0.5f * std::sin(2.0f * std::numbers::pi_v<float> * 440.0f * t);
+            if (b == 0 && i < 16) {
+                s += 0.9f; // Fast transient attack
+            }
+            chL[i] = s;
+            chR[i] = s;
+        }
+        gran.process(ctx);
+    }
+
+    require(!std::isnan(chL[0]) && !std::isinf(chL[0]), "Granular cloud resynthesis is numerically stable");
+}
+
+void testHardwareControlSurfaceEngineSuite()
+{
+    using dawg::engine::HardwareControlSurfaceEngine;
+    using dawg::engine::ControllerProfile;
+    using dawg::engine::GridPadState;
+    using dawg::engine::GridOperatingMode;
+    using dawg::engine::ParameterPickupMode;
+    using dawg::engine::MidiEvent;
+
+    HardwareControlSurfaceEngine surface;
+
+    // 1. Controller Profile & Clip Matrix States
+    surface.setProfile(ControllerProfile::launchpadPro);
+    require(surface.profile() == ControllerProfile::launchpadPro, "Controller set to Launchpad Pro");
+
+    surface.setClipState(0, 0, GridPadState::playing);
+    surface.setClipState(0, 1, GridPadState::recording);
+    surface.setClipState(0, 2, GridPadState::queuedPlay);
+    surface.setClipState(0, 3, GridPadState::selected);
+
+    require(surface.clipState(0, 0) == GridPadState::playing, "Pad 0,0 is playing");
+    require(surface.getVelocityColorIndex(0, 0) == 21, "Playing pad has green color index 21");
+    require(surface.getVelocityColorIndex(0, 1) == 5, "Recording pad has red color index 5");
+
+    // 2. SysEx RGB Packet Generation (Novation Launchpad Pro Spec)
+    const auto sysex = surface.generatePadSysEx(0, 0);
+    require(sysex.size() == 12, "SysEx packet is 12 bytes");
+    require(sysex.front() == 0xF0 && sysex.back() == 0xF7, "Valid SysEx delimiters F0..F7");
+    require(sysex[1] == 0x00 && sysex[2] == 0x20 && sysex[3] == 0x29, "Novation manufacturer ID 00 20 29");
+    require(sysex[6] == 0x0B, "RGB LED command 0B");
+
+    // 3. Step Sequencer Mode & Playhead Sweep
+    surface.setOperatingMode(GridOperatingMode::stepSequencer);
+    require(surface.operatingMode() == GridOperatingMode::stepSequencer, "Step sequencer operating mode");
+
+    surface.setStepSequencerPlayhead(4);
+    require(surface.stepSequencerPlayhead() == 4, "Active step is 4");
+
+    const auto cursorColor = surface.getPadLedColor(0, 4);
+    require(cursorColor.r == 255 && cursorColor.g == 255 && cursorColor.b == 255, "Step cursor glows white");
+
+    // 4. Note Performance Mode Isomorphic Layout
+    surface.setOperatingMode(GridOperatingMode::notePerformance);
+    const int rootPadNote = surface.getNoteForPad(7, 0, 60); // Bottom left pad
+    require(rootPadNote == 60, "Bottom left pad is Middle C (60)");
+
+    const int rowAboveNote = surface.getNoteForPad(6, 0, 60); // Row above (4th layout)
+    require(rowAboveNote == 65, "Row above is a perfect 4th (+5 semitones)");
+
+    // 5. Hardware Encoder Banking & Catch Pickup Mode
+    surface.setPickupMode(ParameterPickupMode::pickup);
+    surface.setVirtualParameter(0, 0.75f);
+    require(!surface.isEncoderCaught(0), "Encoder lost catch lock after DAW virtual jump");
+
+    // Moving physical knob at 0.20f should NOT alter the virtual 0.75f value
+    float val = surface.processPhysicalEncoderMove(0, 0.20f);
+    require(std::abs(val - 0.75f) < 0.001f, "Catch mode ignores hardware move before crossing virtual value");
+    require(!surface.isEncoderCaught(0), "Encoder still uncaught");
+
+    // Moving physical knob through 0.75f catches the parameter!
+    val = surface.processPhysicalEncoderMove(0, 0.76f);
+    require(surface.isEncoderCaught(0), "Encoder caught when physical value crosses virtual value");
+    require(std::abs(val - 0.76f) < 0.001f, "Virtual value now follows physical knob seamlessly");
+
+    // 6. Inbound MIDI Event Parsing
+    MidiEvent padEv {
+        .frameOffset = 0,
+        .data = {std::byte {0x90}, std::byte {36}, std::byte {100}}, // Note On pad 36
+        .size = 3
+    };
+    HardwareControlSurfaceEngine::HardwareEvent parsed;
+    require(surface.parseMidiInput(padEv, parsed), "Parsed pad press MIDI message");
+    require(parsed.type == HardwareControlSurfaceEngine::HardwareEvent::Type::padPress, "Type is padPress");
+    require(parsed.index == 36, "Pad index 36");
+
+    MidiEvent ccEv {
+        .frameOffset = 0,
+        .data = {std::byte {0xB0}, std::byte {21}, std::byte {64}}, // CC 21 encoder 0
+        .size = 3
+    };
+    require(surface.parseMidiInput(ccEv, parsed), "Parsed encoder turn MIDI message");
+    require(parsed.type == HardwareControlSurfaceEngine::HardwareEvent::Type::encoderTurn, "Type is encoderTurn");
+    require(parsed.index == 0, "Encoder index 0");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -4731,4 +4968,7 @@ int main()
     testSpectralSidechainUnmaskerAndAuditionDelta();
     testPhysicalModelingSynthSuite();
     testMacroModulationMatrixSuite();
+    testLiveLooperSuite();
+    testTransientSplitGranularResynthesizerSuite();
+    testHardwareControlSurfaceEngineSuite();
 }
