@@ -18,6 +18,7 @@ add_library(dawg_engine_core STATIC
     src/WorkStealingScheduler.cpp
     src/WsolaTimeStretcher.cpp
     src/clap/ClapPluginNode.cpp
+    src/dsp/AcousticDrumBleedCancellationNode.cpp
     src/dsp/AnalogLadderRingModSynthNode.cpp
     src/dsp/AudioTranscriber.cpp
     src/dsp/AudioWarpEngine.cpp
@@ -44,8 +45,10 @@ add_library(dawg_engine_core STATIC
     src/dsp/ParametricEQNode.cpp
     src/dsp/PhysicalModelingSynthNode.cpp
     src/dsp/PolyphaseOversampler.cpp
+    src/dsp/SpatialHeadTrackerBridge.cpp
     src/dsp/SpatialSurroundPannerNode.cpp
     src/dsp/SpectralBalanceAssistant.cpp
+    src/dsp/SpectralMorphCrossSynthNode.cpp
     src/dsp/SpectralResonanceTamerNode.cpp
     src/dsp/SpectralSidechainNode.cpp
     src/dsp/StepSequencerEngine.cpp

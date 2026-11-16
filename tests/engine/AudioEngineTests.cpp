@@ -43,11 +43,14 @@
 #include <dawg/engine/dsp/TapeConsoleSummingNode.h>
 #include <dawg/engine/dsp/TnhcDelayNode.h>
 #include <dawg/engine/HardwareControlSurfaceEngine.h>
+#include <dawg/engine/dsp/AcousticDrumBleedCancellationNode.h>
 #include <dawg/engine/dsp/LiveLooperNode.h>
 #include <dawg/engine/dsp/MacroModulationMatrix.h>
 #include <dawg/engine/dsp/MicrotonalTuningEngine.h>
 #include <dawg/engine/dsp/OpticalVariMuCompressorNode.h>
 #include <dawg/engine/dsp/PhysicalModelingSynthNode.h>
+#include <dawg/engine/dsp/SpatialHeadTrackerBridge.h>
+#include <dawg/engine/dsp/SpectralMorphCrossSynthNode.h>
 #include <dawg/engine/dsp/StudioControlRoomSimulatorNode.h>
 #include <dawg/engine/dsp/TnhcReverbNode.h>
 #include <dawg/engine/dsp/TnhcSynthNode.h>
@@ -4809,6 +4812,193 @@ void testHardwareControlSurfaceEngineSuite()
     require(parsed.type == HardwareControlSurfaceEngine::HardwareEvent::Type::encoderTurn, "Type is encoderTurn");
     require(parsed.index == 0, "Encoder index 0");
 }
+
+void testAcousticDrumBleedCancellationSuite()
+{
+    using dawg::engine::dsp::AcousticDrumBleedCancellationNode;
+    using dawg::engine::dsp::DrumType;
+
+    AcousticDrumBleedCancellationNode gate;
+    constexpr double sampleRate = 48000.0;
+    constexpr std::size_t blockSize = 256;
+
+    require(gate.prepare(sampleRate, blockSize, 2), "AcousticDrumBleedCancellationNode prepared");
+
+    // 1. Drum Type Profiles
+    gate.setDrumType(DrumType::snare);
+    require(gate.drumType() == DrumType::snare, "Drum type set to snare");
+    gate.setDrumType(DrumType::kick);
+    require(gate.drumType() == DrumType::kick, "Drum type set to kick");
+    gate.setDrumType(DrumType::snare);
+
+    // 2. Microphone Phase Alignment & Correlation
+    gate.setPhaseAlignmentDelayMs(1.5f);
+    gate.setPolarityInverted(true);
+    require(gate.phaseAlignmentDelayMs() == 1.5f, "Phase delay set to 1.5 ms");
+    require(gate.isPolarityInverted(), "Polarity inverted");
+
+    std::vector<float> trkA(blockSize);
+    std::vector<float> trkB(blockSize);
+    std::vector<float> trkInv(blockSize);
+    for (std::size_t i = 0; i < blockSize; ++i) {
+        trkA[i] = std::sin(static_cast<float>(i) * 0.1f);
+        trkB[i] = trkA[i];
+        trkInv[i] = -trkA[i];
+    }
+    const float corrIdentical = gate.calculatePhaseCorrelation(trkA.data(), trkB.data(), blockSize);
+    const float corrInverted = gate.calculatePhaseCorrelation(trkA.data(), trkInv.data(), blockSize);
+    require(std::abs(corrIdentical - 1.0f) < 0.01f, "Identical tracks yield correlation +1.0");
+    require(std::abs(corrInverted - (-1.0f)) < 0.01f, "Phase inverted tracks yield correlation -1.0");
+
+    // 3. Transient Spill De-Bleeding
+    gate.setPolarityInverted(false);
+    gate.setPhaseAlignmentDelayMs(0.0f);
+    gate.setGateThresholdDb(-20.0f);
+    gate.setSpillReductionDb(-24.0f);
+
+    std::vector<float> chL(blockSize, 0.0f);
+    std::vector<float> chR(blockSize, 0.0f);
+    std::array<float*, 2> channels {chL.data(), chR.data()};
+    dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+    dawg::engine::AudioBufferView emptySidechain(nullptr, 0, 0);
+    dawg::engine::ProcessContext ctx {
+        .audio = audioView,
+        .midi = {},
+        .sampleRate = sampleRate,
+        .sidechain = emptySidechain
+    };
+
+    // Feed quiet hi-hat cymbal spill (8 kHz at -35 dBFS)
+    for (int b = 0; b < 4; ++b) {
+        for (std::size_t i = 0; i < blockSize; ++i) {
+            const float t = static_cast<float>(b * blockSize + i) / static_cast<float>(sampleRate);
+            chL[i] = 0.02f * std::sin(2.0f * std::numbers::pi_v<float> * 8000.0f * t);
+            chR[i] = chL[i];
+        }
+        gate.process(ctx);
+    }
+    require(!gate.isGateOpen(), "Gate remains closed on quiet cymbal spill");
+    require(gate.currentGateAttenuationDb() < -10.0f, "Spill reduction active during bleed");
+
+    // Feed loud snare hit (2.2 kHz at -6 dBFS)
+    for (std::size_t i = 0; i < blockSize; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(sampleRate);
+        chL[i] = 0.5f * std::sin(2.0f * std::numbers::pi_v<float> * 2200.0f * t);
+        chR[i] = chL[i];
+    }
+    gate.process(ctx);
+    require(gate.isGateOpen(), "Gate snaps open on snare attack transient");
+
+    // 4. Sample Augmentation
+    std::vector<float> sampleHit(1000, 0.3f);
+    gate.loadAugmentationSample(sampleHit.data(), sampleHit.size());
+    gate.setSampleBlend(0.5f);
+    require(gate.sampleBlend() == 0.5f, "Sample blend set to 50%");
+}
+
+void testSpectralMorphCrossSynthSuite()
+{
+    using dawg::engine::dsp::SpectralMorphCrossSynthNode;
+    using dawg::engine::dsp::SpectralMorphMode;
+
+    SpectralMorphCrossSynthNode morph;
+    constexpr double sampleRate = 48000.0;
+    constexpr std::size_t blockSize = 256;
+
+    require(morph.prepare(sampleRate, blockSize, 2), "SpectralMorphCrossSynthNode prepared");
+    require(morph.latencySamples() == SpectralMorphCrossSynthNode::FftSize, "STFT latency reported");
+
+    morph.setMorphX(0.7f);
+    morph.setFormantWarpY(0.6f);
+    morph.setMorphMode(SpectralMorphMode::crossMultiply);
+
+    require(morph.morphX() == 0.7f, "Morph X set to 0.7");
+    require(morph.formantWarpY() == 0.6f, "Formant warp Y set to 0.6");
+    require(morph.morphMode() == SpectralMorphMode::crossMultiply, "Morph mode crossMultiply");
+
+    // Feed Stream A (Main 400 Hz) and Stream B (Sidechain 1000 Hz)
+    std::vector<float> mainL(blockSize);
+    std::vector<float> mainR(blockSize);
+    std::vector<float> scL(blockSize);
+    std::vector<float> scR(blockSize);
+
+    std::array<float*, 2> mainCh {mainL.data(), mainR.data()};
+    std::array<float*, 2> scCh {scL.data(), scR.data()};
+    dawg::engine::AudioBufferView mainView(mainCh.data(), 2, blockSize);
+    dawg::engine::AudioBufferView scView(scCh.data(), 2, blockSize);
+    dawg::engine::ProcessContext ctx {
+        .audio = mainView,
+        .midi = {},
+        .sampleRate = sampleRate,
+        .sidechain = scView
+    };
+
+    for (int b = 0; b < 8; ++b) {
+        for (std::size_t i = 0; i < blockSize; ++i) {
+            const float t = static_cast<float>(b * blockSize + i) / static_cast<float>(sampleRate);
+            mainL[i] = 0.6f * std::sin(2.0f * std::numbers::pi_v<float> * 400.0f * t);
+            mainR[i] = mainL[i];
+            scL[i] = 0.6f * std::sin(2.0f * std::numbers::pi_v<float> * 1000.0f * t);
+            scR[i] = scL[i];
+        }
+        morph.process(ctx);
+    }
+
+    require(!std::isnan(mainL[0]) && !std::isinf(mainL[0]), "STFT cross-synthesis produces stable output");
+}
+
+void testSpatialHeadTrackerBridgeSuite()
+{
+    using dawg::engine::dsp::SpatialHeadTrackerBridge;
+    using dawg::engine::dsp::Vector3D;
+    using dawg::engine::dsp::StudioControlRoomSimulatorNode;
+    using dawg::engine::dsp::BinauralSpatialPannerNode;
+
+    SpatialHeadTrackerBridge tracker;
+    tracker.reset();
+
+    // 1. Direct Orientation & Smoothing
+    tracker.updateRawOrientation(45.0f, 10.0f, -5.0f);
+    require(std::abs(tracker.rawOrientation().yawDeg - 45.0f) < 0.01f, "Raw yaw updated to 45 deg");
+
+    // 2. OSC Message Parsing
+    const float ypr[3] = {30.0f, -15.0f, 8.0f};
+    require(tracker.parseOscMessage("/tracking/ypr", ypr, 3), "Parsed /tracking/ypr OSC message");
+
+    const float singleYaw[1] = {-60.0f};
+    require(tracker.parseOscMessage("/tracking/yaw", singleYaw, 1), "Parsed /tracking/yaw OSC message");
+
+    // 3. Sweet-Spot Calibration
+    tracker.calibrateZeroReference();
+    const auto calib = tracker.calibratedOrientation();
+    require(std::abs(calib.yawDeg) < 0.01f, "Calibrated yaw zeroed after sweet-spot calibration");
+    require(std::abs(calib.pitchDeg) < 0.01f, "Calibrated pitch zeroed");
+
+    // 4. 3D Coordinate Rotation Transform:
+    // Listener turns head 90 degrees right (yaw = +90).
+    // An object directly in front at (x: 0, y: 2, z: 0) should appear at left ear (x: -2, y: 0, z: 0)!
+    tracker.reset();
+    tracker.setSmoothingFactor(0.0f); // instant response for test
+    tracker.updateRawOrientation(90.0f, 0.0f, 0.0f);
+
+    Vector3D worldFront {0.0f, 2.0f, 0.0f};
+    Vector3D headSpace = tracker.transformWorldToHeadSpace(worldFront);
+    require(std::abs(headSpace.x - (-2.0f)) < 0.05f, "World front object rotates to left ear (-2.0) on 90 deg right head turn");
+    require(std::abs(headSpace.y - 0.0f) < 0.05f, "Y coordinate is near zero");
+
+    // 5. Direct Node Integration Bindings
+    StudioControlRoomSimulatorNode room;
+    require(room.prepare(48000.0, 256, 2), "Room prepared");
+    tracker.updateRawOrientation(30.0f, 0.0f, 0.0f);
+    tracker.applyToControlRoomSimulator(room);
+    require(std::abs(room.headYawDegrees() - 30.0f) < 0.01f, "Head tracker yaw applied to control room simulator");
+
+    BinauralSpatialPannerNode panner;
+    require(panner.prepare(48000.0, 256, 2), "Panner prepared");
+    tracker.updateRawOrientation(90.0f, 0.0f, 0.0f);
+    tracker.applyToBinauralPanner(panner, worldFront);
+    require(std::abs(panner.azimuthDeg() - (-90.0f)) < 1.0f, "Panner azimuth rotated to -90 deg");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -4971,4 +5161,7 @@ int main()
     testLiveLooperSuite();
     testTransientSplitGranularResynthesizerSuite();
     testHardwareControlSurfaceEngineSuite();
+    testAcousticDrumBleedCancellationSuite();
+    testSpectralMorphCrossSynthSuite();
+    testSpatialHeadTrackerBridgeSuite();
 }
