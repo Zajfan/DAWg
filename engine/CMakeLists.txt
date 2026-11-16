@@ -32,6 +32,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/HarmonizerVocoderNode.cpp
     src/dsp/MasterTapeVinylCuttingNode.cpp
     src/dsp/MasteringMeterNode.cpp
+    src/dsp/MacroModulationMatrix.cpp
     src/dsp/MicrotonalTuningEngine.cpp
     src/dsp/ModulatorRack.cpp
     src/dsp/MultiSampleInstrumentNode.cpp
@@ -39,6 +40,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/NeuralAmpModelerNode.cpp
     src/dsp/OpticalVariMuCompressorNode.cpp
     src/dsp/ParametricEQNode.cpp
+    src/dsp/PhysicalModelingSynthNode.cpp
     src/dsp/PolyphaseOversampler.cpp
     src/dsp/SpatialSurroundPannerNode.cpp
     src/dsp/SpectralBalanceAssistant.cpp

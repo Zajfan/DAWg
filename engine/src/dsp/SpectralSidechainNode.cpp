@@ -23,8 +23,14 @@ void SpectralSidechainNode::setupBandFrequencies() noexcept
     double f = minF;
     for (std::size_t b = 0; b < numBands; ++b)
     {
+        const float bandFrac = static_cast<float>(b) / static_cast<float>(numBands - 1);
+        // Adaptive Q: 1.5 at sub-bass (wider, no ringing) scaling to 4.5 at high cymbals/air (sharp formant precision)
+        const float bandQ = 1.5f + 3.0f * bandFrac;
+
         m_bandsL[b].centerHz = static_cast<float>(f);
+        m_bandsL[b].q = bandQ;
         m_bandsR[b].centerHz = static_cast<float>(f);
+        m_bandsR[b].q = bandQ;
         f *= ratio;
     }
 }
@@ -143,8 +149,6 @@ void SpectralSidechainNode::process(ProcessContext& context) noexcept
     }
 
     const float dt = 1.0f / static_cast<float>(m_sampleRate);
-    constexpr float q = 2.5f; // Moderate Q for smooth 32-band coverage
-    const float k = 1.0f / q;
 
     // Zero collision telemetry accumulators
     std::array<float, numBands> blockCollision {};
@@ -158,43 +162,53 @@ void SpectralSidechainNode::process(ProcessContext& context) noexcept
         const float sideL = (sc0 != nullptr) ? sc0[i] : inL;
         const float sideR = (sc1 != nullptr) ? sc1[i] : inR;
 
-        float outSumL = 0.0f;
-        float outSumR = 0.0f;
+        float totalDeltaL = 0.0f;
+        float totalDeltaR = 0.0f;
 
         for (std::size_t b = 0; b < numBands; ++b)
         {
             auto& bandL = m_bandsL[b];
             auto& bandR = m_bandsR[b];
 
+            const float q = m_adaptiveQ ? bandL.q : 2.5f;
+            const float k = 1.0f / q;
+
             const float g = std::tan(std::numbers::pi_v<float> * std::clamp(bandL.centerHz * dt, 0.001f, 0.45f));
-            const float denom = 1.0f / (1.0f + g * (g + k));
+            const float a1 = 1.0f / (1.0f + g * (g + k));
+            const float a2 = g * a1;
+            const float a3 = g * a2;
 
             // Main SVF bandpass L
-            const float v1L = (inL - bandL.s1 * (g + k) - bandL.s2) * denom;
-            const float v0L = g * v1L;
-            const float bpL = g * (v0L + bandL.s1) + bandL.s2;
-            bandL.s1 += 2.0f * v0L;
-            bandL.s2 += 2.0f * g * bpL;
+            const float v3L = inL - bandL.s2;
+            const float v1L = a1 * bandL.s1 + a2 * v3L;
+            const float bpL = k * v1L; // 0 dB unity gain bandpass
+            const float lpL = bandL.s2 + a2 * bandL.s1 + a3 * v3L;
+            bandL.s1 = 2.0f * v1L - bandL.s1;
+            bandL.s2 = 2.0f * lpL - bandL.s2;
 
             // Main SVF bandpass R
-            const float v1R = (inR - bandR.s1 * (g + k) - bandR.s2) * denom;
-            const float v0R = g * v1R;
-            const float bpR = g * (v0R + bandR.s1) + bandR.s2;
-            bandR.s1 += 2.0f * v0R;
-            bandR.s2 += 2.0f * g * bpR;
+            const float v3R = inR - bandR.s2;
+            const float v1R = a1 * bandR.s1 + a2 * v3R;
+            const float bpR = k * v1R;
+            const float lpR = bandR.s2 + a2 * bandR.s1 + a3 * v3R;
+            bandR.s1 = 2.0f * v1R - bandR.s1;
+            bandR.s2 = 2.0f * lpR - bandR.s2;
 
-            // Sidechain SVF bandpass L & R
-            const float scV1L = (sideL - bandL.sidechainS1 * (g + k) - bandL.sidechainS2) * denom;
-            const float scV0L = g * scV1L;
-            const float scBpL = g * (scV0L + bandL.sidechainS1) + bandL.sidechainS2;
-            bandL.sidechainS1 += 2.0f * scV0L;
-            bandL.sidechainS2 += 2.0f * g * scBpL;
+            // Sidechain SVF bandpass L
+            const float scV3L = sideL - bandL.sidechainS2;
+            const float scV1L = a1 * bandL.sidechainS1 + a2 * scV3L;
+            const float scBpL = k * scV1L;
+            const float scLpL = bandL.sidechainS2 + a2 * bandL.sidechainS1 + a3 * scV3L;
+            bandL.sidechainS1 = 2.0f * scV1L - bandL.sidechainS1;
+            bandL.sidechainS2 = 2.0f * scLpL - bandL.sidechainS2;
 
-            const float scV1R = (sideR - bandR.sidechainS1 * (g + k) - bandR.sidechainS2) * denom;
-            const float scV0R = g * scV1R;
-            const float scBpR = g * (scV0R + bandR.sidechainS1) + bandR.sidechainS2;
-            bandR.sidechainS1 += 2.0f * scV0R;
-            bandR.sidechainS2 += 2.0f * g * scBpR;
+            // Sidechain SVF bandpass R
+            const float scV3R = sideR - bandR.sidechainS2;
+            const float scV1R = a1 * bandR.sidechainS1 + a2 * scV3R;
+            const float scBpR = k * scV1R;
+            const float scLpR = bandR.sidechainS2 + a2 * bandR.sidechainS1 + a3 * scV3R;
+            bandR.sidechainS1 = 2.0f * scV1R - bandR.sidechainS1;
+            bandR.sidechainS2 = 2.0f * scLpR - bandR.sidechainS2;
 
             // Envelope detection on sidechain band
             const float scMag = 0.5f * (std::abs(scBpL) + std::abs(scBpR));
@@ -202,18 +216,19 @@ void SpectralSidechainNode::process(ProcessContext& context) noexcept
             bandL.sidechainEnv += coeffL * (scMag - bandL.sidechainEnv);
 
             // Compute dynamic inverse ducking attenuation for this frequency band
-            float duckGain = 1.0f;
+            float duckAmount = 0.0f;
             if (bandL.centerHz >= m_lowCutHz && bandL.centerHz <= m_highCutHz)
             {
-                const float duckAmount = std::clamp(bandL.sidechainEnv * 3.5f * m_duckingAmount, 0.0f, 0.95f);
-                duckGain = 1.0f - duckAmount;
+                duckAmount = std::clamp(bandL.sidechainEnv * 3.5f * m_duckingAmount * m_sensitivity, 0.0f, 0.95f);
             }
 
-            bandL.gainReduction = duckGain;
-            bandR.gainReduction = duckGain;
+            bandL.gainReduction = 1.0f - duckAmount;
+            bandR.gainReduction = 1.0f - duckAmount;
 
-            outSumL += bpL * duckGain;
-            outSumR += bpR * duckGain;
+            // Surgical dynamic frequency carving delta normalized for 32-band filterbank overlap
+            constexpr float kFilterBankNorm = 0.35f;
+            totalDeltaL += bpL * (duckAmount * kFilterBankNorm);
+            totalDeltaR += bpR * (duckAmount * kFilterBankNorm);
 
             // Track acoustic masking collision
             const float mainMag = 0.5f * (std::abs(bpL) + std::abs(bpR));
@@ -222,10 +237,23 @@ void SpectralSidechainNode::process(ProcessContext& context) noexcept
             blockScEnergy[b] = std::max(blockScEnergy[b], scMag);
         }
 
-        ch0[i] = outSumL;
-        if (ch1 != nullptr)
+        if (m_auditionDelta)
         {
-            ch1[i] = outSumR;
+            // Solo strictly the carved-out difference signal
+            ch0[i] = totalDeltaL;
+            if (ch1 != nullptr)
+            {
+                ch1[i] = totalDeltaR;
+            }
+        }
+        else
+        {
+            // Transparent subtraction: untouched input minus surgical ducking delta
+            ch0[i] = inL - totalDeltaL;
+            if (ch1 != nullptr)
+            {
+                ch1[i] = inR - totalDeltaR;
+            }
         }
     }
 

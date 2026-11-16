@@ -42,8 +42,10 @@
 #include <dawg/engine/dsp/StepSequencerEngine.h>
 #include <dawg/engine/dsp/TapeConsoleSummingNode.h>
 #include <dawg/engine/dsp/TnhcDelayNode.h>
+#include <dawg/engine/dsp/MacroModulationMatrix.h>
 #include <dawg/engine/dsp/MicrotonalTuningEngine.h>
 #include <dawg/engine/dsp/OpticalVariMuCompressorNode.h>
+#include <dawg/engine/dsp/PhysicalModelingSynthNode.h>
 #include <dawg/engine/dsp/StudioControlRoomSimulatorNode.h>
 #include <dawg/engine/dsp/TnhcReverbNode.h>
 #include <dawg/engine/dsp/TnhcSynthNode.h>
@@ -4319,6 +4321,257 @@ void testStudioControlRoomSimulatorSuite()
     room.process(ctx);
     require(std::abs(chL[0] - 0.5f) < 1.0e-5f && std::abs(chR[0] - 0.25f) < 1.0e-5f, "Mix 0.0 gives bit-identical dry signal");
 }
+
+void testSpectralSidechainUnmaskerAndAuditionDelta()
+{
+    using dawg::engine::dsp::SpectralSidechainNode;
+
+    SpectralSidechainNode unmasker;
+    constexpr double sampleRate = 48000.0;
+    constexpr std::size_t blockSize = 256;
+
+    require(unmasker.prepare(sampleRate, blockSize, 2), "SpectralSidechainNode prepared");
+    require(unmasker.latencySamples() == 0, "Zero latency spectral unmasker");
+
+    unmasker.setDuckingAmount(0.85f);
+    unmasker.setSensitivity(1.5f);
+    unmasker.setAdaptiveQEnabled(true);
+    unmasker.setAuditionDelta(false);
+
+    require(unmasker.isAdaptiveQEnabled(), "Adaptive Q enabled");
+    require(!unmasker.isAuditionDelta(), "Audition delta initially false");
+    require(unmasker.sensitivity() == 1.5f, "Sensitivity set to 1.5");
+
+    // 1. Bit-transparent pass-through when sidechain is inactive
+    std::vector<float> mainL(blockSize, 0.4f);
+    std::vector<float> mainR(blockSize, 0.4f);
+    std::vector<float> sideL(blockSize, 0.0f);
+    std::vector<float> sideR(blockSize, 0.0f);
+
+    std::array<float*, 2> mainCh {mainL.data(), mainR.data()};
+    std::array<float*, 2> sideCh {sideL.data(), sideR.data()};
+    dawg::engine::AudioBufferView mainView(mainCh.data(), 2, blockSize);
+    dawg::engine::AudioBufferView sideView(sideCh.data(), 2, blockSize);
+    dawg::engine::ProcessContext ctx {
+        .audio = mainView,
+        .midi = {},
+        .sampleRate = sampleRate,
+        .sidechain = sideView
+    };
+
+    unmasker.process(ctx);
+    require(std::abs(mainL[0] - 0.4f) < 1.0e-5f, "Zero sidechain yields bit-transparent dry audio");
+
+    // 2. Frequency-masking collision: Feed 100 Hz kick in sidechain and 100 Hz bass in main
+    for (int block = 0; block < 10; ++block) {
+        for (std::size_t i = 0; i < blockSize; ++i) {
+            const float t = static_cast<float>(block * blockSize + i) / static_cast<float>(sampleRate);
+            mainL[i] = 0.8f * std::sin(2.0f * std::numbers::pi_v<float> * 100.0f * t);
+            mainR[i] = mainL[i];
+            sideL[i] = 0.9f * std::sin(2.0f * std::numbers::pi_v<float> * 100.0f * t);
+            sideR[i] = sideL[i];
+        }
+        unmasker.process(ctx);
+    }
+
+    // Main signal at 100 Hz should be surgically ducked
+    float duckedPeak = 0.0f;
+    for (std::size_t i = 0; i < blockSize; ++i) {
+        duckedPeak = std::max(duckedPeak, std::abs(mainL[i]));
+    }
+    require(duckedPeak < 0.75f, "Colliding 100 Hz frequency component dynamically ducked by sidechain");
+
+    // 3. Audition Delta Mode: Solo strictly the carved-out difference signal
+    unmasker.setAuditionDelta(true);
+    require(unmasker.isAuditionDelta(), "Audition delta mode enabled");
+
+    for (std::size_t i = 0; i < blockSize; ++i) {
+        const float t = static_cast<float>(10 * blockSize + i) / static_cast<float>(sampleRate);
+        mainL[i] = 0.8f * std::sin(2.0f * std::numbers::pi_v<float> * 100.0f * t);
+        mainR[i] = mainL[i];
+        sideL[i] = 0.9f * std::sin(2.0f * std::numbers::pi_v<float> * 100.0f * t);
+        sideR[i] = sideL[i];
+    }
+    unmasker.process(ctx);
+
+    float deltaPeak = 0.0f;
+    for (std::size_t i = 0; i < blockSize; ++i) {
+        deltaPeak = std::max(deltaPeak, std::abs(mainL[i]));
+    }
+    require(deltaPeak > 0.05f, "Audition delta mode solos carved-out frequency delta energy");
+}
+
+void testPhysicalModelingSynthSuite()
+{
+    using dawg::engine::dsp::PhysicalModelingSynthNode;
+    using dawg::engine::dsp::PhysicalModelType;
+    using dawg::engine::dsp::ExciterType;
+
+    PhysicalModelingSynthNode synth;
+    constexpr double sampleRate = 48000.0;
+    constexpr std::size_t blockSize = 256;
+
+    require(synth.prepare(sampleRate, blockSize, 2), "PhysicalModelingSynthNode prepared");
+    require(synth.latencySamples() == 0, "Zero latency physical modeling synth");
+
+    // 1. Karplus-Strong Waveguide String with Mallet Strike
+    synth.setModelType(PhysicalModelType::waveguideString);
+    synth.setExciterType(ExciterType::mallet);
+    synth.setDecayTimeSeconds(1.2f);
+    synth.setMalletHardness(0.6f);
+    synth.setStrikePosition(0.2f);
+
+    require(synth.modelType() == PhysicalModelType::waveguideString, "Model set to waveguideString");
+    require(synth.exciterType() == ExciterType::mallet, "Exciter set to mallet");
+
+    synth.noteOn(60, 0.85f);
+    require(synth.activeVoiceCount() == 1, "Voice 1 active after noteOn");
+
+    std::vector<float> chL(blockSize, 0.0f);
+    std::vector<float> chR(blockSize, 0.0f);
+    std::array<float*, 2> channels {chL.data(), chR.data()};
+    dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+    dawg::engine::AudioBufferView emptySidechain(nullptr, 0, 0);
+    dawg::engine::ProcessContext ctx {
+        .audio = audioView,
+        .midi = {},
+        .sampleRate = sampleRate,
+        .sidechain = emptySidechain
+    };
+
+    synth.process(ctx);
+
+    float peakString = 0.0f;
+    for (std::size_t i = 0; i < blockSize; ++i) {
+        peakString = std::max(peakString, std::abs(chL[i]));
+    }
+    require(peakString > 0.05f, "Karplus-Strong waveguide produces ringing string tone");
+    require(!std::isnan(chL[0]) && !std::isinf(chL[0]), "Waveguide audio is numerically stable");
+
+    // 2. Modal Resonator Membrane (Drumhead physics)
+    synth.allNotesOff();
+    require(synth.activeVoiceCount() == 0, "All notes off clears voices");
+
+    synth.setModelType(PhysicalModelType::modalMembrane);
+    synth.setExciterType(ExciterType::mallet);
+    synth.setDecayTimeSeconds(0.8f);
+
+    synth.noteOn(48, 0.9f);
+    require(synth.activeVoiceCount() == 1, "Membrane voice active");
+
+    synth.process(ctx);
+    float peakMembrane = 0.0f;
+    for (std::size_t i = 0; i < blockSize; ++i) {
+        peakMembrane = std::max(peakMembrane, std::abs(chL[i]));
+    }
+    require(peakMembrane > 0.05f, "Modal membrane resonator produces drum strike acoustics");
+
+    // 3. Tuned Acoustic Marimba / Vibraphone Bar
+    synth.setModelType(PhysicalModelType::modalBar);
+    synth.noteOn(72, 0.95f);
+    synth.process(ctx);
+    require(!std::isnan(chL[0]), "Modal bar synthesis is numerically stable");
+
+    synth.allNotesOff();
+}
+
+void testMacroModulationMatrixSuite()
+{
+    using dawg::engine::dsp::MacroModulationMatrix;
+    using dawg::engine::dsp::ModSource;
+    using dawg::engine::dsp::MsegNode;
+    using dawg::engine::dsp::MsegLoopMode;
+    using dawg::engine::dsp::ModulationRoute;
+
+    MacroModulationMatrix matrix;
+    matrix.prepare(48000.0);
+
+    // 1. Macro knobs (8 macros)
+    matrix.setMacro(0, 0.75f);
+    matrix.setMacro(7, 0.25f);
+    require(matrix.macro(0) == 0.75f, "Macro 0 set to 0.75");
+    require(matrix.macro(7) == 0.25f, "Macro 7 set to 0.25");
+
+    // 2. Multi-Stage Envelope (MSEG) with tension
+    std::vector<MsegNode> customNodes = {
+        {0.0f,  0.0f,  0.0f},
+        {0.3f,  1.0f,  0.5f},  // Ease-out curve
+        {0.7f,  0.2f, -0.5f},  // Ease-in curve
+        {1.0f,  0.0f,  0.0f}
+    };
+    matrix.setMsegNodes(customNodes);
+    matrix.setMsegLoopMode(MsegLoopMode::loop);
+    matrix.setMsegRateHz(2.0f);
+    matrix.triggerMseg();
+
+    require(matrix.msegLoopMode() == MsegLoopMode::loop, "MSEG loop mode verified");
+    require(matrix.msegRateHz() == 2.0f, "MSEG rate 2 Hz");
+
+    // 3. Lorenz Strange Attractor
+    matrix.setLorenzSpeed(2.5f);
+    require(matrix.lorenzSpeed() == 2.5f, "Lorenz speed set to 2.5 Hz");
+
+    // Process 256 frames of audio to update modulators
+    std::vector<float> dummy(256, 0.5f);
+    const float* const channels[1] = {dummy.data()};
+    matrix.process(channels, 1, 256);
+
+    const float lorenzX = matrix.lorenzX();
+    const float lorenzY = matrix.lorenzY();
+    require(lorenzX >= 0.0f && lorenzX <= 1.0f, "Lorenz X normalized within [0, 1]");
+    require(lorenzY >= 0.0f && lorenzY <= 1.0f, "Lorenz Y normalized within [0, 1]");
+
+    // 4. Bipolar Modulation Routing & Modulation Ring Visualizer
+    matrix.clearRoutes();
+    constexpr std::uint32_t filterCutoffParamId = 42;
+
+    ModulationRoute r1 {
+        .targetParamId = filterCutoffParamId,
+        .source = ModSource::macro1,
+        .depth = 0.40f, // +40% modulation
+        .minClamp = 0.0f,
+        .maxClamp = 1.0f,
+        .smoothedValue = 0.0f,
+        .slewMs = 1.0f
+    };
+    require(matrix.addRoute(r1), "Added Macro1 modulation route");
+    require(matrix.routeCount() == 1, "Route count is 1");
+
+    // Process a block to settle slew filter
+    for (int i = 0; i < 5; ++i) {
+        matrix.process(channels, 1, 256);
+    }
+
+    constexpr float baseCutoff = 0.50f;
+    const float modulated = matrix.evaluateModulatedParam(filterCutoffParamId, baseCutoff);
+    require(modulated > baseCutoff, "Macro1 positively modulates filter cutoff");
+
+    const auto ring = matrix.getModulationRing(filterCutoffParamId, baseCutoff);
+    require(ring.baseValue == baseCutoff, "Ring base value matches");
+    require(ring.arcMax > baseCutoff, "Ring arc max covers positive modulation range");
+
+    // 5. MIDI MPE Expression Routing
+    std::array<dawg::engine::MidiEvent, 2> midiEvents {{
+        dawg::engine::MidiEvent {
+            .frameOffset = 0,
+            .data = {std::byte {0xD0}, std::byte {96}, std::byte {0}}, // Channel pressure
+            .size = 2
+        },
+        dawg::engine::MidiEvent {
+            .frameOffset = 0,
+            .data = {std::byte {0xE0}, std::byte {0x00}, std::byte {0x60}}, // Pitch bend
+            .size = 3
+        }
+    }};
+    dawg::engine::MidiBufferView midiView {
+        .events = midiEvents.data(),
+        .eventCount = midiEvents.size()
+    };
+
+    matrix.processMidi(midiView);
+    require(matrix.getSourceValue(ModSource::mpePressure) > 0.7f, "MPE Pressure updated via MIDI event");
+    require(matrix.getSourceValue(ModSource::mpePitchBend) > 0.1f, "MPE Pitch Bend updated via MIDI event");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -4475,4 +4728,7 @@ int main()
     testOpticalVariMuCompressorSuite();
     testMicrotonalTuningEngineSuite();
     testStudioControlRoomSimulatorSuite();
+    testSpectralSidechainUnmaskerAndAuditionDelta();
+    testPhysicalModelingSynthSuite();
+    testMacroModulationMatrixSuite();
 }
