@@ -32,10 +32,12 @@ add_library(dawg_engine_core STATIC
     src/dsp/HarmonizerVocoderNode.cpp
     src/dsp/MasterTapeVinylCuttingNode.cpp
     src/dsp/MasteringMeterNode.cpp
+    src/dsp/MicrotonalTuningEngine.cpp
     src/dsp/ModulatorRack.cpp
     src/dsp/MultiSampleInstrumentNode.cpp
     src/dsp/MultibandCompressorNode.cpp
     src/dsp/NeuralAmpModelerNode.cpp
+    src/dsp/OpticalVariMuCompressorNode.cpp
     src/dsp/ParametricEQNode.cpp
     src/dsp/PolyphaseOversampler.cpp
     src/dsp/SpatialSurroundPannerNode.cpp
@@ -43,6 +45,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/SpectralResonanceTamerNode.cpp
     src/dsp/SpectralSidechainNode.cpp
     src/dsp/StepSequencerEngine.cpp
+    src/dsp/StudioControlRoomSimulatorNode.cpp
     src/dsp/TapeConsoleSummingNode.cpp
     src/dsp/TnhcDelayNode.cpp
     src/dsp/TnhcReverbNode.cpp

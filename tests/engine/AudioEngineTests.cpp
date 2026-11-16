@@ -42,6 +42,9 @@
 #include <dawg/engine/dsp/StepSequencerEngine.h>
 #include <dawg/engine/dsp/TapeConsoleSummingNode.h>
 #include <dawg/engine/dsp/TnhcDelayNode.h>
+#include <dawg/engine/dsp/MicrotonalTuningEngine.h>
+#include <dawg/engine/dsp/OpticalVariMuCompressorNode.h>
+#include <dawg/engine/dsp/StudioControlRoomSimulatorNode.h>
 #include <dawg/engine/dsp/TnhcReverbNode.h>
 #include <dawg/engine/dsp/TnhcSynthNode.h>
 #include <dawg/engine/dsp/TransientExciterNode.h>
@@ -4083,6 +4086,239 @@ void testMasterTapeVinylCuttingSuite()
     lathe.process(ctx);
     require(!std::isnan(chL[0]) && !std::isinf(chL[0]), "Through-zero tape flange processes cleanly without numerical instability");
 }
+
+void testOpticalVariMuCompressorSuite()
+{
+    using dawg::engine::dsp::OpticalVariMuCompressorNode;
+    using dawg::engine::dsp::CompressorModel;
+    using dawg::engine::dsp::SidechainFilterMode;
+
+    OpticalVariMuCompressorNode comp;
+    constexpr double sampleRate = 48000.0;
+    constexpr std::size_t blockSize = 256;
+
+    require(comp.prepare(sampleRate, blockSize, 2), "OpticalVariMuCompressorNode prepared");
+    require(comp.latencySamples() == 0, "Zero latency mastering compressor");
+
+    // 1. Teletronix LA-2A Style Electro-Optical T4 Cell Compression
+    comp.setModel(CompressorModel::opticalT4);
+    comp.setPeakReduction(0.85f);
+    comp.setSidechainFilter(SidechainFilterMode::highpass80);
+    comp.setMix(1.0f);
+
+    require(comp.model() == CompressorModel::opticalT4, "Model set to optical T4");
+    require(comp.sidechainFilter() == SidechainFilterMode::highpass80, "Sidechain HPF at 80 Hz");
+
+    std::vector<float> chL(blockSize);
+    std::vector<float> chR(blockSize);
+
+    // Feed a loud 1 kHz test tone
+    for (int block = 0; block < 10; ++block) {
+        for (std::size_t i = 0; i < blockSize; ++i) {
+            const float t = static_cast<float>(block * blockSize + i) / static_cast<float>(sampleRate);
+            const float s = 0.85f * std::sin(2.0f * std::numbers::pi_v<float> * 1000.0f * t);
+            chL[i] = s;
+            chR[i] = s;
+        }
+
+        std::array<float*, 2> channels {chL.data(), chR.data()};
+        dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+        dawg::engine::AudioBufferView emptySidechain(nullptr, 0, 0);
+        dawg::engine::ProcessContext ctx {
+            .audio = audioView,
+            .midi = {},
+            .sampleRate = sampleRate,
+            .sidechain = emptySidechain
+        };
+
+        comp.process(ctx);
+    }
+
+    require(comp.currentGainReductionDb() > 3.0f, "T4 optical cell applies substantial gain reduction on loud signal");
+
+    // 2. Fairchild 670 Style Vari-Mu Dynamic Transconductance & Tube Warmth
+    comp.setModel(CompressorModel::variMu);
+    comp.setPeakReduction(0.70f);
+    comp.setTubeWarmth(0.50f);
+    comp.setSidechainFilter(SidechainFilterMode::thrust);
+
+    require(comp.model() == CompressorModel::variMu, "Model set to Vari-Mu tube limiter");
+    require(comp.tubeWarmth() == 0.50f, "Tube warmth set to 50%");
+    require(comp.sidechainFilter() == SidechainFilterMode::thrust, "API thrust sidechain active");
+
+    for (int block = 0; block < 5; ++block) {
+        for (std::size_t i = 0; i < blockSize; ++i) {
+            const float t = static_cast<float>(block * blockSize + i) / static_cast<float>(sampleRate);
+            const float s = 0.90f * std::sin(2.0f * std::numbers::pi_v<float> * 400.0f * t);
+            chL[i] = s;
+            chR[i] = s;
+        }
+
+        std::array<float*, 2> channels {chL.data(), chR.data()};
+        dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+        dawg::engine::AudioBufferView emptySidechain(nullptr, 0, 0);
+        dawg::engine::ProcessContext ctx {
+            .audio = audioView,
+            .midi = {},
+            .sampleRate = sampleRate,
+            .sidechain = emptySidechain
+        };
+
+        comp.process(ctx);
+    }
+
+    require(comp.currentGainReductionDb() > 1.0f, "Vari-Mu variable-mu compression active");
+    require(!std::isnan(chL[0]) && !std::isinf(chL[0]), "Vari-Mu tube saturation produces numerical stability");
+}
+
+void testMicrotonalTuningEngineSuite()
+{
+    using dawg::engine::dsp::MicrotonalTuningEngine;
+    using dawg::engine::dsp::FactoryScale;
+
+    MicrotonalTuningEngine engine;
+
+    // 1. Standard 12-TET verification
+    require(std::abs(engine.frequencyForNote(69) - 440.0) < 0.001, "A4 is calibrated to exactly 440.0 Hz");
+    require(std::abs(engine.frequencyForNote(60) - 261.6255) < 0.05, "Middle C is ~261.63 Hz");
+    require(std::abs(engine.centsOffsetFrom12TET(69)) < 0.001, "Zero cents offset for 12-TET A4");
+
+    // 2. 24-EDO (Quarter-Tone Arabic Maqam scale)
+    engine.loadFactoryScale(FactoryScale::twentyFourEqual);
+    require(engine.divisionsPerOctave() == 24, "24-EDO has 24 divisions per octave");
+    require(std::abs(engine.centsForDegree(0) - 50.0) < 0.001, "Step 1 of 24-EDO is exactly 50 cents");
+    require(std::abs(engine.centsForDegree(1) - 100.0) < 0.001, "Step 2 of 24-EDO is 100 cents");
+
+    // 3. 5-Limit Just Intonation
+    engine.loadFactoryScale(FactoryScale::justIntonation5L);
+    require(engine.divisionsPerOctave() == 12, "5-Limit chromatic scale has 12 notes");
+    // Degree 4 (index 3) is Major 3rd (5/4 = 386.314 cents)
+    require(std::abs(engine.centsForDegree(3) - 386.314) < 0.1, "Pure 5/4 major third is 386.31 cents");
+    // Degree 7 (index 6) is Perfect 5th (3/2 = 701.955 cents)
+    require(std::abs(engine.centsForDegree(6) - 701.955) < 0.1, "Pure 3/2 perfect fifth is 701.96 cents");
+
+    // 4. Scala (.scl) Parser
+    const std::string_view ptolemyScala =
+        "! ptolemy.scl\n"
+        "Ptolemy's Intense Diatonic Scale (syntonic diatonic)\n"
+        "7\n"
+        "!\n"
+        "9/8\n"
+        "5/4\n"
+        "4/3\n"
+        "3/2\n"
+        "5/3\n"
+        "15/8\n"
+        "2/1\n";
+
+    require(engine.loadScalaString(ptolemyScala), "Parsed Ptolemy Scala scale successfully");
+    require(engine.scaleDegreeCount() == 7, "Ptolemy scale has 7 scale degrees");
+    require(engine.currentScale().formalOctaveCents == 1200.0, "Formal octave is 1200 cents");
+
+    // 5. Keyboard Mapping (.kbm) Parser
+    const std::string_view sampleKbm =
+        "! sample.kbm\n"
+        "7\n"
+        "0\n"
+        "127\n"
+        "60\n"
+        "69\n"
+        "440.0\n"
+        "5\n"
+        "0\n"
+        "1\n"
+        "2\n"
+        "3\n"
+        "4\n"
+        "5\n"
+        "6\n";
+
+    require(engine.loadMappingString(sampleKbm), "Parsed Keyboard Mapping successfully");
+    require(engine.currentMapping().mapSize == 7, "Mapping has 7 keys per cycle");
+    require(engine.currentMapping().referenceFrequencyHz == 440.0, "Ref freq is 440 Hz");
+
+    const std::string noteLabel = engine.noteDegreeLabel(60);
+    require(!noteLabel.empty(), "Note degree label generated");
+}
+
+void testStudioControlRoomSimulatorSuite()
+{
+    using dawg::engine::dsp::StudioControlRoomSimulatorNode;
+    using dawg::engine::dsp::StudioEnvironment;
+
+    StudioControlRoomSimulatorNode room;
+    constexpr double sampleRate = 48000.0;
+    constexpr std::size_t blockSize = 256;
+
+    require(room.prepare(sampleRate, blockSize, 2), "StudioControlRoomSimulatorNode prepared");
+    require(room.latencySamples() == 0, "Zero latency control room simulator");
+
+    // 1. Environment and Position Configuration
+    room.setEnvironment(StudioEnvironment::masteringSuite);
+    room.setHeadYawDegrees(20.0f);
+    room.setMonitorDistanceMeters(2.2f);
+    room.setCrossfeedAmount(0.9f);
+    room.setRoomAmbienceAmount(0.5f);
+    room.setMix(1.0f);
+
+    require(room.environment() == StudioEnvironment::masteringSuite, "Environment set to masteringSuite");
+    require(room.headYawDegrees() == 20.0f, "Head yaw set to 20 degrees");
+    require(room.monitorDistanceMeters() == 2.2f, "Distance set to 2.2 meters");
+
+    // 2. Binaural Crossfeed Verification:
+    // Feed sound strictly into the Left channel (Right = 0.0)
+    std::vector<float> chL(blockSize, 0.0f);
+    std::vector<float> chR(blockSize, 0.0f);
+
+    for (int rep = 0; rep < 5; ++rep) {
+        for (std::size_t i = 0; i < blockSize; ++i) {
+            const float t = static_cast<float>(rep * blockSize + i) / static_cast<float>(sampleRate);
+            chL[i] = 0.8f * std::sin(2.0f * std::numbers::pi_v<float> * 800.0f * t);
+            chR[i] = 0.0f; // Silence on right
+        }
+
+        std::array<float*, 2> channels {chL.data(), chR.data()};
+        dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+        dawg::engine::AudioBufferView emptySidechain(nullptr, 0, 0);
+        dawg::engine::ProcessContext ctx {
+            .audio = audioView,
+            .midi = {},
+            .sampleRate = sampleRate,
+            .sidechain = emptySidechain
+        };
+
+        room.process(ctx);
+    }
+
+    // Right channel should now contain crossfeed & reflection signals arriving around the head
+    float maxRightEnergy = 0.0f;
+    for (std::size_t i = 0; i < blockSize; ++i) {
+        maxRightEnergy = std::max(maxRightEnergy, std::abs(chR[i]));
+    }
+    require(maxRightEnergy > 0.05f, "Contralateral ear receives binaural crossfeed & head shadow from left speaker");
+
+    // 3. Environment switching to Large Club PA
+    room.setEnvironment(StudioEnvironment::largeClubPA);
+    require(room.environment() == StudioEnvironment::largeClubPA, "Environment switched to largeClubPA");
+
+    // 4. Dry/Wet Mix Bypass Check
+    room.setMix(0.0f);
+    for (std::size_t i = 0; i < blockSize; ++i) {
+        chL[i] = 0.5f;
+        chR[i] = 0.25f;
+    }
+    std::array<float*, 2> channels {chL.data(), chR.data()};
+    dawg::engine::AudioBufferView audioView(channels.data(), 2, blockSize);
+    dawg::engine::AudioBufferView emptySidechain(nullptr, 0, 0);
+    dawg::engine::ProcessContext ctx {
+        .audio = audioView,
+        .midi = {},
+        .sampleRate = sampleRate,
+        .sidechain = emptySidechain
+    };
+    room.process(ctx);
+    require(std::abs(chL[0] - 0.5f) < 1.0e-5f && std::abs(chR[0] - 0.25f) < 1.0e-5f, "Mix 0.0 gives bit-identical dry signal");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -4236,4 +4472,7 @@ int main()
     testSpectralResonanceTamerAndDeEsser();
     testAnalogLadderRingModSynthAndFeedback();
     testMasterTapeVinylCuttingSuite();
+    testOpticalVariMuCompressorSuite();
+    testMicrotonalTuningEngineSuite();
+    testStudioControlRoomSimulatorSuite();
 }
