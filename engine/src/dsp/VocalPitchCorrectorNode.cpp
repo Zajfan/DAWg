@@ -41,6 +41,14 @@ void VocalPitchCorrectorNode::reset() noexcept
     m_phaseTapB = 0.5f;
     m_smoothedCorrectionSemitones = 0.0f;
     m_lastPitchInfo = {};
+    m_streamTimeSec = 0.0f;
+    m_vibratoBpState1 = 0.0f;
+    m_vibratoBpState2 = 0.0f;
+    m_extractedVibratoSemitones = 0.0f;
+    m_formantFilterL.reset();
+    m_formantFilterR.reset();
+    m_trajectoryHistory.fill({});
+    m_trajectoryWritePos = 0;
 }
 
 float VocalPitchCorrectorNode::quantizeToScale(
@@ -105,7 +113,7 @@ float VocalPitchCorrectorNode::quantizeToScale(
         }
     }
 
-    // Also check candidate wrap-around in next octave (e.g. interval 0 at +12)
+    // Check candidate wrap-around in next octave (e.g. interval 0 at +12)
     const float upperCandidateDiff = std::abs(pitchClass - (static_cast<float>(intervals[0]) + 12.0f));
     if (upperCandidateDiff < minDiff)
     {
@@ -113,6 +121,21 @@ float VocalPitchCorrectorNode::quantizeToScale(
     }
 
     return static_cast<float>(octave * 12) + closestInterval + static_cast<float>(rootNote % 12);
+}
+
+void VocalPitchCorrectorNode::getPitchTrajectory(PitchTrajectoryPoint* destination, std::size_t count) const noexcept
+{
+    if (destination == nullptr || count == 0)
+    {
+        return;
+    }
+
+    const auto copyCount = std::min(count, trajectoryHistorySize);
+    for (std::size_t i = 0; i < copyCount; ++i)
+    {
+        const auto idx = (m_trajectoryWritePos + trajectoryHistorySize - copyCount + i) % trajectoryHistorySize;
+        destination[i] = m_trajectoryHistory[idx];
+    }
 }
 
 DetectedPitchInfo VocalPitchCorrectorNode::detectPitchYin(const float* buffer, const std::size_t size) const noexcept
@@ -123,105 +146,194 @@ DetectedPitchInfo VocalPitchCorrectorNode::detectPitchYin(const float* buffer, c
         return info;
     }
 
-    const auto halfSize = size / 2;
-    std::array<float, yinBufferSize / 2> dPrime {};
-
-    // 1. Difference function
-    // Limits: 50 Hz to 1200 Hz
-    const auto minTau = std::max<std::size_t>(2, static_cast<std::size_t>(m_sampleRate / 1200.0));
-    const auto maxTau = std::min<std::size_t>(halfSize - 1, static_cast<std::size_t>(m_sampleRate / 50.0));
-
-    // Tau 0
-    dPrime[0] = 1.0f;
-    float runningSum = 0.0f;
-
-    for (std::size_t tau = 1; tau < halfSize; ++tau)
+    // 1. Sibilance & Zero Crossing Rate (ZCR) detection for aperiodic consonants ('s', 't', 'k')
+    std::size_t zeroCrossings = 0;
+    float totalEnergy = 0.0f;
+    for (std::size_t i = 1; i < size; ++i)
     {
-        float diffSum = 0.0f;
-        for (std::size_t j = 0; j < halfSize; ++j)
+        totalEnergy += buffer[i] * buffer[i];
+        if ((buffer[i] >= 0.0f && buffer[i - 1] < 0.0f) || (buffer[i] < 0.0f && buffer[i - 1] >= 0.0f))
         {
-            const float diff = buffer[j] - buffer[j + tau];
-            diffSum += diff * diff;
+            zeroCrossings++;
         }
-
-        runningSum += diffSum;
-        dPrime[tau] = (runningSum > 1e-9f) ? (diffSum * static_cast<float>(tau) / runningSum) : 1.0f;
     }
 
-    // 2. Absolute threshold & local minimum search
-    constexpr float threshold = 0.12f;
-    std::size_t bestTau = 0;
+    const float zcr = static_cast<float>(zeroCrossings) / static_cast<float>(size);
+    const float rms = std::sqrt(totalEnergy / static_cast<float>(size));
 
-    for (std::size_t tau = minTau; tau <= maxTau; ++tau)
+    if (rms < 0.005f)
     {
-        if (dPrime[tau] < threshold)
+        // Silence
+        info.isVoiced = false;
+        info.isSibilant = false;
+        return info;
+    }
+
+    if (zcr > 0.32f && rms > 0.01f)
+    {
+        // High frequency aperiodic energy = sibilant consonant
+        info.isVoiced = false;
+        info.isSibilant = true;
+        info.confidence = 0.0f;
+        return info;
+    }
+
+    // Two-pass YIN analysis:
+    // Pass 1: 512-sample recent window (halfSize = 256) for zero boundary discontinuity on 180-1200 Hz
+    // Pass 2: Full window for lower fundamental frequencies (50-200 Hz)
+    auto runYinPass = [&](const float* pBuf, std::size_t bufLen) -> DetectedPitchInfo
+    {
+        DetectedPitchInfo passInfo {};
+        const auto halfSize = bufLen / 2;
+        if (halfSize < 64) { return passInfo; }
+
+        std::vector<float> dPrime(halfSize, 1.0f);
+        const auto minTau = std::max<std::size_t>(2, static_cast<std::size_t>(m_sampleRate / 1200.0));
+        const auto maxTau = std::min<std::size_t>(halfSize - 8, static_cast<std::size_t>(m_sampleRate / 50.0));
+
+        dPrime[0] = 1.0f;
+        float runningSum = 0.0f;
+
+        for (std::size_t tau = 1; tau < halfSize; ++tau)
         {
-            while (tau + 1 <= maxTau && dPrime[tau + 1] < dPrime[tau])
+            float diffSum = 0.0f;
+            for (std::size_t j = 0; j < halfSize; ++j)
             {
-                ++tau;
+                const float diff = pBuf[j] - pBuf[j + tau];
+                diffSum += diff * diff;
             }
-            bestTau = tau;
-            break;
-        }
-    }
 
-    // Fallback: search global minimum if no value was under threshold
-    if (bestTau == 0)
-    {
-        float minVal = 999.0f;
+            runningSum += diffSum;
+            dPrime[tau] = (runningSum > 1e-9f) ? (diffSum * static_cast<float>(tau) / runningSum) : 1.0f;
+        }
+
+        constexpr float threshold = 0.15f;
+        std::size_t bestTau = 0;
+
         for (std::size_t tau = minTau; tau <= maxTau; ++tau)
         {
-            if (dPrime[tau] < minVal)
+            if (dPrime[tau] < threshold)
             {
-                minVal = dPrime[tau];
+                while (tau + 1 <= maxTau && dPrime[tau + 1] < dPrime[tau])
+                {
+                    ++tau;
+                }
                 bestTau = tau;
+                break;
             }
+        }
+
+        if (bestTau == 0)
+        {
+            float minVal = 999.0f;
+            for (std::size_t tau = minTau; tau <= maxTau; ++tau)
+            {
+                if (dPrime[tau] < minVal)
+                {
+                    minVal = dPrime[tau];
+                    bestTau = tau;
+                }
+            }
+        }
+
+        if (bestTau < minTau || bestTau >= maxTau)
+        {
+            return passInfo;
+        }
+
+        // Parabolic Interpolation for sub-sample accuracy
+        const float alpha = dPrime[bestTau - 1];
+        const float beta = dPrime[bestTau];
+        const float gamma = dPrime[bestTau + 1];
+        const float denominator = 2.0f * (2.0f * beta - alpha - gamma);
+        float delta = 0.0f;
+        if (std::abs(denominator) > 1e-7f)
+        {
+            delta = (gamma - alpha) / denominator;
+        }
+
+        const float tauStar = static_cast<float>(bestTau) + delta;
+        if (tauStar <= 0.0f)
+        {
+            return passInfo;
+        }
+
+        const float detectedHz = static_cast<float>(m_sampleRate) / tauStar;
+        if (detectedHz < 40.0f || detectedHz > 1500.0f)
+        {
+            return passInfo;
+        }
+
+        const float confidence = std::clamp(1.0f - beta, 0.0f, 1.0f);
+        const float midi = 69.0f + 12.0f * std::log2(detectedHz / 440.0f);
+
+        passInfo.pitchHz = detectedHz;
+        passInfo.midiPitch = midi;
+        passInfo.confidence = confidence;
+        passInfo.isVoiced = (confidence >= 0.55f);
+        passInfo.targetMidiPitch = quantizeToScale(midi, m_scale, m_rootNote);
+
+        return passInfo;
+    };
+
+    // Pass 1: analyze most recent 512 samples
+    if (size >= 512)
+    {
+        info = runYinPass(buffer + (size - 512), 512);
+        if (info.isVoiced)
+        {
+            return info;
         }
     }
 
-    if (bestTau < minTau || bestTau >= maxTau)
+    // Pass 2: fallback to full buffer for low fundamentals
+    return runYinPass(buffer, size);
+}
+
+void VocalPitchCorrectorNode::updateFormantFilter(const float pitchRatio) noexcept
+{
+    // High-frequency formant compensation:
+    // When pitch ratio > 1.0 (shifted up), high frequencies are boosted too much; we apply a gentle high shelf cut.
+    // When pitch ratio < 1.0 (shifted down), high frequencies lose clarity; we apply a gentle high shelf boost.
+    const float semitones = 12.0f * (std::log(std::max(0.25f, pitchRatio)) / std::numbers::ln2_v<float>) + m_formantShift;
+    const float gainDb = m_formantPreservation ? -0.75f * semitones : 0.0f;
+    const float gainLinear = std::pow(10.0f, std::clamp(gainDb, -6.0f, 6.0f) / 20.0f);
+
+    constexpr double f0 = 2600.0; // Vocal tract formant center (~2.6 kHz)
+    const double K = std::tan(std::numbers::pi * f0 / m_sampleRate);
+    const double V = gainLinear;
+
+    if (gainDb >= 0.0f)
     {
-        return info;
+        // High shelf boost
+        const double a0 = 1.0 + std::numbers::sqrt2 * K + K * K;
+        m_formantFilterL.b0 = static_cast<float>((V + std::sqrt(2.0 * V) * K + K * K) / a0);
+        m_formantFilterL.b1 = static_cast<float>(2.0 * (K * K - V) / a0);
+        m_formantFilterL.b2 = static_cast<float>((V - std::sqrt(2.0 * V) * K + K * K) / a0);
+        m_formantFilterL.a1 = static_cast<float>(2.0 * (K * K - 1.0) / a0);
+        m_formantFilterL.a2 = static_cast<float>((1.0 - std::numbers::sqrt2 * K + K * K) / a0);
+    }
+    else
+    {
+        // High shelf cut
+        const double a0 = V + std::sqrt(2.0 * V) * K + K * K;
+        m_formantFilterL.b0 = static_cast<float>((1.0 + std::numbers::sqrt2 * K + K * K) / a0);
+        m_formantFilterL.b1 = static_cast<float>(2.0 * (K * K - 1.0) / a0);
+        m_formantFilterL.b2 = static_cast<float>((1.0 - std::numbers::sqrt2 * K + K * K) / a0);
+        m_formantFilterL.a1 = static_cast<float>(2.0 * (K * K - V) / a0);
+        m_formantFilterL.a2 = static_cast<float>((V - std::sqrt(2.0 * V) * K + K * K) / a0);
     }
 
-    // 3. Parabolic Interpolation for sub-sample accuracy
-    const float alpha = dPrime[bestTau - 1];
-    const float beta = dPrime[bestTau];
-    const float gamma = dPrime[bestTau + 1];
-    const float denominator = 2.0f * (2.0f * beta - alpha - gamma);
-    float delta = 0.0f;
-    if (std::abs(denominator) > 1e-7f)
-    {
-        delta = (gamma - alpha) / denominator;
-    }
-
-    const float tauStar = static_cast<float>(bestTau) + delta;
-    if (tauStar <= 0.0f)
-    {
-        return info;
-    }
-
-    const float detectedHz = static_cast<float>(m_sampleRate) / tauStar;
-    if (detectedHz < 40.0f || detectedHz > 1500.0f)
-    {
-        return info;
-    }
-
-    const float confidence = std::clamp(1.0f - beta, 0.0f, 1.0f);
-    const float midi = 69.0f + 12.0f * std::log2(detectedHz / 440.0f);
-
-    info.pitchHz = detectedHz;
-    info.midiPitch = midi;
-    info.confidence = confidence;
-    info.isVoiced = (confidence >= 0.55f);
-    info.targetMidiPitch = quantizeToScale(midi, m_scale, m_rootNote);
-
-    return info;
+    m_formantFilterR.b0 = m_formantFilterL.b0;
+    m_formantFilterR.b1 = m_formantFilterL.b1;
+    m_formantFilterR.b2 = m_formantFilterL.b2;
+    m_formantFilterR.a1 = m_formantFilterL.a1;
+    m_formantFilterR.a2 = m_formantFilterL.a2;
 }
 
 void VocalPitchCorrectorNode::process(ProcessContext& context) noexcept
 {
-    if (context.audio.channels == nullptr || context.audio.frameCount == 0 || context.audio.channelCount == 0)
+    if (context.audio.channelCount == 0 || context.audio.frameCount == 0)
     {
         return;
     }
@@ -235,6 +347,8 @@ void VocalPitchCorrectorNode::process(ProcessContext& context) noexcept
         return;
     }
 
+    m_streamTimeSec += static_cast<float>(frameCount) / static_cast<float>(m_sampleRate);
+
     // 1. Stream samples into analysis ring buffer
     for (std::size_t i = 0; i < frameCount; ++i)
     {
@@ -244,7 +358,6 @@ void VocalPitchCorrectorNode::process(ProcessContext& context) noexcept
     }
 
     // 2. Perform pitch detection on analysis buffer
-    // Unroll linear view from circular buffer
     std::array<float, yinBufferSize> linearBuf {};
     for (std::size_t i = 0; i < yinBufferSize; ++i)
     {
@@ -257,8 +370,44 @@ void VocalPitchCorrectorNode::process(ProcessContext& context) noexcept
     float targetDeltaSemitones = 0.0f;
     if (m_lastPitchInfo.isVoiced && m_correctionAmount > 0.001f)
     {
-        targetDeltaSemitones = (m_lastPitchInfo.targetMidiPitch - m_lastPitchInfo.midiPitch) * m_correctionAmount;
-        // Clamp extreme jumps
+        float rawDelta = m_lastPitchInfo.targetMidiPitch - m_lastPitchInfo.midiPitch;
+
+        // Humanize deadband: allow micro-intonation within tolerance
+        if (m_humanizeAmount > 0.001f)
+        {
+            const float deadband = m_humanizeAmount * 0.25f; // Up to 25 cents deadband
+            if (std::abs(rawDelta) < deadband)
+            {
+                rawDelta = 0.0f;
+            }
+            else if (rawDelta > 0.0f)
+            {
+                rawDelta -= deadband;
+            }
+            else
+            {
+                rawDelta += deadband;
+            }
+        }
+
+        // Natural Vibrato Protection:
+        // Human vibrato oscillates at ~4.5 - 7.0 Hz. We separate this vibrato modulation
+        // and re-inject it so the baseline pitch is centered while vibrato is preserved!
+        if (m_vibratoProtection > 0.001f)
+        {
+            // Simple 2nd-order resonant bandpass at ~5.5 Hz for block-rate modulation
+            constexpr float fVibrato = 5.5f;
+            const float dt = static_cast<float>(frameCount) / static_cast<float>(m_sampleRate);
+            const float w0 = 2.0f * std::numbers::pi_v<float> * fVibrato * dt;
+            m_vibratoBpState1 += w0 * (rawDelta - m_vibratoBpState2);
+            m_vibratoBpState2 += w0 * m_vibratoBpState1;
+            m_extractedVibratoSemitones = m_vibratoBpState1 * 0.5f;
+
+            // Retain baseline pitch shift and preserve vibrato
+            rawDelta = (rawDelta - m_extractedVibratoSemitones * m_vibratoProtection);
+        }
+
+        targetDeltaSemitones = rawDelta * m_correctionAmount;
         targetDeltaSemitones = std::clamp(targetDeltaSemitones, -4.0f, 4.0f);
     }
 
@@ -276,21 +425,46 @@ void VocalPitchCorrectorNode::process(ProcessContext& context) noexcept
         m_smoothedCorrectionSemitones = alpha * m_smoothedCorrectionSemitones + (1.0f - alpha) * targetDeltaSemitones;
     }
 
+    // Telemetry Trajectory Recording
+    PitchTrajectoryPoint trajPoint {};
+    trajPoint.timestampSec = m_streamTimeSec;
+    trajPoint.detectedHz = m_lastPitchInfo.pitchHz;
+    trajPoint.detectedMidiPitch = m_lastPitchInfo.midiPitch;
+    trajPoint.targetMidiPitch = m_lastPitchInfo.targetMidiPitch;
+    trajPoint.correctedMidiPitch = m_lastPitchInfo.midiPitch + m_smoothedCorrectionSemitones;
+    trajPoint.centsDeviation = (m_lastPitchInfo.targetMidiPitch - m_lastPitchInfo.midiPitch) * 100.0f;
+    trajPoint.confidence = m_lastPitchInfo.confidence;
+    trajPoint.isVoiced = m_lastPitchInfo.isVoiced;
+    trajPoint.isSibilant = m_lastPitchInfo.isSibilant;
+
+    m_trajectoryHistory[m_trajectoryWritePos] = trajPoint;
+    m_trajectoryWritePos = (m_trajectoryWritePos + 1) % trajectoryHistorySize;
+
     // Pitch shift ratio
     const float pitchRatio = std::pow(2.0f, (m_smoothedCorrectionSemitones + m_formantShift) / 12.0f);
+    updateFormantFilter(pitchRatio);
 
     // 5. Dual-tap rotating delay line pitch shifter
-    // Window length: ~30ms (1440 samples @ 48kHz)
     const float windowSize = std::min(1440.0f, static_cast<float>(delayBufferSize / 2));
     const float rate = (1.0f - pitchRatio) / windowSize;
 
     for (std::size_t i = 0; i < frameCount; ++i)
     {
+        const float inL = ch0[i];
+        const float inR = (ch1 != nullptr) ? ch1[i] : inL;
+
         // Write dry input to circular delay line
-        m_delayBufferL[m_delayWritePos] = ch0[i];
+        m_delayBufferL[m_delayWritePos] = inL;
         if (ch1 != nullptr)
         {
-            m_delayBufferR[m_delayWritePos] = ch1[i];
+            m_delayBufferR[m_delayWritePos] = inR;
+        }
+
+        // If unvoiced/sibilant or unity pitch ratio, pass dry signal without delay artifact
+        if (m_lastPitchInfo.isSibilant || !m_lastPitchInfo.isVoiced || std::abs(pitchRatio - 1.0f) < 0.0001f)
+        {
+            m_delayWritePos = (m_delayWritePos + 1) % delayBufferSize;
+            continue;
         }
 
         // Advance tap phases
@@ -329,13 +503,15 @@ void VocalPitchCorrectorNode::process(ProcessContext& context) noexcept
         const float weightB = 0.5f * (1.0f - std::cos(m_phaseTapB * 2.0f * std::numbers::pi_v<float>));
         const float norm = (weightA + weightB > 1e-6f) ? (1.0f / (weightA + weightB)) : 1.0f;
 
-        ch0[i] = (outAL * weightA + outBL * weightB) * norm;
+        const float pitchShiftedL = (outAL * weightA + outBL * weightB) * norm;
+        ch0[i] = m_formantFilterL.process(pitchShiftedL);
 
         if (ch1 != nullptr)
         {
             const float outAR = readDelay(m_delayBufferR, m_delayWritePos, delayA);
             const float outBR = readDelay(m_delayBufferR, m_delayWritePos, delayB);
-            ch1[i] = (outAR * weightA + outBR * weightB) * norm;
+            const float pitchShiftedR = (outAR * weightA + outBR * weightB) * norm;
+            ch1[i] = m_formantFilterR.process(pitchShiftedR);
         }
 
         m_delayWritePos = (m_delayWritePos + 1) % delayBufferSize;

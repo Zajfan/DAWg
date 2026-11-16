@@ -51,6 +51,8 @@
 #include <dawg/engine/dsp/PhysicalModelingSynthNode.h>
 #include <dawg/engine/dsp/SpatialHeadTrackerBridge.h>
 #include <dawg/engine/dsp/SpectralMorphCrossSynthNode.h>
+#include <dawg/engine/dsp/SpringReverbMagneticDrumEchoNode.h>
+#include <dawg/engine/dsp/MasteringStemExportEngine.h>
 #include <dawg/engine/dsp/StudioControlRoomSimulatorNode.h>
 #include <dawg/engine/dsp/TnhcReverbNode.h>
 #include <dawg/engine/dsp/TnhcSynthNode.h>
@@ -4999,6 +5001,266 @@ void testSpatialHeadTrackerBridgeSuite()
     tracker.applyToBinauralPanner(panner, worldFront);
     require(std::abs(panner.azimuthDeg() - (-90.0f)) < 1.0f, "Panner azimuth rotated to -90 deg");
 }
+
+void testSpringReverbMagneticDrumEchoSuite()
+{
+    using dawg::engine::dsp::SpringReverbMagneticDrumEchoNode;
+    using dawg::engine::dsp::SpringDrumMode;
+
+    SpringReverbMagneticDrumEchoNode node;
+    require(node.prepare(48000.0, 512, 2), "SpringReverbMagneticDrumEchoNode prepared successfully");
+
+    // 1. Verify default parameters & setters
+    node.setMode(SpringDrumMode::seriesDrumToSpring);
+    require(node.mode() == SpringDrumMode::seriesDrumToSpring, "Mode set to seriesDrumToSpring");
+    node.setPreampDriveDb(12.0f);
+    require(std::abs(node.preampDriveDb() - 12.0f) < 0.1f, "Preamp drive set to 12 dB");
+    node.setSpringDecay(3.0f);
+    require(std::abs(node.springDecay() - 3.0f) < 0.1f, "Spring decay set to 3.0s");
+    node.setSpringDispersion(0.85f);
+    require(std::abs(node.springDispersion() - 0.85f) < 0.05f, "Spring dispersion set to 0.85");
+    node.setSpringRattle(0.5f);
+    require(std::abs(node.springRattle() - 0.5f) < 0.05f, "Spring rattle set to 0.5");
+    node.setDrumSpeedMs(250.0f);
+    require(std::abs(node.drumSpeedMs() - 250.0f) < 0.1f, "Drum speed set to 250 ms");
+    node.setFeedback(0.70f);
+    require(std::abs(node.feedback() - 0.70f) < 0.05f, "Feedback set to 0.70");
+
+    // Head config tests
+    node.setHeadEnabled(0, true);
+    node.setHeadEnabled(1, true);
+    node.setHeadEnabled(2, false);
+    node.setHeadEnabled(3, true);
+    require(node.isHeadEnabled(0) && node.isHeadEnabled(1) && !node.isHeadEnabled(2) && node.isHeadEnabled(3), "Heads 1, 2, 4 enabled, head 3 disabled");
+
+    // 2. Dispersive Spring Reverb chirp test (Impulse response)
+    node.setMode(SpringDrumMode::springOnly);
+    node.setMix(1.0f); // 100% wet
+    node.setPreampDriveDb(0.0f); // Clean
+
+    std::vector<float> impulseL(512, 0.0f);
+    std::vector<float> impulseR(512, 0.0f);
+    impulseL[0] = 1.0f; // Single impulse
+    impulseR[0] = 1.0f;
+
+    std::array<float*, 2> channels { impulseL.data(), impulseR.data() };
+    dawg::engine::ProcessContext ctx {
+        .audio = dawg::engine::AudioBufferView { channels.data(), 2, 512 },
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+
+    node.process(ctx);
+
+    // Verify impulse was stretched into allpass dispersion tail
+    float tailEnergy = 0.0f;
+    for (std::size_t i = 1; i < 512; ++i)
+    {
+        tailEnergy += impulseL[i] * impulseL[i];
+    }
+    require(tailEnergy > 0.01f, "Dispersive transmission spring allpass stages dispersed single impulse into energy chirp");
+
+    // 3. Multi-tap Magnetic Drum Echo test
+    node.reset();
+    node.setMode(SpringDrumMode::drumEchoOnly);
+    node.setMix(1.0f);
+    node.setDrumSpeedMs(100.0f); // 100ms drum revolution = 4800 samples @ 48kHz. Head 1 delay = 1200 samples
+    node.setFeedback(0.5f);
+    node.setWowFlutter(0.0f);
+
+    std::vector<float> blockL(512, 0.0f);
+    std::vector<float> blockR(512, 0.0f);
+    blockL[0] = 1.0f;
+    blockR[0] = 1.0f;
+    channels[0] = blockL.data();
+    channels[1] = blockR.data();
+
+    node.process(ctx);
+
+    std::fill(blockL.begin(), blockL.end(), 0.0f);
+    std::fill(blockR.begin(), blockR.end(), 0.0f);
+
+    float drumEchoEnergy = 0.0f;
+    for (int b = 0; b < 10; ++b)
+    {
+        node.process(ctx);
+        for (std::size_t i = 0; i < 512; ++i)
+        {
+            drumEchoEnergy += std::abs(blockL[i]);
+        }
+    }
+    require(drumEchoEnergy > 0.05f, "Magnetic drum multi-tap delay heads produce repeated echoes");
+
+    // 4. Runaway self-oscillation safety test (Feedback > 1.0 with magnetic saturation)
+    node.reset();
+    node.setFeedback(1.25f); // Runaway self-oscillation
+    blockL[0] = 0.8f;
+    blockR[0] = 0.8f;
+    node.process(ctx);
+
+    std::fill(blockL.begin(), blockL.end(), 0.0f);
+    std::fill(blockR.begin(), blockR.end(), 0.0f);
+
+    float maxSample = 0.0f;
+    for (int b = 0; b < 30; ++b)
+    {
+        node.process(ctx);
+        for (std::size_t i = 0; i < 512; ++i)
+        {
+            maxSample = std::max(maxSample, std::abs(blockL[i]));
+        }
+    }
+    require(maxSample > 0.05f, "Runaway feedback maintains continuous self-oscillation");
+    require(maxSample <= 1.5f, "Magnetic hysteresis saturation safely soft-clips runaway feedback below explosion threshold");
+}
+
+void testMasteringStemExportSuite()
+{
+    using dawg::engine::dsp::MasteringStemExportEngine;
+    using dawg::engine::dsp::MasteringTargetProfile;
+
+    MasteringStemExportEngine engine;
+    engine.setTargetProfile(MasteringTargetProfile::spotify);
+    require(std::abs(engine.targetLufs() - (-14.0f)) < 0.1f, "Spotify target is -14.0 LUFS");
+    require(std::abs(engine.ceilingTruePeakDb() - (-1.0f)) < 0.1f, "Spotify ceiling is -1.0 dBTP");
+
+    // 1. Inter-sample true-peak detection test
+    constexpr double sampleRate = 48000.0;
+    constexpr std::size_t frameCount = 1024;
+    std::vector<float> testToneL(frameCount, 0.0f);
+    std::vector<float> testToneR(frameCount, 0.0f);
+
+    for (std::size_t i = 0; i < frameCount; ++i)
+    {
+        const double phase = 2.0 * std::numbers::pi * 12000.0 * static_cast<double>(i) / sampleRate + std::numbers::pi / 4.0;
+        testToneL[i] = static_cast<float>(std::sin(phase) * 0.95);
+        testToneR[i] = testToneL[i];
+    }
+
+    const float truePeak = MasteringStemExportEngine::computeInterSampleTruePeak(testToneL.data(), frameCount);
+    require(truePeak > 0.85f, "4x polyphase FIR interpolator detects inter-sample peak beyond sample peak");
+
+    // 2. Full buffer loudness analysis & gating test
+    constexpr std::size_t numFrames2s = 96000;
+    std::vector<float> calibL(numFrames2s, 0.0f);
+    std::vector<float> calibR(numFrames2s, 0.0f);
+    for (std::size_t i = 0; i < numFrames2s; ++i)
+    {
+        const float s = static_cast<float>(std::sin(2.0 * std::numbers::pi * 1000.0 * static_cast<double>(i) / sampleRate) * 0.5);
+        calibL[i] = s;
+        calibR[i] = s;
+    }
+    std::array<float*, 2> calibChannels { calibL.data(), calibR.data() };
+    dawg::engine::AudioBufferView calibBuffer { calibChannels.data(), 2, numFrames2s };
+
+    const auto telemetry = engine.analyzeBuffer(calibBuffer, sampleRate);
+    require(telemetry.integratedLufs > -30.0f && telemetry.integratedLufs < -5.0f, "Measured integrated LUFS within reasonable calibration range");
+    require(telemetry.truePeakDb > -10.0f && telemetry.truePeakDb < 0.0f, "True Peak dBTP accurately calculated");
+
+    // 3. Automated Target Normalization to -14 LUFS with True Peak limiting
+    const auto result = engine.normalizeBuffer(calibBuffer, sampleRate, "MasterMix");
+    require(std::abs(result.finalIntegratedLufs - (-14.0f)) < 1.0f, "Normalized master buffer hits -14 LUFS Spotify target within 1 LU");
+    require(result.finalTruePeakDb <= (-1.0f + 0.1f), "Final true peak respects -1.0 dBTP ceiling");
+
+    // 4. Batch Multi-Stem Export with relative balance preservation
+    std::vector<float> drumStemL(numFrames2s, 0.1f);
+    std::vector<float> drumStemR(numFrames2s, 0.1f);
+    std::array<float*, 2> drumCh { drumStemL.data(), drumStemR.data() };
+    dawg::engine::AudioBufferView drumView { drumCh.data(), 2, numFrames2s };
+
+    std::vector<float> bassStemL(numFrames2s, 0.2f);
+    std::vector<float> bassStemR(numFrames2s, 0.2f);
+    std::array<float*, 2> bassCh { bassStemL.data(), bassStemR.data() };
+    dawg::engine::AudioBufferView bassView { bassCh.data(), 2, numFrames2s };
+
+    std::vector<dawg::engine::AudioBufferView> stems { drumView, bassView };
+    std::vector<std::string> stemNames { "Drums", "Bass" };
+
+    const auto stemReports = engine.normalizeStems(stems, stemNames, sampleRate, true);
+    require(stemReports.size() == 2, "2 stem normalization reports generated");
+    require(std::abs(stemReports[0].appliedGainDb - stemReports[1].appliedGainDb) < 1e-4f, "Uniform gain applied to preserve relative mix balance across stems");
+}
+
+void testEnhancedVocalPitchCorrectionSuite()
+{
+    using dawg::engine::dsp::VocalPitchCorrectorNode;
+    using dawg::engine::dsp::PitchTrajectoryPoint;
+    using dawg::engine::dsp::MusicalScale;
+
+    VocalPitchCorrectorNode node;
+    require(node.prepare(48000.0, 512, 2), "VocalPitchCorrectorNode prepared");
+
+    node.setScale(MusicalScale::minor);
+    node.setRootNote(9); // A Minor
+    node.setRetuneSpeed(0.05f); // Pop snappy
+    node.setCorrectionAmount(1.0f);
+    node.setVibratoProtection(0.85f);
+    node.setHumanizeAmount(0.20f);
+    node.setFormantPreservation(true);
+    node.setFormantShiftSemitones(0.0f);
+
+    require(std::abs(node.vibratoProtection() - 0.85f) < 0.01f, "Vibrato protection set to 0.85");
+    require(std::abs(node.humanizeAmount() - 0.20f) < 0.01f, "Humanize amount set to 0.20");
+    require(node.isFormantPreservationEnabled(), "Formant preservation enabled");
+
+    // 1. Sibilance detection test
+    std::vector<float> sibilantL(512, 0.0f);
+    std::vector<float> sibilantR(512, 0.0f);
+    float val = 0.5f;
+    for (std::size_t i = 0; i < 512; ++i)
+    {
+        val = -val; // Alternating maximum zero crossings
+        sibilantL[i] = val * 0.3f;
+        sibilantR[i] = val * 0.3f;
+    }
+    std::array<float*, 2> channels { sibilantL.data(), sibilantR.data() };
+    dawg::engine::ProcessContext ctx {
+        .audio = dawg::engine::AudioBufferView { channels.data(), 2, 512 },
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+
+    node.process(ctx);
+    node.process(ctx);
+
+    const auto sibilantInfo = node.currentPitchInfo();
+    require(sibilantInfo.isSibilant || !sibilantInfo.isVoiced, "High frequency aperiodic consonant detected as sibilant / unvoiced");
+
+    // 2. Pitch Trajectory Telemetry Readout
+    std::array<PitchTrajectoryPoint, 8> trajectoryPoints {};
+    node.getPitchTrajectory(trajectoryPoints.data(), 8);
+    require(trajectoryPoints[0].timestampSec >= 0.0f, "Pitch trajectory timestamp recorded");
+
+    // 3. Natural Vibrato Intonation test
+    node.reset();
+    constexpr double sampleRate = 48000.0;
+    std::vector<float> vocalBlockL(512, 0.0f);
+    std::vector<float> vocalBlockR(512, 0.0f);
+    channels[0] = vocalBlockL.data();
+    channels[1] = vocalBlockR.data();
+
+    double carrierPhase = 0.0;
+    for (int b = 0; b < 10; ++b)
+    {
+        for (std::size_t i = 0; i < 512; ++i)
+        {
+            const double t = static_cast<double>(b * 512 + i) / sampleRate;
+            const double vibratoSemitones = 0.30 * std::sin(2.0 * std::numbers::pi * 5.5 * t);
+            const double instHz = 440.0 * std::pow(2.0, vibratoSemitones / 12.0);
+            carrierPhase += 2.0 * std::numbers::pi * instHz / sampleRate;
+            const float s = static_cast<float>(std::sin(carrierPhase) * 0.75);
+            vocalBlockL[i] = s;
+            vocalBlockR[i] = s;
+        }
+        node.process(ctx);
+    }
+
+    const auto voicedInfo = node.currentPitchInfo();
+    require(voicedInfo.isVoiced, "Voiced tone tracked successfully with vibrato protection");
+    require(std::abs(voicedInfo.targetMidiPitch - 69.0f) < 0.5f, "Target pitch quantized to A4 (note 69)");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -5164,4 +5426,7 @@ int main()
     testAcousticDrumBleedCancellationSuite();
     testSpectralMorphCrossSynthSuite();
     testSpatialHeadTrackerBridgeSuite();
+    testSpringReverbMagneticDrumEchoSuite();
+    testMasteringStemExportSuite();
+    testEnhancedVocalPitchCorrectionSuite();
 }

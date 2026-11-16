@@ -35,6 +35,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/LiveLooperNode.cpp
     src/dsp/MasterTapeVinylCuttingNode.cpp
     src/dsp/MasteringMeterNode.cpp
+    src/dsp/MasteringStemExportEngine.cpp
     src/dsp/MacroModulationMatrix.cpp
     src/dsp/MicrotonalTuningEngine.cpp
     src/dsp/ModulatorRack.cpp
@@ -51,6 +52,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/SpectralMorphCrossSynthNode.cpp
     src/dsp/SpectralResonanceTamerNode.cpp
     src/dsp/SpectralSidechainNode.cpp
+    src/dsp/SpringReverbMagneticDrumEchoNode.cpp
     src/dsp/StepSequencerEngine.cpp
     src/dsp/StudioControlRoomSimulatorNode.cpp
     src/dsp/TapeConsoleSummingNode.cpp
