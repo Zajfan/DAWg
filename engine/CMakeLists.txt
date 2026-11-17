@@ -3,6 +3,7 @@ find_package(Threads REQUIRED)
 add_library(dawg_engine_core STATIC
     src/AudioEngine.cpp
     src/AutomationCurveEvaluator.cpp
+    src/ConsoleRoutingMatrix.cpp
     src/DspGraph.cpp
     src/GraphHandoff.cpp
     src/HardwareControlSurfaceEngine.cpp
@@ -41,12 +42,14 @@ add_library(dawg_engine_core STATIC
     src/dsp/MacroModulationMatrix.cpp
     src/dsp/MicrotonalTuningEngine.cpp
     src/dsp/ModulatorRack.cpp
+    src/dsp/MpeVoiceManager.cpp
     src/dsp/MultiSampleInstrumentNode.cpp
     src/dsp/MultibandCompressorNode.cpp
     src/dsp/NeuralAmpModelerNode.cpp
     src/dsp/OpticalVariMuCompressorNode.cpp
     src/dsp/ParametricEQNode.cpp
     src/dsp/PhysicalModelingSynthNode.cpp
+    src/dsp/PolymetricSequencerEngine.cpp
     src/dsp/PolyphaseOversampler.cpp
     src/dsp/SpatialHeadTrackerBridge.cpp
     src/dsp/SpatialSurroundPannerNode.cpp
@@ -56,6 +59,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/SpectralSidechainNode.cpp
     src/dsp/SpectralVocoderNode.cpp
     src/dsp/SpringReverbMagneticDrumEchoNode.cpp
+    src/dsp/SslChannelStripNode.cpp
     src/dsp/StepSequencerEngine.cpp
     src/dsp/StudioControlRoomSimulatorNode.cpp
     src/dsp/TapeConsoleSummingNode.cpp

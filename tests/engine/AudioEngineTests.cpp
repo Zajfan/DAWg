@@ -55,6 +55,10 @@
 #include <dawg/engine/dsp/SpectralMorphCrossSynthNode.h>
 #include <dawg/engine/dsp/SpectralVocoderNode.h>
 #include <dawg/engine/dsp/SpringReverbMagneticDrumEchoNode.h>
+#include <dawg/engine/dsp/SslChannelStripNode.h>
+#include <dawg/engine/ConsoleRoutingMatrix.h>
+#include <dawg/engine/dsp/MpeVoiceManager.h>
+#include <dawg/engine/dsp/PolymetricSequencerEngine.h>
 #include <dawg/engine/dsp/MasteringStemExportEngine.h>
 #include <dawg/engine/dsp/StudioControlRoomSimulatorNode.h>
 #include <dawg/engine/dsp/TnhcReverbNode.h>
@@ -5560,6 +5564,203 @@ void testAmbisonicsProcessorSuite()
     node.decodeMultichannel(hoaPtrs.data(), spkPtrs.data(), 12, 64);
     require(std::abs(spkOutputs[0][0]) > 0.0f, "Multichannel 7.1.4 decoder generates speaker outputs from HOA B-format");
 }
+
+void testSslChannelStripAndConsoleRoutingMatrixSuite()
+{
+    using namespace dawg::engine;
+    using namespace dawg::engine::dsp;
+
+    // 1. SSL Channel Strip Node Tests
+    SslChannelStripNode ssl;
+    require(ssl.prepare(48000.0, 256, 2), "SSL channel strip prepares cleanly at 48kHz stereo");
+
+    std::vector<float> leftIn(256, 0.5f);
+    std::vector<float> rightIn(256, 0.5f);
+    std::array<float*, 2> chData {leftIn.data(), rightIn.data()};
+    AudioBufferView buf {chData.data(), 2, 256};
+    ProcessContext ctx {buf, {}, 48000.0, {}};
+
+    // Verify unity fader and bypass EQ delivers transparent signal with constant 0dB pan law
+    ssl.setPanLaw(PanLaw::constant0dB);
+    ssl.process(ctx);
+    require(std::abs(leftIn[10] - 0.5f) < 1e-3f, "Transparent pass-through when flat");
+
+    // High Pass Filter activation
+    ssl.setHpfEnabled(true);
+    ssl.setHpfFrequency(100.0f);
+    require(ssl.hpfEnabled(), "HPF enabled state confirmed");
+    require(std::abs(ssl.hpfFrequency() - 100.0f) < 0.1f, "HPF frequency accurate");
+
+    // Proportional Q EQ testing: boost LMF by 12dB
+    ssl.setLmfGainDb(12.0f);
+    ssl.setLmfFrequency(1000.0f);
+    ssl.setLmfQ(1.5f);
+    ssl.process(ctx);
+    require(ssl.lmfGainDb() == 12.0f, "LMF gain updated");
+
+    // Pan Law verification
+    const auto panLaw3dB = calculatePanLawGains(0.0f, PanLaw::equalPower3dB);
+    require(std::abs(panLaw3dB.gainL - panLaw3dB.gainR) < 1e-4f, "Center pan is symmetrical");
+    require(std::abs(panLaw3dB.gainL - 0.7071f) < 0.01f, "-3dB center attenuation matches 1/sqrt(2)");
+
+    const auto panLawLinear = calculatePanLawGains(0.0f, PanLaw::linear6dB);
+    require(std::abs(panLawLinear.gainL - 0.5f) < 1e-4f, "-6dB linear center attenuation is 0.5");
+
+    // Mute test
+    ssl.setMute(true);
+    ssl.process(ctx);
+    require(leftIn[20] == 0.0f && rightIn[20] == 0.0f, "Muted channel outputs exact digital silence");
+
+    // 2. Console Routing Matrix Tests
+    ConsoleRoutingMatrix console;
+    console.reset();
+
+    // Set up 2 active input channels
+    std::vector<float> ch1L(128, 0.4f), ch1R(128, 0.4f);
+    std::vector<float> ch2L(128, 0.3f), ch2R(128, 0.3f);
+    std::array<float*, 2> ch1Ptrs {ch1L.data(), ch1R.data()};
+    std::array<float*, 2> ch2Ptrs {ch2L.data(), ch2R.data()};
+    std::array<AudioBufferView, 2> chViews {
+        AudioBufferView {ch1Ptrs.data(), 2, 128},
+        AudioBufferView {ch2Ptrs.data(), 2, 128}
+    };
+
+    // Sub-bus buffers (8 stereo buses)
+    std::vector<std::vector<float>> subBusData(16, std::vector<float>(128, 0.0f));
+    std::vector<std::array<float*, 2>> subBusPtrs(8);
+    std::vector<AudioBufferView> subViews(8);
+    for (std::size_t b = 0; b < 8; ++b)
+    {
+        subBusPtrs[b] = {subBusData[b * 2].data(), subBusData[b * 2 + 1].data()};
+        subViews[b] = AudioBufferView {subBusPtrs[b].data(), 2, 128};
+    }
+
+    // Aux buffers (8 stereo buses)
+    std::vector<std::vector<float>> auxData(16, std::vector<float>(128, 0.0f));
+    std::vector<std::array<float*, 2>> auxPtrs(8);
+    std::vector<AudioBufferView> auxViews(8);
+    for (std::size_t a = 0; a < 8; ++a)
+    {
+        auxPtrs[a] = {auxData[a * 2].data(), auxData[a * 2 + 1].data()};
+        auxViews[a] = AudioBufferView {auxPtrs[a].data(), 2, 128};
+    }
+
+    // Master output
+    std::vector<float> masterL(128, 0.0f), masterR(128, 0.0f);
+    std::array<float*, 2> masterPtrs {masterL.data(), masterR.data()};
+    AudioBufferView masterView {masterPtrs.data(), 2, 128};
+
+    // Route Channel 1 to Sub-Bus 1, Channel 2 direct to Master
+    ChannelRoutingConfig cfg1;
+    cfg1.targetSubBus = 1; // Sub-Bus 1
+    cfg1.faderGainDb = 0.0f;
+    cfg1.pan = 0.0f;
+    cfg1.vcaGroup = 1; // Assigned to VCA 1
+    console.setChannelConfig(0, cfg1);
+
+    ChannelRoutingConfig cfg2;
+    cfg2.targetSubBus = 0; // Master direct
+    cfg2.faderGainDb = -6.0f;
+    cfg2.pan = 0.0f;
+    console.setChannelConfig(1, cfg2);
+
+    // Aux send on channel 1 to Aux 0 (Reverb)
+    console.getChannelConfig(0).sends[0].enabled = true;
+    console.getChannelConfig(0).sends[0].targetAuxIndex = 0;
+    console.getChannelConfig(0).sends[0].sendGainDb = 0.0f;
+
+    // VCA 1 master fader attenuation
+    console.setVcaFader(1, -6.0f);
+
+    console.processRouting(chViews.data(), 2, subViews.data(), auxViews.data(), masterView, 128);
+
+    // Aux 0 must have received signal from channel 1
+    require(std::abs(auxData[0][10]) > 0.0f, "Aux send buffer received post-fader send signal");
+
+    // Master should have summed signal from Sub-Bus 1 and Channel 2
+    require(std::abs(masterL[10]) > 0.0f, "Master output receives console summed signals");
+
+    // Test VCA Mute
+    console.setVcaMute(1, true);
+    require(console.getVcaMute(1), "VCA 1 mute active");
+    require(!console.isChannelAudible(0), "Channel 1 muted by VCA 1 master");
+}
+
+void testMpeVoiceManagerAndPolymetricSequencerSuite()
+{
+    using namespace dawg::engine;
+    using namespace dawg::engine::dsp;
+
+    // 1. MPE Voice Manager Tests
+    MpeVoiceManager mpe;
+    mpe.reset();
+    require(mpe.activeVoiceCount() == 0, "No voices active after reset");
+
+    // Strike: Note On ch 2, note 64, vel 0.9
+    mpe.noteOn(2, 64, 0.9f);
+    require(mpe.activeVoiceCount() == 1, "One active MPE voice");
+    const auto* v1 = mpe.findVoice(2, 64);
+    require(v1 != nullptr && v1->active, "Voice found for ch 2 note 64");
+    require(std::abs(v1->strike - 0.9f) < 1e-4f, "Strike velocity matched");
+
+    // Press: Polyphonic / channel pressure
+    mpe.setPressure(2, 0.75f);
+    require(std::abs(v1->press - 0.75f) < 1e-4f, "Press dimension tracked");
+
+    // Glide: 14-bit pitchbend with standard 48-semitone range
+    // 8192 + 4096 = 12288 -> +0.5 fraction -> +24 semitones
+    mpe.setPitchBend(2, 12288);
+    require(std::abs(v1->glide - 24.0f) < 0.1f, "Glide continuous semitones tracked");
+
+    // Slide: CC74 Timbre
+    mpe.setTimbreSlide(2, 0.85f);
+    require(std::abs(v1->slide - 0.85f) < 1e-4f, "Slide CC74 dimension tracked");
+
+    // Lift: Note Off release velocity
+    mpe.noteOff(2, 64, 0.35f);
+    require(mpe.activeVoiceCount() == 0, "Voice inactive after noteOff");
+
+    // 2. Polymetric Sequencer Engine Tests
+    PolymetricSequencerEngine seq;
+    seq.reset();
+
+    // Generate Bjorklund Euclidean rhythm: 5 hits over 8 steps (Tresillo / Afro-Cuban)
+    seq.generateEuclidean(0, 5, 8, 0, 60, 0.8f);
+    const auto& trk0 = seq.getTrack(0);
+    require(trk0.stepCount == 8, "Track 0 step count is 8");
+
+    std::size_t activeCount = 0;
+    for (std::size_t i = 0; i < 8; ++i)
+    {
+        if (trk0.steps[i].active)
+            ++activeCount;
+    }
+    require(activeCount == 5, "Bjorklund generated exactly 5 hits over 8 steps");
+
+    // Independent polymetric length on track 1: 7 steps (polymetric 7 against 8)
+    seq.generateEuclidean(1, 3, 7, 0, 48, 0.9f);
+    const auto& trk1 = seq.getTrack(1);
+    require(trk1.stepCount == 7, "Track 1 step count is 7");
+
+    // Markov Harmonic Progression generation in D Dorian
+    seq.generateMarkovProgression(0, 62, MusicalScaleType::dorian, 0.3f, 42);
+    // Verify all generated active notes are valid notes
+    for (std::size_t i = 0; i < 8; ++i)
+    {
+        if (trk0.steps[i].active)
+        {
+            require(trk0.steps[i].pitch >= 60 && trk0.steps[i].pitch <= 86, "Markov pitch in valid range");
+        }
+    }
+
+    // Real-time block dispatch
+    std::array<MidiEvent, 32> eventBuffer {};
+    const std::size_t dispatched = seq.processBlock(120.0, 48000.0, 512, eventBuffer);
+    (void)dispatched;
+    require(seq.swingPercentage() == 50.0f, "Default straight swing is 50%");
+    seq.setSwingPercentage(58.0f); // MPC 60 swing
+    require(seq.swingPercentage() == 58.0f, "MPC 60 swing applied");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -5731,4 +5932,6 @@ int main()
     testSpectralVocoderSuite();
     testDynamicCabinetSimulatorSuite();
     testAmbisonicsProcessorSuite();
+    testSslChannelStripAndConsoleRoutingMatrixSuite();
+    testMpeVoiceManagerAndPolymetricSequencerSuite();
 }
