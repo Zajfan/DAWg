@@ -12,6 +12,8 @@
 
 namespace dawg::engine {
 
+class SessionMatrixEngine;
+
 enum class ControllerProfile : std::uint8_t
 {
     launchpadPro,
@@ -25,9 +27,12 @@ enum class ControllerProfile : std::uint8_t
 enum class GridPadState : std::uint8_t
 {
     empty,
+    loaded,
     playing,
+    playingPulse,
     recording,
     queuedPlay,
+    queuedBlink,
     queuedRecord,
     selected
 };
@@ -114,6 +119,10 @@ public:
     void setClipState(std::size_t row, std::size_t col, GridPadState state) noexcept;
     [[nodiscard]] GridPadState clipState(std::size_t row, std::size_t col) const noexcept;
     [[nodiscard]] RgbColor getPadLedColor(std::size_t row, std::size_t col) const noexcept;
+    void syncFromSessionMatrix(const SessionMatrixEngine& sessionMatrix, double currentBeat = 0.0) noexcept;
+
+    void setAnimationTick(std::uint32_t tick) noexcept { m_animTick = tick; }
+    [[nodiscard]] std::uint32_t animationTick() const noexcept { return m_animTick; }
 
     // SysEx & LED Output Packet Generation
     [[nodiscard]] std::vector<std::uint8_t> generatePadSysEx(std::size_t row, std::size_t col) const;
@@ -173,6 +182,7 @@ private:
     // 64-Pad Grid
     std::array<GridPadState, TotalPads> m_padStates {};
     std::size_t m_activeStep {0};
+    std::uint32_t m_animTick {0};
 
     // 8 Hardware Encoders
     std::array<HardwareEncoderState, NumEncoders> m_encoders {};

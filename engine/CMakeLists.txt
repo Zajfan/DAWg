@@ -46,6 +46,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/ModulatorRack.cpp
     src/dsp/MpeVoiceManager.cpp
     src/dsp/MultiSampleInstrumentNode.cpp
+    src/dsp/MultiTrackPhaseAlignerNode.cpp
     src/dsp/MultibandCompressorNode.cpp
     src/dsp/NeuralAmpModelerNode.cpp
     src/dsp/OpticalVariMuCompressorNode.cpp

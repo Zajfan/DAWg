@@ -68,6 +68,8 @@
 #include <dawg/engine/dsp/TransientExciterNode.h>
 #include <dawg/engine/dsp/TransientSlicerEngine.h>
 #include <dawg/engine/dsp/StudioMonitorCalibrationNode.h>
+#include <dawg/engine/dsp/MultiTrackPhaseAlignerNode.h>
+#include <dawg/media/AudioExportPreset.h>
 #include <dawg/engine/dsp/TransientSplitGranularResynthesizerNode.h>
 #include <dawg/engine/dsp/VocalPitchCorrectorNode.h>
 #include <dawg/engine/dsp/WavetableSynthNode.h>
@@ -6458,6 +6460,138 @@ void testProjectFreezeSlicerAndMonitorCalibrationSuite()
     require(std::abs(calL[10] - calR[10]) < 1e-4f, "Auratone mix check output is mono-correlated");
     require(!std::isnan(calL[10]) && !std::isinf(calL[10]), "Output is finite");
 }
+
+void testHardwareSurfacesPhaseAlignmentAndExportPresetsSuite()
+{
+    using dawg::engine::HardwareControlSurfaceEngine;
+    using dawg::engine::GridPadState;
+    using dawg::engine::KnobBank;
+    using dawg::engine::ParameterPickupMode;
+    using dawg::engine::SessionMatrixEngine;
+    using dawg::engine::SessionClipSlot;
+    using dawg::engine::ClipSlotState;
+    using dawg::engine::dsp::MultiTrackPhaseAlignerNode;
+    using dawg::media::AudioExportPresetManager;
+    using dawg::media::StreamingExportPreset;
+    using dawg::media::AudioMetadataTag;
+
+    // 1. Session Matrix RGB Pad Feedback & Hardware Soft-Takeover
+    HardwareControlSurfaceEngine surface;
+    SessionMatrixEngine matrix;
+
+    // Set up slots in matrix: (0,0) empty, (0,1) stopped, (0,2) queuedToPlay, (0,3) playing
+    SessionClipSlot s1; s1.state = ClipSlotState::stopped; matrix.setClip(1, 0, s1);
+    SessionClipSlot s2; s2.state = ClipSlotState::queuedToPlay; matrix.setClip(2, 0, s2);
+    SessionClipSlot s3; s3.state = ClipSlotState::playing; matrix.setClip(3, 0, s3);
+
+    surface.syncFromSessionMatrix(matrix);
+    require(surface.clipState(0, 0) == GridPadState::empty, "Slot (0,0) is empty");
+    require(surface.clipState(0, 1) == GridPadState::loaded, "Slot (0,1) is loaded");
+    require(surface.clipState(0, 2) == GridPadState::queuedBlink, "Slot (0,2) is queuedBlink");
+    require(surface.clipState(0, 3) == GridPadState::playingPulse, "Slot (0,3) is playingPulse");
+
+    // Animation Tick & RGB Color Generation
+    surface.setAnimationTick(0);
+    const auto colBlinkOn = surface.getPadLedColor(0, 2);
+    surface.setAnimationTick(4);
+    const auto colBlinkOff = surface.getPadLedColor(0, 2);
+    require(colBlinkOn.r > colBlinkOff.r, "Blink animation toggles brightness between ticks");
+
+    // Rotary Knob Soft-Takeover on Modular Macro Knobs
+    surface.setEncoderBank(KnobBank::macros);
+    surface.setPickupMode(ParameterPickupMode::pickup);
+    surface.setVirtualParameter(0, 0.8f); // DAW virtual parameter at 0.8
+    require(!surface.isEncoderCaught(0), "Encoder starts uncaught due to delta between physical & virtual");
+
+    // Physical knob moves at 0.2 -> ignored (no sudden jump)
+    const float val1 = surface.processPhysicalEncoderMove(0, 0.2f);
+    require(std::abs(val1 - 0.8f) < 1e-4f, "Pickup mode rejected sudden jump from 0.2 to 0.8");
+    require(!surface.isEncoderCaught(0), "Encoder still not caught");
+
+    // Physical knob moves to 0.8 -> crosses threshold and catches
+    const float val2 = surface.processPhysicalEncoderMove(0, 0.81f);
+    require(surface.isEncoderCaught(0), "Encoder caught when physical crosses virtual");
+    require(std::abs(val2 - 0.81f) < 1e-4f, "Virtual parameter now tracking physical control");
+
+    // 2. Multi-Track Phase Alignment & Polarity Optimization
+    MultiTrackPhaseAlignerNode phaseAligner;
+    require(phaseAligner.prepare(48000.0, 128, 2), "MultiTrackPhaseAlignerNode prepared");
+
+    constexpr std::size_t testLen = 2048;
+    std::vector<float> ref(testLen);
+    std::vector<float> target(testLen);
+
+    // Reference signal: 440 Hz sine wave
+    constexpr float kPi = 3.14159265f;
+    for (std::size_t i = 0; i < testLen; ++i)
+    {
+        ref[i] = std::sin(2.0f * kPi * 440.0f * static_cast<float>(i) / 48000.0f);
+    }
+    // Target signal: reference delayed by 18 samples and polarity inverted (-180 deg)
+    constexpr std::size_t kSimDelay = 18;
+    for (std::size_t i = 0; i < testLen; ++i)
+    {
+        target[i] = (i >= kSimDelay) ? -ref[i - kSimDelay] : 0.0f;
+    }
+
+    const auto analysis = MultiTrackPhaseAlignerNode::analyzeAlignment(
+        ref.data(), target.data(), testLen, 48000.0, 100);
+
+    require(std::abs(analysis.optimalDelaySamples - static_cast<float>(kSimDelay)) < 0.5f,
+            "Detected optimal phase delay near 18 samples");
+    require(analysis.recommendedPolarityInvert, "Recommended 180-deg polarity inversion");
+    require(analysis.correlationAfter > 0.95f, "Correlation after sub-sample alignment is > 0.95");
+
+    // Test real-time processing through Phase Aligner
+    phaseAligner.setDelaySamplesL(analysis.optimalDelaySamples);
+    phaseAligner.setPolarityInvertL(analysis.recommendedPolarityInvert);
+
+    std::array<float, 128> alignL {};
+    std::array<float, 128> alignR {};
+    std::copy_n(target.data(), 128, alignL.data());
+    std::array<float*, 2> alignChs {alignL.data(), alignR.data()};
+    dawg::engine::ProcessContext alignCtx {
+        .audio = dawg::engine::AudioBufferView {alignChs.data(), 2, 128},
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+
+    {
+        ScopedAllocationGuard guard;
+        phaseAligner.process(alignCtx);
+        require(g_allocationCount.load() == 0, "Phase aligner process has zero RT allocations");
+    }
+
+    // 3. Advanced Audio Export Presets & Metadata Tagger
+    AudioMetadataTag tag;
+    tag.title = "Hit Record";
+    tag.artist = "Top Producer";
+    tag.album = "Studio Album";
+    tag.isrc = "US-S1Z-26-99999";
+    tag.bpm = 126.0;
+    tag.musicalKey = "Fmin";
+
+    const auto appleOpts = AudioExportPresetManager::createOptionsForPreset(
+        StreamingExportPreset::appleDigitalMasters, "/tmp/master.wav", tag);
+    require(appleOpts.sampleRate == 96000, "Apple Digital Masters preset configures 96kHz");
+    require(appleOpts.bitDepth == dawg::media::ExportBitDepth::int24, "Apple Digital Masters is 24-bit");
+
+    const auto spotifyOpts = AudioExportPresetManager::createOptionsForPreset(
+        StreamingExportPreset::spotifyLoudnessMatch, "/tmp/spotify.wav", tag);
+    require(spotifyOpts.sampleRate == 44100, "Spotify preset configures 44.1kHz");
+
+    // BEXT Chunk
+    const auto bext = AudioExportPresetManager::generateBextChunk(tag, 48000);
+    require(bext.size() == 602, "Broadcast WAV BEXT chunk is exactly 602 bytes");
+    std::string bextDesc(reinterpret_cast<const char*>(bext.data()), 20);
+    require(bextDesc.find("Hit Record") != std::string::npos, "BEXT contains track title");
+
+    // ID3v2 Tag
+    const auto id3 = AudioExportPresetManager::generateId3v2Tag(tag);
+    require(id3.size() > 10, "ID3v2 tag generated");
+    require(id3[0] == 'I' && id3[1] == 'D' && id3[2] == '3', "ID3v2 header magic is 'ID3'");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -6636,4 +6770,5 @@ int main()
     testSidechainDuckingWarpMarkersAndMarkovChordsSuite();
     testAnalogSaturationMultiSampleKeySwitchesAndSpatialRadarSuite();
     testProjectFreezeSlicerAndMonitorCalibrationSuite();
+    testHardwareSurfacesPhaseAlignmentAndExportPresetsSuite();
 }

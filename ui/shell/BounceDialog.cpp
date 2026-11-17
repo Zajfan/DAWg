@@ -27,6 +27,50 @@ BounceComponent::BounceComponent(project::ProjectSnapshot snapshot, StartRenderF
     };
     addAndMakeVisible(m_browseButton);
 
+    // Preset Combo
+    addAndMakeVisible(m_presetLabel);
+    m_presetCombo.addItem("Custom Settings", 1);
+    m_presetCombo.addItem("Apple Digital Masters (24-bit / 96kHz)", 2);
+    m_presetCombo.addItem("Spotify Loudness Target (-14 LUFS / 24-bit)", 3);
+    m_presetCombo.addItem("YouTube Video Standard (48kHz / 24-bit)", 4);
+    m_presetCombo.addItem("Broadcast WAV (BWF) with SMPTE BEXT", 5);
+    m_presetCombo.addItem("CD Red Book Standard (16-bit / 44.1kHz)", 6);
+    m_presetCombo.addItem("Club / Festival Master (-9 LUFS / 24-bit)", 7);
+    m_presetCombo.setSelectedId(1);
+    m_presetCombo.onChange = [this] {
+        const int p = m_presetCombo.getSelectedId();
+        if (p == 2) {
+            m_formatCombo.setSelectedId(1);
+            m_srCombo.setSelectedId(3);
+            m_ditherCombo.setSelectedId(1);
+        } else if (p == 3) {
+            m_formatCombo.setSelectedId(1);
+            m_srCombo.setSelectedId(2);
+            m_ditherCombo.setSelectedId(1);
+        } else if (p == 4) {
+            m_formatCombo.setSelectedId(1);
+            m_srCombo.setSelectedId(1);
+            m_ditherCombo.setSelectedId(1);
+        } else if (p == 5) {
+            m_formatCombo.setSelectedId(1);
+            m_srCombo.setSelectedId(1);
+        } else if (p == 6) {
+            m_formatCombo.setSelectedId(2);
+            m_srCombo.setSelectedId(2);
+            m_ditherCombo.setSelectedId(2);
+        } else if (p == 7) {
+            m_formatCombo.setSelectedId(1);
+            m_srCombo.setSelectedId(2);
+            m_ditherCombo.setSelectedId(3);
+        }
+    };
+    addAndMakeVisible(m_presetCombo);
+
+    // ISRC Metadata Tag
+    addAndMakeVisible(m_isrcLabel);
+    m_isrcEdit.setText("US-S1Z-26-00001");
+    addAndMakeVisible(m_isrcEdit);
+
     // Range Combo
     addAndMakeVisible(m_rangeLabel);
     m_rangeCombo.addItem("Entire Arrangement", 1);
@@ -255,6 +299,18 @@ void BounceComponent::resized()
     m_destPathEdit.setBounds(row1);
     area.removeFromTop(10);
 
+    // Row 1b: Streaming Preset
+    auto row1b = area.removeFromTop(28);
+    m_presetLabel.setBounds(row1b.removeFromLeft(120));
+    m_presetCombo.setBounds(row1b);
+    area.removeFromTop(10);
+
+    // Row 1c: ISRC / Metadata
+    auto row1c = area.removeFromTop(28);
+    m_isrcLabel.setBounds(row1c.removeFromLeft(120));
+    m_isrcEdit.setBounds(row1c);
+    area.removeFromTop(10);
+
     // Row 2: Range
     auto row2 = area.removeFromTop(28);
     m_rangeLabel.setBounds(row2.removeFromLeft(120));
@@ -311,7 +367,7 @@ BounceWindow::BounceWindow(project::ProjectSnapshot snapshot, BounceComponent::S
     setUsingNativeTitleBar(true);
     setContentOwned(new BounceComponent(std::move(snapshot), std::move(startRender)), true);
     setResizable(true, false);
-    centreWithSize(580, 520);
+    centreWithSize(580, 580);
     setVisible(true);
 }
 

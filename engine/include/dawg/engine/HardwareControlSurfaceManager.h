@@ -76,6 +76,7 @@ public:
     // DAW State Updates for Hardware Feedback (Thread-safe)
     void updateChannelStrip(std::size_t channelIdx, const ChannelStripFeedback& state) noexcept;
     void updatePadMatrix(std::size_t row, std::size_t col, GridPadState state) noexcept;
+    void syncSessionMatrix(const SessionMatrixEngine& sessionMatrix, double currentBeat = 0.0) noexcept;
 
     // Background Sync Loop Control
     void startSyncLoop(std::chrono::milliseconds interval = std::chrono::milliseconds(30));

@@ -101,6 +101,14 @@ void HardwareControlSurfaceManager::updatePadMatrix(
     m_engine.setClipState(row, col, state);
 }
 
+void HardwareControlSurfaceManager::syncSessionMatrix(
+    const SessionMatrixEngine& sessionMatrix,
+    double currentBeat) noexcept
+{
+    std::lock_guard<std::mutex> lock(m_stateMutex);
+    m_engine.syncFromSessionMatrix(sessionMatrix, currentBeat);
+}
+
 void HardwareControlSurfaceManager::startSyncLoop(std::chrono::milliseconds interval)
 {
     if (m_syncRunning.exchange(true))

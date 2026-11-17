@@ -1,5 +1,6 @@
 #pragma once
 
+#include <dawg/media/AudioExportPreset.h>
 #include <dawg/media/OfflineRenderService.h>
 #include <dawg/project/ProjectSnapshot.h>
 
@@ -38,6 +39,12 @@ private:
     juce::Label m_destLabel {"DestLabel", "Export WAV File:"};
     juce::TextEditor m_destPathEdit;
     juce::TextButton m_browseButton {"Browse..."};
+
+    juce::Label m_presetLabel {"PresetLabel", "Streaming Preset:"};
+    juce::ComboBox m_presetCombo;
+
+    juce::Label m_isrcLabel {"IsrcLabel", "ISRC / ID3 Tag:"};
+    juce::TextEditor m_isrcEdit;
 
     juce::Label m_rangeLabel {"RangeLabel", "Timeline Range:"};
     juce::ComboBox m_rangeCombo;

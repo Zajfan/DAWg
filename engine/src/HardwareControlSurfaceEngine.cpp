@@ -1,4 +1,5 @@
 #include <dawg/engine/HardwareControlSurfaceEngine.h>
+#include <dawg/engine/SessionMatrixEngine.h>
 
 #include <algorithm>
 #include <cmath>
@@ -59,12 +60,30 @@ RgbColor HardwareControlSurfaceEngine::getPadLedColor(std::size_t row, std::size
     {
     case GridPadState::empty:
         return {10, 10, 10}; // Dim dark gray
+    case GridPadState::loaded:
+        return {130, 110, 50}; // Warm amber/gold: clip loaded and ready
     case GridPadState::playing:
         return {0, 255, 30};  // Vibrant Green
+    case GridPadState::playingPulse:
+    {
+        // Breathing pulsing green: 16-tick pulse cycle
+        const float phase = static_cast<float>(m_animTick % 16) / 16.0f;
+        const float pulse = 0.5f * (1.0f + std::sin(2.0f * 3.14159265f * phase));
+        const auto g = static_cast<std::uint8_t>(160.0f + 95.0f * pulse);
+        const auto r = static_cast<std::uint8_t>(20.0f * pulse);
+        const auto b = static_cast<std::uint8_t>(30.0f + 60.0f * pulse);
+        return {r, g, b};
+    }
     case GridPadState::recording:
         return {255, 20, 20}; // Vibrant Red
     case GridPadState::queuedPlay:
         return {255, 190, 0}; // Amber
+    case GridPadState::queuedBlink:
+    {
+        // Fast blinking: toggles every 4 ticks
+        const bool on = (m_animTick % 8) < 4;
+        return on ? RgbColor {255, 180, 0} : RgbColor {15, 15, 15};
+    }
     case GridPadState::queuedRecord:
         return {255, 0, 200}; // Magenta
     case GridPadState::selected:
@@ -79,13 +98,49 @@ std::uint8_t HardwareControlSurfaceEngine::getVelocityColorIndex(std::size_t row
     switch (state)
     {
     case GridPadState::empty:        return 0;  // Off
+    case GridPadState::loaded:       return 62; // Warm yellow/amber
     case GridPadState::playing:      return 21; // Green
+    case GridPadState::playingPulse: return (m_animTick % 8 < 4) ? 21 : 23; // Pulsing green shades
     case GridPadState::recording:    return 5;  // Red
     case GridPadState::queuedPlay:   return 13; // Amber
+    case GridPadState::queuedBlink:  return (m_animTick % 8 < 4) ? 13 : 0; // Blinking amber
     case GridPadState::queuedRecord: return 53; // Pink/Magenta
     case GridPadState::selected:     return 37; // Cyan
     }
     return 0;
+}
+
+void HardwareControlSurfaceEngine::syncFromSessionMatrix(
+    const SessionMatrixEngine& sessionMatrix,
+    [[maybe_unused]] double currentBeat) noexcept
+{
+    for (std::size_t r = 0; r < GridRows; ++r)
+    {
+        for (std::size_t c = 0; c < GridCols; ++c)
+        {
+            const auto& slot = sessionMatrix.getClip(c, r);
+            GridPadState padState = GridPadState::empty;
+            switch (slot.state)
+            {
+            case ClipSlotState::empty:
+                padState = GridPadState::empty;
+                break;
+            case ClipSlotState::stopped:
+                padState = GridPadState::loaded;
+                break;
+            case ClipSlotState::queuedToPlay:
+                padState = GridPadState::queuedBlink;
+                break;
+            case ClipSlotState::playing:
+                padState = GridPadState::playingPulse;
+                break;
+            case ClipSlotState::queuedToStop:
+                padState = GridPadState::queuedBlink;
+                break;
+            }
+            setClipState(r, c, padState);
+        }
+    }
 }
 
 std::vector<std::uint8_t> HardwareControlSurfaceEngine::generatePadSysEx(std::size_t row, std::size_t col) const

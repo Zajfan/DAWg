@@ -1,6 +1,7 @@
 find_package(Threads REQUIRED)
 
 add_library(dawg_services_media STATIC
+    src/AudioExportPreset.cpp
     src/AudioMediaService.cpp
     src/AudioRecordService.cpp
     src/AudioResampler.cpp
