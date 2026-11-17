@@ -10,6 +10,7 @@ add_library(dawg_engine_core STATIC
     src/Metronome.cpp
     src/MidiClockGenerator.cpp
     src/MidiControllerManager.cpp
+    src/MultiTrackRecordingEngine.cpp
     src/PlaybackRingBuffer.cpp
     src/RecordRingBuffer.cpp
     src/RenderSnapshotPublisher.cpp

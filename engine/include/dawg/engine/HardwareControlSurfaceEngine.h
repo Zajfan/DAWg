@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace dawg::engine {
@@ -16,7 +17,9 @@ enum class ControllerProfile : std::uint8_t
     launchpadPro,
     push2,
     apc40Mk2,
-    genericRgbGrid
+    genericRgbGrid,
+    mackieControlUniversal,
+    hui
 };
 
 enum class GridPadState : std::uint8_t
@@ -42,6 +45,24 @@ enum class KnobBank : std::uint8_t
     trackPan,
     sends,
     macros
+};
+
+enum class McuVpotLedMode : std::uint8_t
+{
+    singleDot = 0x00,
+    boostCut  = 0x10,
+    wrap      = 0x20,
+    spread    = 0x30
+};
+
+enum class McuTransportButton : std::uint8_t
+{
+    rewind      = 0x5B,
+    fastForward = 0x5C,
+    stop        = 0x5D,
+    play        = 0x5E,
+    record      = 0x5F,
+    cycleLoop   = 0x56
 };
 
 enum class ParameterPickupMode : std::uint8_t
@@ -114,12 +135,34 @@ public:
     // Inbound Hardware Event Parsing
     struct HardwareEvent
     {
-        enum class Type { padPress, padRelease, encoderTurn, sceneLaunch, bankChange };
+        enum class Type {
+            padPress,
+            padRelease,
+            encoderTurn,
+            sceneLaunch,
+            bankChange,
+            mcuFaderMove,
+            mcuVpotTurn,
+            mcuJogWheel,
+            mcuTransport,
+            huiFaderMove,
+            huiSwitch
+        };
         Type type {Type::padPress};
         std::size_t index {0};
         float value {0.0f};
     };
     [[nodiscard]] bool parseMidiInput(const MidiEvent& event, HardwareEvent& outEvent) noexcept;
+
+    // MCU (Mackie Control Universal) Protocol Engine
+    [[nodiscard]] static std::array<std::uint8_t, 3> generateMcuFaderMessage(std::size_t channelIdx, float normalized0to1) noexcept;
+    [[nodiscard]] static std::array<std::uint8_t, 3> generateMcuVpotLedMessage(std::size_t channelIdx, McuVpotLedMode mode, float normalized0to1) noexcept;
+    [[nodiscard]] static std::vector<std::uint8_t> generateMcuScribbleSysEx(std::uint8_t line, const std::string& text);
+
+    // HUI Protocol Engine
+    [[nodiscard]] static std::array<std::uint8_t, 6> generateHuiSwitchMessage(std::uint8_t zone, std::uint8_t port, bool pressed) noexcept;
+    [[nodiscard]] static std::array<std::uint8_t, 6> generateHuiFaderMessage(std::size_t channelIdx, float normalized0to1) noexcept;
+    [[nodiscard]] bool parseHuiMidiInput(const MidiEvent& event, HardwareEvent& outEvent) noexcept;
 
 private:
     ControllerProfile m_profile {ControllerProfile::launchpadPro};

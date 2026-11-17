@@ -1,3 +1,4 @@
+#include <dawg/project/ArrangementTimelineEngine.h>
 #include <dawg/project/Project.h>
 #include <dawg/project/TakeLaneComping.h>
 
@@ -848,6 +849,143 @@ void testPitchBlobEditorAndGrooveQuantizer()
     const auto audioGroove = GrooveQuantizer::extractGrooveFromAudio(vocalSynth.data(), vocalSynth.size(), 48000.0, 120.0);
     require(audioGroove.stepTimingOffsets.size() == 16, "Extracted groove offsets from audio transient grid");
 }
+
+void testArrangementTimelineAndBezierAutomationSuite()
+{
+    // 1. Grid Snapping Tests
+    constexpr double bpm = 120.0;
+    constexpr std::uint32_t sampleRate = 48000;
+    // At 120 BPM, 48kHz: 1 beat = 24000 samples, 1 bar = 96000 samples
+
+    const auto snapBar = ArrangementTimelineEngine::snapToGrid(95500, GridSnapDivision::bar, bpm, sampleRate);
+    require(snapBar == 96000, "Snapped to nearest 1-Bar boundary (96000)");
+
+    const auto snapBeat = ArrangementTimelineEngine::snapToGrid(23850, GridSnapDivision::quarterNote, bpm, sampleRate);
+    require(snapBeat == 24000, "Snapped to nearest 1/4 note beat boundary (24000)");
+
+    const auto snapTriplet = ArrangementTimelineEngine::snapToGrid(7950, GridSnapDivision::tripletEighth, bpm, sampleRate);
+    require(snapTriplet == 8000, "Snapped to nearest 1/8T triplet boundary (8000)");
+
+    const auto snapNone = ArrangementTimelineEngine::snapToGrid(12345, GridSnapDivision::none, bpm, sampleRate);
+    require(snapNone == 12345, "None division preserves exact sample position");
+
+    // 2. Audio Clip Editing Operations
+    std::vector<AudioClip> clips;
+    AudioClip c1 {};
+    c1.id = 1;
+    c1.startSample = 10000;
+    c1.sourceOffset = 0;
+    c1.lengthSamples = 48000;
+    clips.push_back(c1);
+
+    // Split clip
+    const bool splitOk = ArrangementTimelineEngine::splitAudioClip(clips, 1, 30000, 2);
+    require(splitOk, "Split audio clip succeeded");
+    require(clips.size() == 2, "Two clips after split");
+    require(clips[0].lengthSamples == 20000, "Left clip length is 20000");
+    require(clips[1].id == 2 && clips[1].startSample == 30000, "Right clip start is 30000");
+    require(clips[1].lengthSamples == 28000, "Right clip length is 28000");
+    require(clips[1].sourceOffset == 20000, "Right clip source offset is 20000");
+
+    // Trim start
+    const bool trimStartOk = ArrangementTimelineEngine::trimAudioClipStart(clips[0], 15000);
+    require(trimStartOk, "Trim audio clip start succeeded");
+    require(clips[0].startSample == 15000, "Clip start moved to 15000");
+    require(clips[0].sourceOffset == 5000, "Source offset adjusted by delta");
+    require(clips[0].lengthSamples == 15000, "Length reduced by delta");
+
+    // Trim end
+    const bool trimEndOk = ArrangementTimelineEngine::trimAudioClipEnd(clips[0], 28000);
+    require(trimEndOk, "Trim audio clip end succeeded");
+    require(clips[0].lengthSamples == 13000, "Length trimmed to end point");
+
+    // Slip edit (move source material inside window without changing bounds)
+    ArrangementTimelineEngine::slipEditAudioClip(clips[0], 2000);
+    require(clips[0].sourceOffset == 7000, "Slip edit increased source offset to 7000");
+    require(clips[0].startSample == 15000 && clips[0].lengthSamples == 13000, "Clip bounds remained untouched");
+
+    // Crossfade clips
+    AudioClip outClip {};
+    outClip.id = 10;
+    outClip.startSample = 0;
+    outClip.lengthSamples = 48000;
+
+    AudioClip inClip {};
+    inClip.id = 11;
+    inClip.startSample = 46000;
+    inClip.lengthSamples = 48000;
+
+    const bool xfadeOk = ArrangementTimelineEngine::crossfadeAudioClips(outClip, inClip, 2000);
+    require(xfadeOk, "Crossfade applied between overlapping clips");
+    require(outClip.fadeOutSamples == 2000, "Outgoing clip fade-out length set");
+    require(inClip.fadeInSamples == 2000, "Incoming clip fade-in length set");
+
+    // 3. Bezier Tension Evaluation Tests
+    const float linVal = ArrangementTimelineEngine::computeTensionValue(BezierTensionShape::linear, 0.5f);
+    require(std::abs(linVal - 0.5f) < 1e-4f, "Linear tension midpoint is 0.5");
+
+    const float expVal = ArrangementTimelineEngine::computeTensionValue(BezierTensionShape::exponential, 0.5f, 0.6f);
+    require(expVal < 0.5f, "Exponential curve starts slow and stays below midpoint at t=0.5");
+
+    const float logVal = ArrangementTimelineEngine::computeTensionValue(BezierTensionShape::logarithmic, 0.5f, 0.6f);
+    require(logVal > 0.5f, "Logarithmic curve ramps fast and is above midpoint at t=0.5");
+
+    const float sVal = ArrangementTimelineEngine::computeTensionValue(BezierTensionShape::sCurve, 0.5f);
+    require(std::abs(sVal - 0.5f) < 1e-4f, "S-curve midpoint is 0.5");
+
+    // 4. Automation Recording Mode State Machine (Read, Write, Touch, Latch)
+    ArrangementTimelineEngine::AutomationRecorder recorder;
+    recorder.setBaselineValue(0.5f);
+    recorder.setReturnRampSamples(2400);
+
+    // Touch Mode
+    recorder.setMode(AutomationMode::touch);
+    AutomationLane touchLane {};
+    touchLane.id = 1;
+
+    recorder.onTouchDown(1000, 0.5f);
+    require(recorder.isTouching() && recorder.isRecording(), "Touch down activated recording");
+
+    recorder.onControlMoved(1500, 0.85f, touchLane);
+    require(touchLane.points.size() == 1, "Recorded point at sample 1500");
+    require(std::abs(touchLane.points[0].value - 0.85f) < 1e-4f, "Point value recorded");
+
+    recorder.onTouchUp(2000, touchLane);
+    require(!recorder.isTouching() && !recorder.isRecording(), "Touch up ended recording");
+    require(touchLane.points.size() == 2, "Touch up inserted auto-return baseline point");
+    require(touchLane.points[1].samplePosition == 2000 + 2400, "Return ramp sample pos correct");
+    require(std::abs(touchLane.points[1].value - 0.5f) < 1e-4f, "Return ramp value matches baseline");
+
+    // Latch Mode
+    recorder.setMode(AutomationMode::latch);
+    AutomationLane latchLane {};
+    recorder.onTouchDown(3000, 0.5f);
+    recorder.onControlMoved(3500, 0.25f, latchLane);
+    recorder.onTouchUp(4000, latchLane);
+    require(!recorder.isTouching() && recorder.isRecording(), "Latch mode stays recording after touch up");
+    require(std::abs(recorder.lastRecordedValue() - 0.25f) < 1e-4f, "Latch held last recorded value");
+
+    // Read Mode (protects lane from modification)
+    recorder.setMode(AutomationMode::read);
+    recorder.onControlMoved(5000, 0.99f, latchLane);
+    require(latchLane.points.size() == 1, "Read mode rejected changes to automation points");
+
+    // 5. Session-to-Arrangement Drop
+    SessionClipDropInfo dropInfo {};
+    dropInfo.assetId = 42;
+    dropInfo.sourceOffset = 1000;
+    dropInfo.lengthSamples = 96000;
+    dropInfo.gainLinear = 0.8f;
+    dropInfo.isMidi = false;
+
+    const auto dropped = ArrangementTimelineEngine::dropSessionAudioClipToTimeline(3, 48000, 101, dropInfo);
+    require(dropped.has_value(), "Audio clip dropped to arrangement timeline");
+    require(dropped->id == 101, "Dropped clip ID matches");
+    require(dropped->trackId == 3, "Dropped to target track ID 3");
+    require(dropped->startSample == 48000, "Dropped to target start sample 48000");
+    require(dropped->lengthSamples == 96000, "Dropped clip length matches");
+    require(dropped->sourceOffset == 1000, "Dropped clip source offset matches");
+}
 }
 
 int main()
@@ -869,5 +1007,6 @@ int main()
     testAuxSendsSubmixBusesAndSwipeComping();
     testTakeLaneManagerAndEqualPowerCrossfades();
     testPitchBlobEditorAndGrooveQuantizer();
-    std::puts("PASS: 17 project behavior tests");
+    testArrangementTimelineAndBezierAutomationSuite();
+    std::puts("PASS: 18 project behavior tests");
 }

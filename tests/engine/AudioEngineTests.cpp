@@ -42,6 +42,7 @@
 #include <dawg/engine/dsp/StepSequencerEngine.h>
 #include <dawg/engine/dsp/TapeConsoleSummingNode.h>
 #include <dawg/engine/dsp/TnhcDelayNode.h>
+#include <dawg/engine/MultiTrackRecordingEngine.h>
 #include <dawg/engine/HardwareControlSurfaceEngine.h>
 #include <dawg/engine/dsp/AcousticDrumBleedCancellationNode.h>
 #include <dawg/engine/dsp/AmbisonicsProcessorNode.h>
@@ -4885,6 +4886,85 @@ void testHardwareControlSurfaceEngineSuite()
     require(surface.parseMidiInput(ccEv, parsed), "Parsed encoder turn MIDI message");
     require(parsed.type == HardwareControlSurfaceEngine::HardwareEvent::Type::encoderTurn, "Type is encoderTurn");
     require(parsed.index == 0, "Encoder index 0");
+
+    // 7. Mackie Control Universal (MCU) Protocol Tests
+    surface.setProfile(ControllerProfile::mackieControlUniversal);
+    // Outbound motorized fader (14-bit pitch bend)
+    const auto mcuFader0 = HardwareControlSurfaceEngine::generateMcuFaderMessage(0, 0.5f);
+    require(mcuFader0[0] == 0xE0, "Channel 0 pitch bend status 0xE0");
+    const int val14 = static_cast<int>(mcuFader0[1]) | (static_cast<int>(mcuFader0[2]) << 7);
+    require(std::abs(val14 - 8192) <= 1, "Fader 0.5 midpoint mapped to 14-bit center");
+
+    // Inbound motorized fader parse
+    MidiEvent mcuFaderInEv {
+        .frameOffset = 0,
+        .data = {std::byte {0xE2}, std::byte {0x00}, std::byte {0x40}}, // Ch 2 Pitch Bend 8192
+        .size = 3
+    };
+    require(surface.parseMidiInput(mcuFaderInEv, parsed), "Parsed MCU fader move");
+    require(parsed.type == HardwareControlSurfaceEngine::HardwareEvent::Type::mcuFaderMove, "Type is mcuFaderMove");
+    require(parsed.index == 2, "Channel 2 fader index");
+    require(std::abs(parsed.value - 0.5f) < 0.01f, "Fader value 0.5f");
+
+    // MCU V-Pot LED Ring generation (boost/cut mode)
+    const auto vpotLed = HardwareControlSurfaceEngine::generateMcuVpotLedMessage(3, dawg::engine::McuVpotLedMode::boostCut, 0.5f);
+    require(vpotLed[0] == 0xB0 && vpotLed[1] == 0x33, "CC 0x33 for channel 3 V-pot LED ring");
+    require((vpotLed[2] & 0x30) == 0x10, "Boost/Cut mode bits 0x10 set");
+
+    // Inbound V-Pot relative turn (CC 0x10..0x17)
+    MidiEvent vpotTurnEv {
+        .frameOffset = 0,
+        .data = {std::byte {0xB0}, std::byte {0x14}, std::byte {0x42}}, // Ch 4 V-Pot, -2 ticks
+        .size = 3
+    };
+    require(surface.parseMidiInput(vpotTurnEv, parsed), "Parsed MCU V-Pot turn");
+    require(parsed.type == HardwareControlSurfaceEngine::HardwareEvent::Type::mcuVpotTurn, "Type is mcuVpotTurn");
+    require(parsed.index == 4, "V-Pot channel 4");
+    require(parsed.value == -2.0f, "V-pot turn direction was -2 ticks");
+
+    // MCU Jog Wheel (CC 0x3C)
+    MidiEvent jogEv {
+        .frameOffset = 0,
+        .data = {std::byte {0xB0}, std::byte {0x3C}, std::byte {0x03}}, // +3 ticks
+        .size = 3
+    };
+    require(surface.parseMidiInput(jogEv, parsed), "Parsed MCU jog wheel");
+    require(parsed.type == HardwareControlSurfaceEngine::HardwareEvent::Type::mcuJogWheel, "Type is mcuJogWheel");
+    require(parsed.value == 3.0f, "Jog wheel scrub was +3 ticks");
+
+    // MCU Transport buttons
+    MidiEvent playEv {
+        .frameOffset = 0,
+        .data = {std::byte {0x90}, std::byte {0x5E}, std::byte {127}}, // Play pressed
+        .size = 3
+    };
+    require(surface.parseMidiInput(playEv, parsed), "Parsed MCU Play transport button");
+    require(parsed.type == HardwareControlSurfaceEngine::HardwareEvent::Type::mcuTransport, "Type is mcuTransport");
+    require(parsed.index == 0x5E && parsed.value == 1.0f, "Play button active");
+
+    // MCU Scribble Strip SysEx (56 chars padded)
+    const auto scribble = HardwareControlSurfaceEngine::generateMcuScribbleSysEx(0, "VOX 1  DRUMS  BASS");
+    require(scribble.size() == 64, "SysEx length is 64 bytes (7 header + 56 text + 1 EOX)");
+    require(scribble.front() == 0xF0 && scribble.back() == 0xF7, "Valid SysEx wrapper");
+    require(scribble[6] == 0x00, "Line 0 offset is 0x00");
+
+    // 8. HUI Protocol Tests
+    const auto huiSwitch = HardwareControlSurfaceEngine::generateHuiSwitchMessage(2, 4, true);
+    require(huiSwitch[0] == 0xB0 && huiSwitch[1] == 0x0C && huiSwitch[2] == 0x02, "HUI zone message header");
+    require(huiSwitch[3] == 0xB0 && huiSwitch[4] == 0x2C && huiSwitch[5] == (0x04 | 0x40), "HUI port + pressed switch bit");
+
+    const auto huiFader = HardwareControlSurfaceEngine::generateHuiFaderMessage(1, 0.5f);
+    require(huiFader[0] == 0xB0 && huiFader[1] == 0x01, "HUI Fader 1 MSB CC header");
+    require(huiFader[3] == 0xB0 && huiFader[4] == 0x21, "HUI Fader 1 LSB CC header");
+
+    MidiEvent huiInEv {
+        .frameOffset = 0,
+        .data = {std::byte {0xB0}, std::byte {0x03}, std::byte {100}}, // Ch 3 MSB
+        .size = 3
+    };
+    require(surface.parseHuiMidiInput(huiInEv, parsed), "Parsed HUI fader input");
+    require(parsed.type == HardwareControlSurfaceEngine::HardwareEvent::Type::huiFaderMove, "Type is huiFaderMove");
+    require(parsed.index == 3, "HUI fader channel 3");
 }
 
 void testAcousticDrumBleedCancellationSuite()
@@ -5761,6 +5841,126 @@ void testMpeVoiceManagerAndPolymetricSequencerSuite()
     seq.setSwingPercentage(58.0f); // MPC 60 swing
     require(seq.swingPercentage() == 58.0f, "MPC 60 swing applied");
 }
+
+void testMultiTrackRecordingEngineSuite()
+{
+    using namespace dawg::engine;
+
+    // 1. Latency Loopback Calibrator tests
+    LatencyLoopbackCalibrator calibrator;
+    std::array<float, 256> impulseBuffer {};
+    calibrator.generateTestImpulse(impulseBuffer.data(), impulseBuffer.size());
+    require(std::abs(impulseBuffer[64] - 1.0f) < 1e-4f, "Impulse peak at index 64");
+
+    // Test measuring round-trip latency with known peak at index 120
+    std::array<float, 256> testRecorded {};
+    testRecorded[119] = 0.5f;
+    testRecorded[120] = 1.0f;
+    testRecorded[121] = 0.5f;
+    const double measuredLatency = calibrator.measureRoundTripLatency(testRecorded.data(), testRecorded.size());
+    require(std::abs(measuredLatency - 120.0) < 0.05, "Parabolic latency measurement accurate to sub-sample");
+
+    // 2. Multi-Track Recording Engine tests
+    MultiTrackRecordingEngine recEngine;
+    recEngine.reset();
+
+    // Track config
+    TrackRecordConfig trk0Config {};
+    trk0Config.armed = true;
+    trk0Config.inputMonitoring = true;
+    trk0Config.inputChannel = 0;
+    trk0Config.monitorGainDb = 0.0f;
+    trk0Config.monitorPan = 0.0f; // Center
+    trk0Config.cueSends[0].enabled = true;
+    trk0Config.cueSends[0].gainDb = 0.0f;
+    trk0Config.cueSends[0].pan = -1.0f; // Pan Left in Cue A
+    trk0Config.cueSends[1].enabled = true;
+    trk0Config.cueSends[1].gainDb = -6.0f;
+    trk0Config.cueSends[1].pan = 1.0f;  // Pan Right in Cue B
+    recEngine.setTrackConfig(0, trk0Config);
+
+    // Punch Points
+    recEngine.setPunchEnabled(true);
+    recEngine.setPunchPoints(1000, 2000);
+    require(recEngine.punchEnabled(), "Punch enabled");
+    require(recEngine.punchInSample() == 1000, "Punch in sample set");
+    require(recEngine.punchOutSample() == 2000, "Punch out sample set");
+
+    // Process block with audio input
+    std::array<float, 256> inCh0 {};
+    inCh0.fill(0.8f);
+    const float* inChannels[1] = {inCh0.data()};
+    const AudioBufferView hwInputs {
+        .channels = const_cast<float**>(inChannels),
+        .channelCount = 1,
+        .frameCount = 256
+    };
+
+    std::array<float, 256> monL {};
+    std::array<float, 256> monR {};
+    float* monChannels[2] = {monL.data(), monR.data()};
+    AudioBufferView monOut {
+        .channels = monChannels,
+        .channelCount = 2,
+        .frameCount = 256
+    };
+
+    std::array<float, 256> cueAL {};
+    std::array<float, 256> cueAR {};
+    float* cueAChannels[2] = {cueAL.data(), cueAR.data()};
+    AudioBufferView cueOutA {
+        .channels = cueAChannels,
+        .channelCount = 2,
+        .frameCount = 256
+    };
+
+    std::array<float, 256> cueBL {};
+    std::array<float, 256> cueBR {};
+    float* cueBChannels[2] = {cueBL.data(), cueBR.data()};
+    AudioBufferView cueOutB {
+        .channels = cueBChannels,
+        .channelCount = 2,
+        .frameCount = 256
+    };
+
+    // Process block at timeline sample 1200 (inside punch region)
+    recEngine.processRecording(hwInputs, monOut, &cueOutA, &cueOutB, 1200, 256);
+
+    // Verify Direct Monitoring received audio
+    require(monL[0] > 0.1f && monR[0] > 0.1f, "Direct input monitoring fed stereo master");
+
+    // Verify Cue A (panned full left)
+    require(cueAL[0] > 0.5f, "Cue Mix A Left received signal");
+    require(std::abs(cueAR[0]) < 1e-4f, "Cue Mix A Right panned silent");
+
+    // Verify Cue B (panned full right)
+    require(std::abs(cueBL[0]) < 1e-4f, "Cue Mix B Left panned silent");
+    require(cueBR[0] > 0.2f, "Cue Mix B Right received signal");
+
+    // Loop Recording take increment
+    recEngine.setLoopRecordingEnabled(true);
+    recEngine.setLoopRegion(0, 500);
+    require(recEngine.currentTakeIndex() == 1, "Initial take index is 1");
+    // Advance timeline past loop end sample 500
+    recEngine.processRecording(hwInputs, monOut, nullptr, nullptr, 550, 64);
+    require(recEngine.currentTakeIndex() == 2, "Take index incremented after loop boundary");
+
+    // 3. Broadcast WAV (BWF) Chunk generation
+    const auto bwf = MultiTrackRecordingEngine::createBwfChunk(96000, "Vocal Track");
+    require(bwf.timeReferenceSamples == 96000, "BWF time reference samples matched");
+    require(!bwf.description.empty() && !bwf.originator.empty(), "BWF metadata populated");
+
+    // 4. Waveform Peak Overview Caches
+    std::array<float, 512> waveData {};
+    std::fill_n(waveData.data(), 256, 0.5f);
+    waveData[100] = 0.95f;
+    waveData[200] = -0.75f;
+    std::vector<WaveformPeakPoint> overview;
+    MultiTrackRecordingEngine::generateWaveformOverview(waveData.data(), waveData.size(), overview);
+    require(overview.size() == 2, "Two 256-sample overview blocks generated");
+    require(std::abs(overview[0].max - 0.95f) < 1e-4f, "Block 0 max peak captured");
+    require(std::abs(overview[0].min - (-0.75f)) < 1e-4f, "Block 0 min peak captured");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -5934,4 +6134,5 @@ int main()
     testAmbisonicsProcessorSuite();
     testSslChannelStripAndConsoleRoutingMatrixSuite();
     testMpeVoiceManagerAndPolymetricSequencerSuite();
+    testMultiTrackRecordingEngineSuite();
 }

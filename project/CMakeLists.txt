@@ -1,4 +1,5 @@
 add_library(dawg_project_model STATIC
+    src/ArrangementTimelineEngine.cpp
     src/Project.cpp
     src/ProjectCommand.cpp
     src/TakeLaneComping.cpp
