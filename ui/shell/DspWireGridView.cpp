@@ -13,6 +13,7 @@ DspWireGridView::DspWireGridView()
     m_presetCombo.addItem("Preset: Ambient Drone", 2);
     m_presetCombo.addItem("Preset: West Coast Wavefolder", 3);
     m_presetCombo.addItem("Preset: Percussion Synth", 4);
+    m_presetCombo.addItem("Preset: Feedback Resonator", 5);
     m_presetCombo.setSelectedId(1, juce::dontSendNotification);
     m_presetCombo.onChange = [this] {
         const int id = m_presetCombo.getSelectedId();
@@ -20,6 +21,7 @@ DspWireGridView::DspWireGridView()
         else if (id == 2) m_grid.loadPresetAmbientDrone();
         else if (id == 3) m_grid.loadPresetWestCoastWavefolder();
         else if (id == 4) m_grid.loadPresetPercussionSynth();
+        else if (id == 5) m_grid.loadPresetFeedbackResonator();
         repaint();
     };
     addAndMakeVisible(m_presetCombo);
@@ -40,6 +42,18 @@ DspWireGridView::DspWireGridView()
     });
     setupBtn(m_addSatButton, [this] {
         m_grid.addModule(engine::dsp::GridModuleType::mathSaturation, 420.0f, 150.0f);
+        repaint();
+    });
+    setupBtn(m_addFoldButton, [this] {
+        m_grid.addModule(engine::dsp::GridModuleType::wavefolder, 360.0f, 220.0f);
+        repaint();
+    });
+    setupBtn(m_addFeedbackButton, [this] {
+        m_grid.addModule(engine::dsp::GridModuleType::unitDelayFeedback, 460.0f, 260.0f);
+        repaint();
+    });
+    setupBtn(m_addXyButton, [this] {
+        m_grid.addModule(engine::dsp::GridModuleType::xyPad, 120.0f, 240.0f);
         repaint();
     });
     setupBtn(m_addLfoButton, [this] {
@@ -103,13 +117,16 @@ void DspWireGridView::resized()
     auto area = getLocalBounds();
     auto topBar = area.removeFromTop(36).reduced(4, 2);
 
-    m_presetCombo.setBounds(topBar.removeFromLeft(200).reduced(2));
-    m_addOscButton.setBounds(topBar.removeFromLeft(60).reduced(2));
-    m_addFilterButton.setBounds(topBar.removeFromLeft(65).reduced(2));
-    m_addSatButton.setBounds(topBar.removeFromLeft(65).reduced(2));
-    m_addLfoButton.setBounds(topBar.removeFromLeft(60).reduced(2));
-    m_addDelayButton.setBounds(topBar.removeFromLeft(65).reduced(2));
-    m_clearButton.setBounds(topBar.removeFromLeft(55).reduced(2));
+    m_presetCombo.setBounds(topBar.removeFromLeft(180).reduced(2));
+    m_addOscButton.setBounds(topBar.removeFromLeft(50).reduced(2));
+    m_addFilterButton.setBounds(topBar.removeFromLeft(55).reduced(2));
+    m_addSatButton.setBounds(topBar.removeFromLeft(55).reduced(2));
+    m_addFoldButton.setBounds(topBar.removeFromLeft(55).reduced(2));
+    m_addFeedbackButton.setBounds(topBar.removeFromLeft(55).reduced(2));
+    m_addXyButton.setBounds(topBar.removeFromLeft(48).reduced(2));
+    m_addLfoButton.setBounds(topBar.removeFromLeft(50).reduced(2));
+    m_addDelayButton.setBounds(topBar.removeFromLeft(55).reduced(2));
+    m_clearButton.setBounds(topBar.removeFromLeft(48).reduced(2));
 
     auto macroArea = topBar.removeFromRight(200);
     const int macroW = macroArea.getWidth() / 4;

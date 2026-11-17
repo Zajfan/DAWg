@@ -2,6 +2,7 @@
 
 #include "EditorViewModel.h"
 
+#include <dawg/engine/SessionMatrixEngine.h>
 #include <dawg/project/ProjectCommand.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -21,6 +22,15 @@ struct SessionClipSlot
     bool isQueued {false};
     int lengthBars {2};
     std::vector<project::MidiNote> notes {};
+
+    // Live Jam & Launch Parameters
+    engine::ClipLaunchMode launchMode {engine::ClipLaunchMode::trigger};
+    bool isLegato {false};
+    float playheadProgress {0.0f}; // 0.0 to 1.0 (for circular progress ring)
+    engine::FollowAction followActionA {engine::FollowAction::none};
+    engine::FollowAction followActionB {engine::FollowAction::none};
+    float followChanceA {1.0f};
+    int jumpTargetScene {0};
 };
 
 class SessionMatrixView final : public juce::Component, private juce::Timer

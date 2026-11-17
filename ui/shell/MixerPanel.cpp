@@ -34,6 +34,22 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
     addAndMakeVisible(m_phaseButton);
     addAndMakeVisible(m_armButton);
     addAndMakeVisible(m_eqButton);
+    addAndMakeVisible(m_sslEqButton);
+    m_sslEqButton.setClickingTogglesState(true);
+
+    m_panLawCombo.addItem("-3dB", 1);
+    m_panLawCombo.addItem("-4.5dB", 2);
+    m_panLawCombo.addItem("-6dB", 3);
+    m_panLawCombo.addItem("0dB", 4);
+    m_panLawCombo.setSelectedId(1, juce::dontSendNotification);
+    addAndMakeVisible(m_panLawCombo);
+
+    m_vcaCombo.addItem("VCA -", 1);
+    for (int v = 1; v <= 8; ++v)
+        m_vcaCombo.addItem("VCA " + std::to_string(v), v + 1);
+    m_vcaCombo.setSelectedId(1, juce::dontSendNotification);
+    addAndMakeVisible(m_vcaCombo);
+
     addAndMakeVisible(m_compButton);
     addAndMakeVisible(m_synthButton);
     addAndMakeVisible(m_revButton);
@@ -180,26 +196,32 @@ void ChannelStripComponent::resized()
     m_nameLabel.setBounds(area.removeFromTop(20));
     area.removeFromTop(2);
 
-    // DSP Inserts row 1: EQ, COMP
+    // DSP Inserts row 1: EQ, SSL 4k
     auto dspRow1 = area.removeFromTop(16);
     m_eqButton.setBounds(dspRow1.removeFromLeft(dspRow1.getWidth() / 2).reduced(1));
-    m_compButton.setBounds(dspRow1.reduced(1));
+    m_sslEqButton.setBounds(dspRow1.reduced(1));
     area.removeFromTop(1);
 
-    // DSP Inserts row 2: SYNTH, REV
+    // DSP Inserts row 2: COMP, SYNTH
     auto dspRow2 = area.removeFromTop(16);
-    m_synthButton.setBounds(dspRow2.removeFromLeft(dspRow2.getWidth() / 2).reduced(1));
-    m_revButton.setBounds(dspRow2.reduced(1));
+    m_compButton.setBounds(dspRow2.removeFromLeft(dspRow2.getWidth() / 2).reduced(1));
+    m_synthButton.setBounds(dspRow2.reduced(1));
     area.removeFromTop(1);
 
-    // DSP Inserts row 3: DLY, LIMIT
+    // DSP Inserts row 3: REV, DLY
     auto dspRow3 = area.removeFromTop(16);
-    m_delayButton.setBounds(dspRow3.removeFromLeft(dspRow3.getWidth() / 2).reduced(1));
-    m_limiterButton.setBounds(dspRow3.reduced(1));
+    m_revButton.setBounds(dspRow3.removeFromLeft(dspRow3.getWidth() / 2).reduced(1));
+    m_delayButton.setBounds(dspRow3.reduced(1));
     area.removeFromTop(2);
 
-    m_panKnob.setBounds(area.removeFromTop(26).reduced(6, 0));
-    area.removeFromTop(3);
+    // Routing Dropdowns: Pan Law & VCA
+    auto routeRow = area.removeFromTop(18);
+    m_panLawCombo.setBounds(routeRow.removeFromLeft(routeRow.getWidth() / 2).reduced(1));
+    m_vcaCombo.setBounds(routeRow.reduced(1));
+    area.removeFromTop(2);
+
+    m_panKnob.setBounds(area.removeFromTop(24).reduced(6, 0));
+    area.removeFromTop(2);
 
     // Button row: M, S, Ø, REC
     auto buttonRow1 = area.removeFromTop(20);
@@ -263,6 +285,29 @@ void MasterStripComponent::paint(juce::Graphics& g)
 
     auto meterArea = getLocalBounds();
     meterArea.removeFromTop(44); // room for label and limiter button
+
+    // Bottom section: Phase Correlation & LUFS Radar Readout
+    auto bottomArea = meterArea.removeFromBottom(36).reduced(4, 2);
+    auto lufsBadge = bottomArea.removeFromTop(16);
+    g.setColour(juce::Colour::fromRGB(36, 40, 50));
+    g.fillRoundedRectangle(lufsBadge.toFloat(), 2.0f);
+    g.setColour(juce::Colour::fromRGB(120, 220, 255));
+    g.setFont(juce::FontOptions(9.5f).withStyle("Bold"));
+    g.drawText(juce::String(m_lufs, 1) + " LUFS", lufsBadge, juce::Justification::centred);
+
+    // Phase Correlation Bar (-1 to +1)
+    auto corrBar = bottomArea.reduced(2, 2);
+    g.setColour(juce::Colour::fromRGB(20, 22, 28));
+    g.fillRect(corrBar);
+    const float midX = corrBar.toFloat().getCentreX();
+    const float corrNorm = std::clamp(m_correlation, -1.0f, 1.0f);
+    const float corrWidth = (corrBar.getWidth() * 0.48f) * corrNorm;
+    g.setColour(corrNorm >= 0.0f ? juce::Colour::fromRGB(50, 200, 100) : juce::Colour::fromRGB(240, 60, 60));
+    if (corrNorm >= 0.0f)
+        g.fillRect(juce::Rectangle<float>(midX, static_cast<float>(corrBar.getY()), corrWidth, static_cast<float>(corrBar.getHeight())));
+    else
+        g.fillRect(juce::Rectangle<float>(midX + corrWidth, static_cast<float>(corrBar.getY()), -corrWidth, static_cast<float>(corrBar.getHeight())));
+
     meterArea.reduce(8, 4);
 
     const int barWidth = (meterArea.getWidth() - 4) / 2;

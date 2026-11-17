@@ -61,6 +61,9 @@ private:
     juce::TextButton m_addOscButton {"+ Osc"};
     juce::TextButton m_addFilterButton {"+ Filter"};
     juce::TextButton m_addSatButton {"+ Drive"};
+    juce::TextButton m_addFoldButton {"+ Fold"};
+    juce::TextButton m_addFeedbackButton {"+ Fdbk"};
+    juce::TextButton m_addXyButton {"+ XY"};
     juce::TextButton m_addLfoButton {"+ LFO"};
     juce::TextButton m_addDelayButton {"+ Delay"};
     juce::TextButton m_clearButton {"Clear"};

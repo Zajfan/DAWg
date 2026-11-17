@@ -13,6 +13,8 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/TimelineView.h
     ../../ui/shell/PianoRollView.cpp
     ../../ui/shell/PianoRollView.h
+    ../../ui/shell/PitchBlobCompingView.cpp
+    ../../ui/shell/PitchBlobCompingView.h
     ../../ui/shell/DspEditorDialog.cpp
     ../../ui/shell/DspEditorDialog.h
     ../../ui/shell/AudioSettingsDialog.cpp

@@ -64,7 +64,7 @@ void SessionMatrixView::timerCallback()
 {
     m_blinkState = ! m_blinkState;
 
-    // If transport is running and clips are queued, launch them on bar boundaries
+    // Advance playhead progress for active clips & launch queued
     bool needsRepaint = false;
     for (auto& trackSlots : m_trackSlots)
     {
@@ -74,10 +74,25 @@ void SessionMatrixView::timerCallback()
             {
                 slot.isQueued = false;
                 slot.isPlaying = true;
+                slot.playheadProgress = 0.0f;
+                needsRepaint = true;
+            }
+            else if (slot.isPlaying)
+            {
+                // Advance progress ring smoothly (assuming ~120 bpm, lengthBars)
+                slot.playheadProgress += 0.02f / static_cast<float>(std::max(1, slot.lengthBars));
+                if (slot.playheadProgress >= 1.0f)
+                {
+                    slot.playheadProgress = 0.0f;
+                }
                 needsRepaint = true;
             }
         }
     }
+
+    if (needsRepaint)
+        repaint();
+}
 
     if (needsRepaint || m_blinkState)
         repaint();
@@ -284,6 +299,16 @@ void SessionMatrixView::drawGrid(juce::Graphics& g, juce::Rectangle<int>)
 
                 if (slot.isPlaying)
                 {
+                    // Circular playhead progress ring around button
+                    juce::Path ringPath;
+                    const float cx = playBtn.getCentreX();
+                    const float cy = playBtn.getCentreY();
+                    constexpr float twoPi = juce::MathConstants<float>::twoPi;
+                    ringPath.addCentredArc(cx, cy, 12.0f, 12.0f, 0.0f, 0.0f,
+                                           twoPi * std::clamp(slot.playheadProgress, 0.05f, 1.0f), true);
+                    g.setColour(juce::Colour::fromRGB(120, 255, 170));
+                    g.strokePath(ringPath, juce::PathStrokeType(2.0f));
+
                     // Playing square [■]
                     g.setColour(juce::Colour::fromRGB(180, 255, 190));
                     g.fillRect(playBtn.reduced(5.0f));
@@ -297,6 +322,30 @@ void SessionMatrixView::drawGrid(juce::Graphics& g, juce::Rectangle<int>)
                                  playBtn.getX() + 6.0f, playBtn.getBottom() - 5.0f,
                                  playBtn.getRight() - 5.0f, playBtn.getCentreY());
                     g.fillPath(p);
+                }
+
+                // Mode Badge (TRG / GATE / TOG / RPT)
+                const char* modeStr = "TRG";
+                if (slot.launchMode == engine::ClipLaunchMode::gate) modeStr = "GATE";
+                else if (slot.launchMode == engine::ClipLaunchMode::toggle) modeStr = "TOG";
+                else if (slot.launchMode == engine::ClipLaunchMode::repeat) modeStr = "RPT";
+
+                auto badgeBounds = bounds.removeFromRight(34).reduced(2, 4).removeFromTop(14);
+                g.setColour(juce::Colour::fromRGB(20, 24, 30).withAlpha(0.85f));
+                g.fillRoundedRectangle(badgeBounds.toFloat(), 2.5f);
+                g.setColour(juce::Colour::fromRGB(210, 225, 240));
+                g.setFont(juce::FontOptions(8.0f).withStyle("Bold"));
+                g.drawText(modeStr, badgeBounds, juce::Justification::centred);
+
+                // Legato Badge
+                if (slot.isLegato)
+                {
+                    auto legBounds = bounds.removeFromRight(28).reduced(2, 4).removeFromTop(14);
+                    g.setColour(juce::Colour::fromRGB(40, 30, 60));
+                    g.fillRoundedRectangle(legBounds.toFloat(), 2.5f);
+                    g.setColour(juce::Colour::fromRGB(215, 180, 255));
+                    g.setFont(juce::FontOptions(7.5f).withStyle("Bold"));
+                    g.drawText("LEG", legBounds, juce::Justification::centred);
                 }
 
                 // Clip text

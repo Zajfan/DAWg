@@ -191,6 +191,7 @@ set(DAWG_OWN_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/MixerPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/TimelineView.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/PianoRollView.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/PitchBlobCompingView.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/DspEditorDialog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/AudioSettingsDialog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/BounceDialog.cpp

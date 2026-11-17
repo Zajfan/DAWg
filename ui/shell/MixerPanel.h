@@ -34,11 +34,14 @@ private:
     juce::Label m_nameLabel;
     juce::Slider m_panKnob;
     juce::Slider m_fader;
+    juce::ComboBox m_panLawCombo;
+    juce::ComboBox m_vcaCombo;
     juce::TextButton m_muteButton {"M"};
     juce::TextButton m_soloButton {"S"};
     juce::TextButton m_phaseButton {"Ø"};
     juce::TextButton m_armButton {"REC"};
     juce::TextButton m_eqButton {"EQ"};
+    juce::TextButton m_sslEqButton {"SSL 4k"};
     juce::TextButton m_compButton {"COMP"};
     juce::TextButton m_synthButton {"SYNTH"};
     juce::TextButton m_revButton {"REV"};
@@ -68,6 +71,8 @@ private:
     float m_displayPeakR {0.0f};
     float m_displayRmsL {0.0f};
     float m_displayRmsR {0.0f};
+    float m_correlation {0.95f};
+    float m_lufs {-14.0f};
     bool m_limiterActive {false};
 };
 
