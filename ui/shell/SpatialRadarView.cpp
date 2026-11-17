@@ -41,6 +41,37 @@ SpatialRadarView::SpatialRadarView(OnPositionChanged onPositionChanged)
     m_elevationLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(m_elevationLabel);
 
+    m_formatCombo.addItem("Binaural HRTF (Headphones)", 1);
+    m_formatCombo.addItem("Surround 7.1.4 (Atmos)", 2);
+    m_formatCombo.addItem("Ambisonics B-Format (WXYZ)", 3);
+    m_formatCombo.setSelectedId(1);
+    m_formatCombo.onChange = [this] {
+        switch (m_formatCombo.getSelectedId()) {
+        case 1: m_format = SpatialFormat::binauralHrtf; break;
+        case 2: m_format = SpatialFormat::surround714; break;
+        case 3: m_format = SpatialFormat::ambisonicsB; break;
+        default: break;
+        }
+        repaint();
+    };
+    addAndMakeVisible(m_formatCombo);
+
+    m_hrtfHeadphoneButton.setClickingTogglesState(true);
+    m_hrtfHeadphoneButton.setToggleState(true, juce::dontSendNotification);
+    m_hrtfHeadphoneButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(45, 140, 220));
+    m_hrtfHeadphoneButton.onClick = [this] {
+        if (m_hrtfHeadphoneButton.getToggleState())
+            m_format = SpatialFormat::binauralHrtf;
+        repaint();
+    };
+    addAndMakeVisible(m_hrtfHeadphoneButton);
+
+    m_headSizeCombo.addItem("Head: 8.75cm (Adult)", 1);
+    m_headSizeCombo.addItem("Head: 8.0cm (Compact)", 2);
+    m_headSizeCombo.addItem("Head: 9.5cm (Large)", 3);
+    m_headSizeCombo.setSelectedId(1);
+    addAndMakeVisible(m_headSizeCombo);
+
     m_azimuthLabel.setFont(juce::FontOptions(12.0f, juce::Font::bold));
     m_azimuthLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(200, 225, 255));
     addAndMakeVisible(m_azimuthLabel);
@@ -50,6 +81,13 @@ SpatialRadarView::SpatialRadarView(OnPositionChanged onPositionChanged)
     addAndMakeVisible(m_distanceLabel);
 
     startTimerHz(30); // 30 FPS pulse animation
+}
+
+void SpatialRadarView::setSpatialFormat(SpatialFormat format) noexcept
+{
+    m_format = format;
+    m_formatCombo.setSelectedId(static_cast<int>(format) + 1, juce::dontSendNotification);
+    repaint();
 }
 
 void SpatialRadarView::setViewModel(const EditorViewModel& model)
@@ -160,7 +198,7 @@ void SpatialRadarView::paint(juce::Graphics& g)
     g.fillAll(juce::Colour::fromRGB(16, 18, 24));
 
     auto bounds = getLocalBounds().toFloat();
-    auto rightPanel = bounds.removeFromRight(90);
+    bounds.removeFromRight(120);
     auto radarArea = bounds.reduced(10);
 
     const auto center = radarArea.getCentre();
@@ -171,6 +209,27 @@ void SpatialRadarView::paint(juce::Graphics& g)
     g.fillEllipse(center.x - maxR, center.y - maxR, maxR * 2.0f, maxR * 2.0f);
     g.setColour(juce::Colour::fromRGB(45, 52, 70));
     g.drawEllipse(center.x - maxR, center.y - maxR, maxR * 2.0f, maxR * 2.0f, 2.0f);
+
+    // Mode Badge at top-left of Radar
+    juce::Rectangle<float> modeBadge(radarArea.getX() + 6, radarArea.getY() + 6, 175, 18);
+    g.setColour(juce::Colour::fromRGBA(15, 20, 28, 200));
+    g.fillRoundedRectangle(modeBadge, 3.0f);
+    g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+    if (m_format == SpatialFormat::binauralHrtf)
+    {
+        g.setColour(juce::Colour::fromRGB(45, 180, 240));
+        g.drawText("🎧 HRTF BINAURAL 3D", modeBadge, juce::Justification::centred);
+    }
+    else if (m_format == SpatialFormat::surround714)
+    {
+        g.setColour(juce::Colour::fromRGB(240, 180, 45));
+        g.drawText("🔊 7.1.4 ATMOS SURROUND", modeBadge, juce::Justification::centred);
+    }
+    else
+    {
+        g.setColour(juce::Colour::fromRGB(200, 70, 210));
+        g.drawText("🌐 AMBISONICS B-FORMAT", modeBadge, juce::Justification::centred);
+    }
 
     // Concentric Range Rings: 1m, 2.5m, 5m, 10m
     const std::array<std::pair<float, const char*>, 4> rings {{
@@ -224,6 +283,19 @@ void SpatialRadarView::paint(juce::Graphics& g)
         const auto pt = polarToScreen(obj.azimuthDeg, obj.distanceMeters, radarArea);
         const bool isSelected = (static_cast<int>(i) == m_selectedIdx);
 
+        // 3D Elevation halo ring
+        if (std::abs(obj.elevationDeg) > 0.5f)
+        {
+            const float elOffset = -(obj.elevationDeg / 90.0f) * 12.0f;
+            g.setColour(obj.elevationDeg > 0.0f ? juce::Colour::fromRGB(80, 220, 255) : juce::Colour::fromRGB(255, 170, 60));
+            g.drawEllipse(pt.x - 14, pt.y - 14 + elOffset, 28, 28, 1.5f);
+
+            // Elevation angle badge
+            g.setFont(juce::FontOptions(8.0f));
+            const juce::String elStr = (obj.elevationDeg > 0.0f ? "+" : "") + juce::String(static_cast<int>(obj.elevationDeg)) + "°";
+            g.drawText(elStr, pt.x - 20, pt.y - 24 + elOffset, 40, 10, juce::Justification::centred);
+        }
+
         // Sound Aura Ring (pulsing)
         g.setColour(obj.color.withAlpha(0.25f));
         g.fillEllipse(pt.x - 18, pt.y - 18, 36, 36);
@@ -249,13 +321,19 @@ void SpatialRadarView::paint(juce::Graphics& g)
 void SpatialRadarView::resized()
 {
     auto bounds = getLocalBounds();
-    auto rightPanel = bounds.removeFromRight(90).reduced(8);
+    auto rightPanel = bounds.removeFromRight(120).reduced(6);
 
-    m_azimuthLabel.setBounds(rightPanel.removeFromTop(20));
+    m_formatCombo.setBounds(rightPanel.removeFromTop(20));
+    rightPanel.removeFromTop(3);
+    m_hrtfHeadphoneButton.setBounds(rightPanel.removeFromTop(20));
+    rightPanel.removeFromTop(3);
+    m_headSizeCombo.setBounds(rightPanel.removeFromTop(20));
+    rightPanel.removeFromTop(6);
+
+    m_azimuthLabel.setBounds(rightPanel.removeFromTop(18));
     m_distanceLabel.setBounds(rightPanel.removeFromTop(18));
-    rightPanel.removeFromTop(10);
     m_elevationLabel.setBounds(rightPanel.removeFromTop(18));
-    m_elevationSlider.setBounds(rightPanel.reduced(10, 4));
+    m_elevationSlider.setBounds(rightPanel.reduced(10, 2));
 
     if (m_selectedIdx >= 0 && m_selectedIdx < static_cast<int>(m_objects.size()))
     {
@@ -265,10 +343,29 @@ void SpatialRadarView::resized()
     }
 }
 
+void SpatialRadarView::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
+{
+    auto bounds = getLocalBounds().toFloat();
+    bounds.removeFromRight(120);
+    auto radarArea = bounds.reduced(10);
+
+    const int hit = findPuckAt(e.getPosition(), radarArea);
+    const int targetIdx = (hit >= 0) ? hit : m_selectedIdx;
+    if (targetIdx >= 0 && targetIdx < static_cast<int>(m_objects.size()))
+    {
+        auto& obj = m_objects[static_cast<std::size_t>(targetIdx)];
+        obj.elevationDeg = std::clamp(obj.elevationDeg + (wheel.deltaY * 20.0f), -90.0f, 90.0f);
+        m_elevationSlider.setValue(obj.elevationDeg, juce::dontSendNotification);
+        if (m_onPositionChanged)
+            m_onPositionChanged(obj.trackId, obj.azimuthDeg, obj.elevationDeg, obj.distanceMeters);
+        repaint();
+    }
+}
+
 void SpatialRadarView::mouseDown(const juce::MouseEvent& e)
 {
     auto bounds = getLocalBounds().toFloat();
-    bounds.removeFromRight(90);
+    bounds.removeFromRight(120);
     auto radarArea = bounds.reduced(10);
 
     const int hit = findPuckAt(e.getPosition(), radarArea);
@@ -289,17 +386,28 @@ void SpatialRadarView::mouseDrag(const juce::MouseEvent& e)
     if (m_draggingPuck && m_selectedIdx >= 0 && m_selectedIdx < static_cast<int>(m_objects.size()))
     {
         auto bounds = getLocalBounds().toFloat();
-        bounds.removeFromRight(90);
+        bounds.removeFromRight(120);
         auto radarArea = bounds.reduced(10);
 
-        const auto [az, dist] = screenToPolar(e.position, radarArea);
-        auto& obj = m_objects[static_cast<std::size_t>(m_selectedIdx)];
-        obj.azimuthDeg = az;
-        obj.distanceMeters = dist;
+        if (e.mods.isRightButtonDown())
+        {
+            // Right-click drag controls elevation
+            auto& obj = m_objects[static_cast<std::size_t>(m_selectedIdx)];
+            obj.elevationDeg = std::clamp(obj.elevationDeg - static_cast<float>(e.getDistanceFromDragStartY()) * 0.5f, -90.0f, 90.0f);
+            m_elevationSlider.setValue(obj.elevationDeg, juce::dontSendNotification);
+        }
+        else
+        {
+            const auto [az, dist] = screenToPolar(e.position, radarArea);
+            auto& obj = m_objects[static_cast<std::size_t>(m_selectedIdx)];
+            obj.azimuthDeg = az;
+            obj.distanceMeters = dist;
 
-        m_azimuthLabel.setText(juce::String(static_cast<int>(az)) + "° Az", juce::dontSendNotification);
-        m_distanceLabel.setText(juce::String(dist, 2) + "m Dist", juce::dontSendNotification);
+            m_azimuthLabel.setText(juce::String(static_cast<int>(az)) + "° Az", juce::dontSendNotification);
+            m_distanceLabel.setText(juce::String(dist, 2) + "m Dist", juce::dontSendNotification);
+        }
 
+        const auto& obj = m_objects[static_cast<std::size_t>(m_selectedIdx)];
         if (m_onPositionChanged)
         {
             m_onPositionChanged(obj.trackId, obj.azimuthDeg, obj.elevationDeg, obj.distanceMeters);

@@ -20,6 +20,14 @@ enum class PanLaw : std::uint8_t
     constant0dB     // 0 dB center attenuation
 };
 
+enum class PreampSaturationModel : std::uint8_t
+{
+    sslConsoleLine,           // Clean SSL 4000 G-series line amp
+    germaniumFuzz,            // Germanium transistor fuzz with asymmetric warm even harmonics
+    britishClassATransformer, // British Class-A iron core transformer hysteresis
+    tapeEmulation             // 2-track 1/2" magnetic tape with head bump, hysteresis and flutter
+};
+
 struct StereoPanLawResult
 {
     float gainL {1.0f};
@@ -132,9 +140,13 @@ public:
     void setHfBell(bool isBell) noexcept { m_hfBell = isBell; updateFilters(); }
     [[nodiscard]] bool hfBell() const noexcept { return m_hfBell; }
 
-    // Preamp Drive & Analog Console Saturation
+    // Preamp Drive, Models & Analog Console Saturation
     void setDrive(float drive) noexcept { m_drive = std::clamp(drive, 0.0f, 1.0f); }
     [[nodiscard]] float drive() const noexcept { return m_drive; }
+    void setPreampModel(PreampSaturationModel model) noexcept { m_preampModel = model; }
+    [[nodiscard]] PreampSaturationModel preampModel() const noexcept { return m_preampModel; }
+    void setAutoGainCompensation(bool enabled) noexcept { m_autoGain = enabled; }
+    [[nodiscard]] bool autoGainCompensation() const noexcept { return m_autoGain; }
 
     // Pan Law & Stereo Balance
     void setPanLaw(PanLaw law) noexcept { m_panLaw = law; }
@@ -226,6 +238,9 @@ private:
 
     // Saturation & Console Fader
     float m_drive {0.0f};
+    PreampSaturationModel m_preampModel {PreampSaturationModel::sslConsoleLine};
+    bool m_autoGain {true};
+    double m_tapeLfoPhase {0.0};
     PanLaw m_panLaw {PanLaw::equalPower3dB};
     float m_pan {0.0f};
     float m_faderGainDb {0.0f};

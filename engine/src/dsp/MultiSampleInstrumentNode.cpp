@@ -67,6 +67,9 @@ const MultiSampleRegion* MultiSampleInstrumentNode::findMatchingRegion(
     std::size_t candidateCount = 0;
 
     for (const auto& reg : m_regions) {
+        if (reg.keySwitchNote != 0 && reg.keySwitchNote != m_activeKeySwitch) {
+            continue;
+        }
         if (note >= reg.lowNote && note <= reg.highNote &&
             vel >= reg.lowVel && vel <= reg.highVel) {
             if (candidateCount < candidates.size()) {
@@ -91,6 +94,14 @@ void MultiSampleInstrumentNode::noteOn(std::uint8_t note, std::uint8_t velocity)
     if (velocity == 0) {
         noteOff(note);
         return;
+    }
+
+    // Check if this note is registered as a key-switch articulation
+    for (const auto& reg : m_regions) {
+        if (reg.keySwitchNote != 0 && reg.keySwitchNote == note) {
+            m_activeKeySwitch = note;
+            return;
+        }
     }
 
     const auto* region = findMatchingRegion(note, velocity);
@@ -122,9 +133,18 @@ void MultiSampleInstrumentNode::noteOn(std::uint8_t note, std::uint8_t velocity)
                            + (static_cast<double>(region->fineTuneCents) / 100.0);
     targetVoice->speed = std::pow(2.0, semitones / 12.0);
 
-    // Equal-power velocity scaling
+    // Equal-power velocity scaling with velocity crossfade blending
     const float normVel = static_cast<float>(velocity) / 127.0f;
-    targetVoice->gain = std::sin(normVel * 1.57079632679f);
+    float velGain = std::sin(normVel * 1.57079632679f);
+    if (region->xfadeVelWidth > 0.0f) {
+        const float lowMargin = static_cast<float>(velocity - region->lowVel);
+        const float highMargin = static_cast<float>(region->highVel - velocity);
+        const float minMargin = std::max(0.0f, std::min(lowMargin, highMargin));
+        if (minMargin < region->xfadeVelWidth) {
+            velGain *= std::sin((minMargin / region->xfadeVelWidth) * 1.57079632679f);
+        }
+    }
+    targetVoice->gain = velGain;
 
     targetVoice->envStage = EnvStage::attack;
     targetVoice->envLevel = 0.0f;

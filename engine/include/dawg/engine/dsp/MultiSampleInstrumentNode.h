@@ -24,6 +24,11 @@ struct MultiSampleRegion
     std::uint8_t roundRobinIndex {0};
     std::int8_t fineTuneCents {0};
 
+    // Articulation Key-Switching & Velocity Crossfading
+    std::uint8_t keySwitchNote {0}; // 0 = default/none, 1-127 = key-switch note trigger
+    std::string articulationName {"Sustain"};
+    float xfadeVelWidth {0.0f}; // Crossfade velocity margin in velocity units
+
     std::vector<float> sampleDataL;
     std::vector<float> sampleDataR;
 
@@ -56,6 +61,11 @@ public:
     void addRegion(MultiSampleRegion region);
     void clearRegions() noexcept;
     [[nodiscard]] std::size_t regionCount() const noexcept { return m_regions.size(); }
+    [[nodiscard]] const std::vector<MultiSampleRegion>& regions() const noexcept { return m_regions; }
+
+    // Key-Switch Articulations
+    void setActiveKeySwitch(std::uint8_t note) noexcept { m_activeKeySwitch = note; }
+    [[nodiscard]] std::uint8_t activeKeySwitch() const noexcept { return m_activeKeySwitch; }
 
     // Simple SFZ format descriptor parser
     bool loadFromSfzString(const std::string& sfzContent);
@@ -107,6 +117,7 @@ private:
     float m_attackCoeff {0.1f};
     float m_releaseCoeff {0.01f};
 
+    std::uint8_t m_activeKeySwitch {0};
     std::vector<MultiSampleRegion> m_regions;
     std::array<std::uint8_t, 128> m_roundRobinTracker {};
     std::array<Voice, maxVoices> m_voices {};

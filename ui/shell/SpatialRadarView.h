@@ -27,11 +27,20 @@ class SpatialRadarView final : public juce::Component, private juce::Timer
 public:
     using OnPositionChanged = std::function<void(std::uint64_t trackId, float az, float el, float dist)>;
 
+    enum class SpatialFormat : std::uint8_t
+    {
+        binauralHrtf,
+        surround714,
+        ambisonicsB
+    };
+
     explicit SpatialRadarView(OnPositionChanged onPositionChanged = nullptr);
     ~SpatialRadarView() override = default;
 
     void setViewModel(const EditorViewModel& model);
     void updateTrackPosition(std::uint64_t trackId, float az, float el, float dist);
+    void setSpatialFormat(SpatialFormat format) noexcept;
+    [[nodiscard]] SpatialFormat spatialFormat() const noexcept { return m_format; }
 
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -39,6 +48,7 @@ public:
     void mouseDown(const juce::MouseEvent& e) override;
     void mouseDrag(const juce::MouseEvent& e) override;
     void mouseUp(const juce::MouseEvent& e) override;
+    void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
 
 private:
     void timerCallback() override;
@@ -51,7 +61,11 @@ private:
     std::vector<SpatialTrackObject> m_objects;
     int m_selectedIdx {-1};
     bool m_draggingPuck {false};
+    SpatialFormat m_format {SpatialFormat::binauralHrtf};
 
+    juce::ComboBox m_formatCombo;
+    juce::TextButton m_hrtfHeadphoneButton {"🎧 Binaural HRTF"};
+    juce::ComboBox m_headSizeCombo;
     juce::Slider m_elevationSlider;
     juce::Label m_elevationLabel;
     juce::Label m_azimuthLabel;

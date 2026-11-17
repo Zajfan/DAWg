@@ -14,6 +14,7 @@
 #include "PluginBrowserPanel.h"
 #include "RoutingMatrixView.h"
 #include "SampleBrowserPanel.h"
+#include "SampleZoneEditorView.h"
 #include "SessionMatrixView.h"
 #include "SpatialRadarView.h"
 #include "TimelineView.h"
@@ -77,7 +78,8 @@ public:
         spatialRadar,
         wireGrid,
         masteringSuite,
-        pitchComping
+        pitchComping,
+        sampleZones
     };
 
     enum class DetachablePanel : std::uint8_t
@@ -93,6 +95,7 @@ public:
         wireGrid,
         masteringSuite,
         pitchComping,
+        sampleZones,
         browser
     };
 
@@ -192,6 +195,7 @@ private:
     juce::TextButton m_tabWireGridButton {"Modular Grid [G]"};
     juce::TextButton m_tabMasteringButton {"Mastering [U]"};
     juce::TextButton m_tabPitchBlobButton {"Pitch/Blob [H]"};
+    juce::TextButton m_tabSampleZoneButton {"SFZ Zones [K]"};
     juce::TextButton m_tabBrowserButton {"Browser [B]"};
     juce::TextButton m_detachDockButton {"↗"};
     juce::TextButton m_maximizeDockButton {"⛶"};
@@ -206,6 +210,7 @@ private:
     DspWireGridView m_wireGridView;
     MasteringSuiteView m_masteringSuiteView;
     PitchBlobCompingView m_pitchBlobView;
+    SampleZoneEditorView m_sampleZoneView;
     std::unique_ptr<PluginBrowserPanel> m_pluginBrowser;
     std::unique_ptr<SampleBrowserPanel> m_sampleBrowser;
     juce::TextButton m_sidebarTabPluginsButton {"Plugins"};
@@ -224,6 +229,7 @@ private:
     std::unique_ptr<FloatingPanelWindow> m_floatingWireGrid;
     std::unique_ptr<FloatingPanelWindow> m_floatingMasteringSuite;
     std::unique_ptr<FloatingPanelWindow> m_floatingPitchBlob;
+    std::unique_ptr<FloatingPanelWindow> m_floatingSampleZone;
     std::unique_ptr<FloatingPanelWindow> m_floatingBrowser;
     std::unique_ptr<FloatingPanelWindow> m_floatingSessionMatrix;
 

@@ -187,6 +187,11 @@ MainEditorView::MainEditorView(EditorViewModel model,
     addAndMakeVisible(m_tabPitchBlobButton);
     addAndMakeVisible(m_pitchBlobView);
 
+    m_tabSampleZoneButton.setClickingTogglesState(false);
+    m_tabSampleZoneButton.onClick = [this] { setDockMode(BottomDockMode::sampleZones); };
+    addAndMakeVisible(m_tabSampleZoneButton);
+    addAndMakeVisible(m_sampleZoneView);
+
     m_tabBrowserButton.setClickingTogglesState(false);
     m_tabBrowserButton.onClick = [this] { togglePluginBrowser(); };
     addAndMakeVisible(m_tabBrowserButton);
@@ -214,6 +219,8 @@ MainEditorView::MainEditorView(EditorViewModel model,
             detachPanel(DetachablePanel::masteringSuite);
         else if (m_dockMode == BottomDockMode::pitchComping)
             detachPanel(DetachablePanel::pitchComping);
+        else if (m_dockMode == BottomDockMode::sampleZones)
+            detachPanel(DetachablePanel::sampleZones);
     };
     addAndMakeVisible(m_detachDockButton);
 
@@ -407,6 +414,11 @@ void MainEditorView::setDockMode(BottomDockMode mode)
         m_floatingPitchBlob->toFront(true);
         return;
     }
+    if (m_dockMode == BottomDockMode::sampleZones && m_floatingSampleZone)
+    {
+        m_floatingSampleZone->toFront(true);
+        return;
+    }
 
     const bool isMixer = (m_dockMode == BottomDockMode::mixer);
     const bool isPianoRoll = (m_dockMode == BottomDockMode::pianoRoll);
@@ -418,6 +430,7 @@ void MainEditorView::setDockMode(BottomDockMode mode)
     const bool isWireGrid = (m_dockMode == BottomDockMode::wireGrid);
     const bool isMastering = (m_dockMode == BottomDockMode::masteringSuite);
     const bool isPitchBlob = (m_dockMode == BottomDockMode::pitchComping);
+    const bool isSampleZone = (m_dockMode == BottomDockMode::sampleZones);
 
     if (! m_floatingMixer) m_mixerPanel.setVisible(isMixer);
     if (! m_floatingPianoRoll) m_pianoRollView.setVisible(isPianoRoll);
@@ -429,6 +442,7 @@ void MainEditorView::setDockMode(BottomDockMode mode)
     if (! m_floatingWireGrid) m_wireGridView.setVisible(isWireGrid);
     if (! m_floatingMasteringSuite) m_masteringSuiteView.setVisible(isMastering);
     if (! m_floatingPitchBlob) m_pitchBlobView.setVisible(isPitchBlob);
+    if (! m_floatingSampleZone) m_sampleZoneView.setVisible(isSampleZone);
 
     m_tabMixerButton.setColour(juce::TextButton::buttonColourId,
                                isMixer ? juce::Colour::fromRGB(45, 95, 145) : juce::Colour::fromRGB(28, 30, 36));
@@ -450,6 +464,8 @@ void MainEditorView::setDockMode(BottomDockMode mode)
                                    isMastering ? juce::Colour::fromRGB(200, 140, 40) : juce::Colour::fromRGB(28, 30, 36));
     m_tabPitchBlobButton.setColour(juce::TextButton::buttonColourId,
                                    isPitchBlob ? juce::Colour::fromRGB(220, 80, 130) : juce::Colour::fromRGB(28, 30, 36));
+    m_tabSampleZoneButton.setColour(juce::TextButton::buttonColourId,
+                                    isSampleZone ? juce::Colour::fromRGB(40, 160, 100) : juce::Colour::fromRGB(28, 30, 36));
     resized();
 }
 
@@ -651,6 +667,22 @@ void MainEditorView::detachPanel(DetachablePanel panel)
         }
         break;
 
+    case DetachablePanel::sampleZones:
+        if (! m_floatingSampleZone)
+        {
+            removeChildComponent(&m_sampleZoneView);
+            m_floatingSampleZone = std::make_unique<FloatingPanelWindow>(
+                "SFZ Sample Zone Mapping Editor - DAWg",
+                &m_sampleZoneView,
+                [this] { reDockPanel(DetachablePanel::sampleZones); });
+
+            m_floatingSampleZone->setBounds(260, 260, 920, 480);
+            m_floatingSampleZone->setVisible(true);
+            m_tabSampleZoneButton.setButtonText("SFZ Zones [↙]");
+            setDockMode(m_dockMode == BottomDockMode::sampleZones ? BottomDockMode::mixer : m_dockMode);
+        }
+        break;
+
     case DetachablePanel::browser:
         break;
     }
@@ -771,6 +803,16 @@ void MainEditorView::reDockPanel(DetachablePanel panel)
         }
         break;
 
+    case DetachablePanel::sampleZones:
+        if (m_floatingSampleZone)
+        {
+            m_floatingSampleZone.reset();
+            addChildComponent(m_sampleZoneView);
+            m_tabSampleZoneButton.setButtonText("SFZ Zones [K]");
+            setDockMode(BottomDockMode::sampleZones);
+        }
+        break;
+
     case DetachablePanel::browser:
         break;
     }
@@ -791,6 +833,7 @@ void MainEditorView::reDockAllPanels()
     reDockPanel(DetachablePanel::wireGrid);
     reDockPanel(DetachablePanel::masteringSuite);
     reDockPanel(DetachablePanel::pitchComping);
+    reDockPanel(DetachablePanel::sampleZones);
 }
 
 bool MainEditorView::isPanelDetached(DetachablePanel panel) const noexcept
@@ -808,6 +851,7 @@ bool MainEditorView::isPanelDetached(DetachablePanel panel) const noexcept
     case DetachablePanel::wireGrid: return m_floatingWireGrid != nullptr;
     case DetachablePanel::masteringSuite: return m_floatingMasteringSuite != nullptr;
     case DetachablePanel::pitchComping: return m_floatingPitchBlob != nullptr;
+    case DetachablePanel::sampleZones: return m_floatingSampleZone != nullptr;
     case DetachablePanel::browser: return false;
     }
     return false;
@@ -1417,6 +1461,7 @@ void MainEditorView::resized()
         m_tabWireGridButton.setBounds(tabHeader.removeFromLeft(110).reduced(2, 2));
         m_tabMasteringButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
         m_tabPitchBlobButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
+        m_tabSampleZoneButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
         m_tabBrowserButton.setBounds(tabHeader.removeFromLeft(80).reduced(2, 2));
 
         m_maximizeDockButton.setBounds(tabHeader.removeFromRight(26).reduced(2, 2));
@@ -1432,6 +1477,7 @@ void MainEditorView::resized()
         if (! m_floatingWireGrid) m_wireGridView.setBounds(bottomDockArea);
         if (! m_floatingMasteringSuite) m_masteringSuiteView.setBounds(bottomDockArea);
         if (! m_floatingPitchBlob) m_pitchBlobView.setBounds(bottomDockArea);
+        if (! m_floatingSampleZone) m_sampleZoneView.setBounds(bottomDockArea);
     }
     else
     {

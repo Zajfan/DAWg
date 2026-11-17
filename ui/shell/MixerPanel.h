@@ -39,6 +39,8 @@ private:
     project::TrackId m_trackId {0};
     bool m_updatingFromModel {false};
     float m_gainReductionDb {0.0f};
+    int m_preampModel {0};
+    bool m_autoGainComp {true};
 
     juce::Label m_nameLabel;
     juce::Slider m_panKnob;

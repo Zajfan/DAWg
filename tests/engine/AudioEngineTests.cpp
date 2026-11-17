@@ -6216,6 +6216,114 @@ void testSidechainDuckingWarpMarkersAndMarkovChordsSuite()
     seq.applySwingTemplate(PolymetricSequencerEngine::SwingTemplate::mpc60_58);
     require(std::abs(seq.swingPercentage() - 58.0f) < 1e-3f, "MPC60 58% swing template applied");
 }
+
+void testAnalogSaturationMultiSampleKeySwitchesAndSpatialRadarSuite()
+{
+    using dawg::engine::dsp::SslChannelStripNode;
+    using dawg::engine::dsp::PreampSaturationModel;
+    using dawg::engine::dsp::MultiSampleInstrumentNode;
+    using dawg::engine::dsp::MultiSampleRegion;
+
+    // 1. SSL Channel Strip Preamp Saturation Models & Auto-Gain
+    SslChannelStripNode ssl;
+    require(ssl.prepare(48000.0, 128, 2), "SSL channel strip prepared");
+
+    ssl.setDrive(0.75f);
+    ssl.setPreampModel(PreampSaturationModel::germaniumFuzz);
+    ssl.setAutoGainCompensation(true);
+    require(ssl.preampModel() == PreampSaturationModel::germaniumFuzz, "Germanium fuzz model set");
+    require(ssl.autoGainCompensation(), "Auto gain compensation enabled");
+
+    std::array<float, 128> sslL {};
+    std::array<float, 128> sslR {};
+    for (std::size_t i = 0; i < 128; ++i)
+    {
+        const float val = 0.5f * std::sin(2.0f * 3.14159265f * 440.0f * static_cast<float>(i) / 48000.0f);
+        sslL[i] = val;
+        sslR[i] = val;
+    }
+    std::array<float*, 2> sslChannels {sslL.data(), sslR.data()};
+    dawg::engine::ProcessContext sslCtx {
+        .audio = dawg::engine::AudioBufferView {sslChannels.data(), 2, 128},
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+
+    ssl.process(sslCtx);
+    require(!std::isnan(sslL[0]) && !std::isinf(sslL[0]), "Germanium fuzz processed without NaN/Inf");
+    const float autoGainLevel = std::abs(sslL[10]);
+
+    // Compare with AutoGain disabled - raw driven signal should have higher amplitude
+    ssl.setAutoGainCompensation(false);
+    for (std::size_t i = 0; i < 128; ++i)
+    {
+        const float val = 0.5f * std::sin(2.0f * 3.14159265f * 440.0f * static_cast<float>(i) / 48000.0f);
+        sslL[i] = val;
+        sslR[i] = val;
+    }
+    ssl.process(sslCtx);
+    const float rawDriveLevel = std::abs(sslL[10]);
+    require(rawDriveLevel >= autoGainLevel, "Auto-gain compensation kept driven level controlled");
+
+    // Test British Class-A and Tape Emulation models
+    ssl.setPreampModel(PreampSaturationModel::britishClassATransformer);
+    require(ssl.preampModel() == PreampSaturationModel::britishClassATransformer, "British Class-A transformer set");
+    ssl.process(sslCtx);
+
+    ssl.setPreampModel(PreampSaturationModel::tapeEmulation);
+    require(ssl.preampModel() == PreampSaturationModel::tapeEmulation, "Tape emulation model set");
+    ssl.process(sslCtx);
+
+    // 2. MultiSampleInstrumentNode: Key-Switch Articulations & Velocity Crossfading
+    MultiSampleInstrumentNode sampler;
+    require(sampler.prepare(48000.0, 128, 2), "MultiSample instrument prepared");
+
+    MultiSampleRegion legatoReg;
+    legatoReg.rootNote = 60;
+    legatoReg.lowNote = 40;
+    legatoReg.highNote = 80;
+    legatoReg.lowVel = 0;
+    legatoReg.highVel = 127;
+    legatoReg.keySwitchNote = 24; // C0 key-switch
+    legatoReg.articulationName = "Legato";
+    legatoReg.xfadeVelWidth = 8.0f;
+    legatoReg.sampleDataL.assign(1000, 0.4f);
+    legatoReg.sampleDataR.assign(1000, 0.4f);
+
+    MultiSampleRegion staccatoReg;
+    staccatoReg.rootNote = 60;
+    staccatoReg.lowNote = 40;
+    staccatoReg.highNote = 80;
+    staccatoReg.lowVel = 0;
+    staccatoReg.highVel = 127;
+    staccatoReg.keySwitchNote = 25; // C#0 key-switch
+    staccatoReg.articulationName = "Staccato";
+    staccatoReg.xfadeVelWidth = 8.0f;
+    staccatoReg.sampleDataL.assign(1000, 0.8f);
+    staccatoReg.sampleDataR.assign(1000, 0.8f);
+
+    sampler.addRegion(std::move(legatoReg));
+    sampler.addRegion(std::move(staccatoReg));
+    require(sampler.regionCount() == 2, "2 articulation regions registered");
+
+    // Send key-switch note 24 (Legato)
+    sampler.noteOn(24, 100);
+    require(sampler.activeKeySwitch() == 24, "Active key-switch switched to 24 (Legato)");
+    require(sampler.activeVoiceCount() == 0, "Key-switch note did not consume an audio voice");
+
+    // Trigger playable note 60 -> should trigger 1 voice (Legato)
+    sampler.noteOn(60, 100);
+    require(sampler.activeVoiceCount() == 1, "Legato voice triggered");
+    sampler.reset();
+
+    // Send key-switch note 25 (Staccato)
+    sampler.noteOn(25, 100);
+    require(sampler.activeKeySwitch() == 25, "Active key-switch switched to 25 (Staccato)");
+    sampler.noteOn(60, 100);
+    require(sampler.activeVoiceCount() == 1, "Staccato voice triggered");
+    sampler.reset();
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -6392,4 +6500,5 @@ int main()
     testMpeVoiceManagerAndPolymetricSequencerSuite();
     testMultiTrackRecordingEngineSuite();
     testSidechainDuckingWarpMarkersAndMarkovChordsSuite();
+    testAnalogSaturationMultiSampleKeySwitchesAndSpatialRadarSuite();
 }

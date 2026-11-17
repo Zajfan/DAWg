@@ -98,6 +98,31 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
         });
     };
 
+    m_sslEqButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(40, 80, 120));
+    m_sslEqButton.onClick = [this] {
+        juce::PopupMenu menu;
+        menu.addItem(1, "Preamp Model: SSL 4000 Console Line", true, m_preampModel == 0);
+        menu.addItem(2, "Preamp Model: Germanium Transistor Fuzz", true, m_preampModel == 1);
+        menu.addItem(3, "Preamp Model: British Class-A Transformer", true, m_preampModel == 2);
+        menu.addItem(4, "Preamp Model: 1/2\" 2-Track Tape Saturation", true, m_preampModel == 3);
+        menu.addSeparator();
+        menu.addItem(5, "Auto-Gain Compensation", true, m_autoGainComp);
+
+        menu.showMenuAsync(juce::PopupMenu::Options {}, [this](int result) {
+            if (result >= 1 && result <= 4)
+            {
+                m_preampModel = result - 1;
+                const char* labels[] = {"SSL 4k", "Germ Fuzz", "Class-A", "Tape 1/2\""};
+                m_sslEqButton.setButtonText(labels[m_preampModel]);
+            }
+            else if (result == 5)
+            {
+                m_autoGainComp = ! m_autoGainComp;
+            }
+            repaint();
+        });
+    };
+
     m_eqButton.onClick = [this] {
         if (m_eqButton.getToggleState())
             m_eqButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(60, 160, 220));

@@ -258,16 +258,68 @@ void SslChannelStripNode::process(ProcessContext& context) noexcept
         double sampleL = static_cast<double>(leftData[i]);
         double sampleR = static_cast<double>(rightData[i]);
 
-        // Preamp saturation stage
+        // Preamp saturation stage with selectable model & auto-gain compensation
         if (m_drive > 0.001f)
         {
-            const double driveScale = 1.0 + m_drive * 3.0;
+            const double driveScale = 1.0 + static_cast<double>(m_drive) * 4.0;
             sampleL *= driveScale;
             sampleR *= driveScale;
 
-            // SSL console line amplifier soft-curve saturation
-            sampleL = std::tanh(sampleL + 0.1 * m_drive * sampleL * sampleL);
-            sampleR = std::tanh(sampleR + 0.1 * m_drive * sampleR * sampleR);
+            switch (m_preampModel)
+            {
+            case PreampSaturationModel::sslConsoleLine:
+            {
+                // SSL console line amplifier soft-curve saturation
+                sampleL = std::tanh(sampleL + 0.1 * static_cast<double>(m_drive) * sampleL * sampleL);
+                sampleR = std::tanh(sampleR + 0.1 * static_cast<double>(m_drive) * sampleR * sampleR);
+                break;
+            }
+            case PreampSaturationModel::germaniumFuzz:
+            {
+                // Germanium transistor fuzz with asymmetric warm even harmonics
+                auto sat = [drive = static_cast<double>(m_drive)](double x) {
+                    const double asym = x + 0.25 * drive * (x * x) / (1.0 + std::abs(x));
+                    return asym / (1.0 + std::abs(asym));
+                };
+                sampleL = sat(sampleL);
+                sampleR = sat(sampleR);
+                break;
+            }
+            case PreampSaturationModel::britishClassATransformer:
+            {
+                // British Class-A iron core transformer hysteresis
+                auto sat = [drive = static_cast<double>(m_drive)](double x) {
+                    const double iron = std::tanh(1.2 * x) - 0.08 * drive * (x * x * x) / (1.0 + x * x);
+                    return iron;
+                };
+                sampleL = sat(sampleL);
+                sampleR = sat(sampleR);
+                break;
+            }
+            case PreampSaturationModel::tapeEmulation:
+            {
+                // 2-track 1/2" magnetic tape with head bump, hysteresis and flutter modulation
+                m_tapeLfoPhase += 0.0003; // ~2.5 Hz flutter
+                if (m_tapeLfoPhase > 2.0 * std::numbers::pi_v<double>)
+                    m_tapeLfoPhase -= 2.0 * std::numbers::pi_v<double>;
+
+                const double flutterMod = 1.0 + 0.015 * static_cast<double>(m_drive) * std::sin(m_tapeLfoPhase);
+                auto sat = [drive = static_cast<double>(m_drive), flutterMod](double x) {
+                    const double tapeX = x * flutterMod;
+                    return (tapeX * (1.5 - 0.3 * drive * tapeX * tapeX)) / (1.0 + 0.4 * drive * std::abs(tapeX));
+                };
+                sampleL = sat(sampleL);
+                sampleR = sat(sampleR);
+                break;
+            }
+            }
+
+            if (m_autoGain)
+            {
+                const double autoGainComp = 1.0 / (1.0 + static_cast<double>(m_drive) * 1.5);
+                sampleL *= autoGainComp;
+                sampleR *= autoGainComp;
+            }
         }
 
         // High Pass Filter
