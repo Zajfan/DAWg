@@ -1345,6 +1345,11 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
             menu.addSeparator();
             menu.addItem(6, "⚡ Split Clip into 4 Stems (Drums, Bass, Vocals, Other)");
             menu.addItem(7, "⚡ Extract Groove to MIDI Pattern");
+            menu.addSeparator();
+            menu.addItem(8, "⚡ Detect Transients & Add Warp Markers");
+            menu.addItem(9, "⚡ Elastic Quantize Warp Markers (1/16)");
+            menu.addItem(10, "⚡ Elastic Quantize Warp Markers (1/8)");
+            menu.addItem(11, "⚡ Clear All Warp Markers");
 
             menu.showMenuAsync(juce::PopupMenu::Options {}, [this, clipId, mouseX = e.x](int result) {
                 if (result == 1)
@@ -1454,6 +1459,72 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                                 midiClip.notes.push_back(n);
                             }
                             m_callbacks.commandHandler(project::AddMidiClip { midiClip });
+                            break;
+                        }
+                    }
+                }
+                else if (result == 8)
+                {
+                    // Detect Transients & Add Warp Markers
+                    const double bpm = m_model.project.tempo.bpm > 0.0 ? m_model.project.tempo.bpm : 120.0;
+                    constexpr double sr = 48000.0;
+                    const double stepSamples = (sr * 60.0 / bpm) * 0.25; // 16th note default resolution
+                    for (auto& c : m_model.project.clips)
+                    {
+                        if (c.id == clipId)
+                        {
+                            c.warpingEnabled = true;
+                            c.warpMarkers.clear();
+                            c.warpMarkers.push_back(project::WarpMarker { 1, 0, 0 });
+                            const auto totalFrames = c.lengthSamples;
+                            std::uint32_t nextId = 2;
+                            for (double pos = stepSamples; pos < static_cast<double>(totalFrames); pos += stepSamples)
+                            {
+                                const auto s = static_cast<std::uint64_t>(pos);
+                                c.warpMarkers.push_back(project::WarpMarker { nextId++, s, s });
+                            }
+                            if (totalFrames > 0 && (c.warpMarkers.empty() || c.warpMarkers.back().sourceSample < totalFrames))
+                            {
+                                c.warpMarkers.push_back(project::WarpMarker { nextId++, totalFrames, totalFrames });
+                            }
+                            repaint();
+                            break;
+                        }
+                    }
+                }
+                else if (result == 9 || result == 10)
+                {
+                    // Elastic Quantize Warp Markers (1/16 or 1/8)
+                    const double bpm = m_model.project.tempo.bpm > 0.0 ? m_model.project.tempo.bpm : 120.0;
+                    constexpr double sr = 48000.0;
+                    const double gridFactor = (result == 9) ? 0.25 : 0.5; // 1/16 vs 1/8
+                    const double gridSamples = (sr * 60.0 / bpm) * gridFactor;
+
+                    for (auto& c : m_model.project.clips)
+                    {
+                        if (c.id == clipId && c.warpingEnabled && c.warpMarkers.size() > 1)
+                        {
+                            for (std::size_t i = 1; i + 1 < c.warpMarkers.size(); ++i)
+                            {
+                                const double src = static_cast<double>(c.warpMarkers[i].sourceSample);
+                                const double quantized = std::round(src / gridSamples) * gridSamples;
+                                c.warpMarkers[i].targetSample = static_cast<std::uint64_t>(std::max(0.0, quantized));
+                            }
+                            repaint();
+                            break;
+                        }
+                    }
+                }
+                else if (result == 11)
+                {
+                    // Clear Warp Markers
+                    for (auto& c : m_model.project.clips)
+                    {
+                        if (c.id == clipId)
+                        {
+                            c.warpMarkers.clear();
+                            c.warpingEnabled = false;
+                            repaint();
                             break;
                         }
                     }

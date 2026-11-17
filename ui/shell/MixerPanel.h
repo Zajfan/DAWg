@@ -19,6 +19,7 @@ public:
     explicit ChannelStripComponent(CommandHandler handler);
 
     void updateTrack(const project::Track& track);
+    void setGainReduction(float grDb) noexcept { m_gainReductionDb = grDb; repaint(); }
     void paint(juce::Graphics& g) override;
     void resized() override;
 
@@ -29,6 +30,7 @@ public:
     [[nodiscard]] bool isMuted() const noexcept { return m_muteButton.getToggleState(); }
     [[nodiscard]] bool isSolo() const noexcept { return m_soloButton.getToggleState(); }
     [[nodiscard]] bool isPhaseInvert() const noexcept { return m_phaseButton.getToggleState(); }
+    [[nodiscard]] bool isSidechainListen() const noexcept { return m_scListenButton.getToggleState(); }
 
 private:
     void sendGainPan();
@@ -36,6 +38,7 @@ private:
     CommandHandler m_handler;
     project::TrackId m_trackId {0};
     bool m_updatingFromModel {false};
+    float m_gainReductionDb {0.0f};
 
     juce::Label m_nameLabel;
     juce::Slider m_panKnob;
@@ -49,6 +52,7 @@ private:
     juce::TextButton m_eqButton {"EQ"};
     juce::TextButton m_sslEqButton {"SSL 4k"};
     juce::TextButton m_compButton {"COMP"};
+    juce::TextButton m_scListenButton {"SC"};
     juce::TextButton m_synthButton {"SYNTH"};
     juce::TextButton m_revButton {"REV"};
     juce::TextButton m_delayButton {"DLY"};

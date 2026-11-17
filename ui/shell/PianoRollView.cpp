@@ -1,5 +1,7 @@
 #include "PianoRollView.h"
 
+#include <dawg/engine/dsp/PolymetricSequencerEngine.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -52,18 +54,24 @@ PianoRollView::PianoRollView(CommandHandler handler, AuditionCallback auditionCb
     };
     addAndMakeVisible(m_gridCombo);
 
-    m_swingCombo.addItem("Straight (0%)", 1);
-    m_swingCombo.addItem("Swing 25%", 2);
-    m_swingCombo.addItem("Swing 50%", 3);
-    m_swingCombo.addItem("Swing 75%", 4);
+    m_swingCombo.addItem("Straight (50%)", 1);
+    m_swingCombo.addItem("MPC60 Shuffle (54%)", 2);
+    m_swingCombo.addItem("MPC60 Shuffle (58%)", 3);
+    m_swingCombo.addItem("MPC60 Heavy (62%)", 4);
+    m_swingCombo.addItem("SP-1200 Swing (59%)", 5);
+    m_swingCombo.addItem("SP-1200 Swing (65%)", 6);
+    m_swingCombo.addItem("Triplet Swing (66.7%)", 7);
     m_swingCombo.setSelectedId(1);
     m_swingCombo.onChange = [this] {
         switch (m_swingCombo.getSelectedId())
         {
         case 1: m_swing = 0.0f; break;
-        case 2: m_swing = 0.25f; break;
-        case 3: m_swing = 0.50f; break;
-        case 4: m_swing = 0.75f; break;
+        case 2: m_swing = 0.08f; break; // 54%
+        case 3: m_swing = 0.16f; break; // 58%
+        case 4: m_swing = 0.24f; break; // 62%
+        case 5: m_swing = 0.18f; break; // 59%
+        case 6: m_swing = 0.30f; break; // 65%
+        case 7: m_swing = 0.33f; break; // 66.7%
         default: m_swing = 0.0f; break;
         }
     };
@@ -72,6 +80,133 @@ PianoRollView::PianoRollView(CommandHandler handler, AuditionCallback auditionCb
     m_quantizeButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(45, 110, 160));
     m_quantizeButton.onClick = [this] { quantizeNotes(); };
     addAndMakeVisible(m_quantizeButton);
+
+    m_btnEuclidean.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(60, 130, 80));
+    m_btnEuclidean.onClick = [this] {
+        const auto* clip = findActiveClip();
+        if (clip == nullptr || ! m_handler)
+            return;
+
+        juce::PopupMenu menu;
+        menu.addItem(1, "3 Hits in 8 (Tresillo)");
+        menu.addItem(2, "5 Hits in 16 (Bossa Nova / Cumbia)");
+        menu.addItem(3, "7 Hits in 16 (West African Bell)");
+        menu.addItem(4, "4 Hits in 7 (Balkan Polymetric)");
+        menu.addItem(5, "9 Hits in 16 (Steve Reich)");
+
+        menu.showMenuAsync(juce::PopupMenu::Options {}, [this, clipId = clip->id](int res) {
+            if (res <= 0) return;
+            std::size_t hits = 5;
+            std::size_t steps = 16;
+            if (res == 1) { hits = 3; steps = 8; }
+            else if (res == 2) { hits = 5; steps = 16; }
+            else if (res == 3) { hits = 7; steps = 16; }
+            else if (res == 4) { hits = 4; steps = 7; }
+            else if (res == 5) { hits = 9; steps = 16; }
+
+            engine::dsp::PolymetricSequencerEngine seq;
+            seq.generateEuclidean(0, hits, steps, 0, 60, 0.85f);
+            const auto& trk = seq.getTrack(0);
+
+            const double stepSamples = gridIntervalSamples();
+            for (std::size_t s = 0; s < trk.stepCount; ++s)
+            {
+                if (trk.steps[s].active)
+                {
+                    project::MidiNote n;
+                    n.id = static_cast<project::NoteId>(m_model.project.midiClips.size() * 1000 + s + 1);
+                    n.pitch = trk.steps[s].pitch;
+                    n.velocity = static_cast<std::uint8_t>(trk.steps[s].velocity * 127.0f);
+                    n.startSample = static_cast<std::uint64_t>(static_cast<double>(s) * stepSamples);
+                    n.lengthSamples = static_cast<std::uint64_t>(stepSamples * static_cast<double>(trk.steps[s].gateFraction));
+                    m_handler(project::AddMidiNote { clipId, n });
+                }
+            }
+            repaint();
+        });
+    };
+    addAndMakeVisible(m_btnEuclidean);
+
+    m_btnMarkov.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(140, 80, 160));
+    m_btnMarkov.onClick = [this] {
+        const auto* clip = findActiveClip();
+        if (clip == nullptr || ! m_handler)
+            return;
+
+        juce::PopupMenu menu;
+        menu.addItem(1, "C Major: I - vi - IV - V (Pop)");
+        menu.addItem(2, "A Minor: i - VI - III - VII (Epic Minor)");
+        menu.addItem(3, "D Dorian: i - IV - v - i (Jazz / Fusion)");
+        menu.addItem(4, "F Major: I - V - vi - IV (Anthem)");
+        menu.addItem(5, "G Mixolydian: I - VII - IV - I (Blues / Funk)");
+
+        menu.showMenuAsync(juce::PopupMenu::Options {}, [this, clipId = clip->id](int res) {
+            if (res <= 0) return;
+            std::uint8_t root = 60; // C4
+            engine::dsp::MusicalScaleType scale = engine::dsp::MusicalScaleType::major;
+            if (res == 2) { root = 57; scale = engine::dsp::MusicalScaleType::naturalMinor; } // A3
+            else if (res == 3) { root = 62; scale = engine::dsp::MusicalScaleType::dorian; } // D4
+            else if (res == 4) { root = 65; scale = engine::dsp::MusicalScaleType::major; }  // F4
+            else if (res == 5) { root = 67; scale = engine::dsp::MusicalScaleType::mixolydian; } // G4
+
+            const auto chords = engine::dsp::PolymetricSequencerEngine::generateMarkovChords(root, scale, 4, 0.2f);
+            const double bpm = std::max(20.0, m_model.project.tempo.bpm);
+            constexpr double sr = 48000.0;
+            const double barSamples = (60.0 / bpm) * sr * 4.0; // 1 bar per chord
+
+            for (std::size_t ci = 0; ci < chords.size(); ++ci)
+            {
+                const auto& chord = chords[ci];
+                const auto chordStart = static_cast<std::uint64_t>(static_cast<double>(ci) * barSamples);
+                const auto chordLen = static_cast<std::uint64_t>(barSamples * 0.95);
+
+                for (std::size_t vi = 0; vi < chord.voiceCount; ++vi)
+                {
+                    project::MidiNote n;
+                    n.id = static_cast<project::NoteId>(m_model.project.midiClips.size() * 2000 + ci * 10 + vi + 1);
+                    n.pitch = chord.notes[vi];
+                    n.velocity = 95;
+                    n.startSample = chordStart;
+                    n.lengthSamples = chordLen;
+                    m_handler(project::AddMidiNote { clipId, n });
+                }
+            }
+            repaint();
+        });
+    };
+    addAndMakeVisible(m_btnMarkov);
+
+    m_btnHumanize.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(180, 110, 50));
+    m_btnHumanize.onClick = [this] {
+        const auto* clip = findActiveClip();
+        if (clip == nullptr || ! m_handler)
+            return;
+
+        std::uint32_t prng = 999983u;
+        for (const auto& note : clip->notes)
+        {
+            if (! m_selectedNoteIds.empty() && ! isNoteSelected(note.id))
+                continue;
+
+            prng = prng * 1664525u + 1013904223u;
+            const float timingJitterMs = (static_cast<float>(prng >> 16) / 65536.0f) * 16.0f - 8.0f; // +/- 8ms
+            constexpr double sr = 48000.0;
+            const auto jitterSamples = static_cast<std::int64_t>((timingJitterMs * 0.001f) * sr);
+
+            prng = prng * 1664525u + 1013904223u;
+            const int velJitter = static_cast<int>((static_cast<float>(prng >> 16) / 65536.0f) * 16.0f) - 8; // +/- 8
+
+            const auto newStart = static_cast<std::uint64_t>(std::max<std::int64_t>(0, static_cast<std::int64_t>(note.startSample) + jitterSamples));
+            const auto newVel = static_cast<std::uint8_t>(std::clamp(static_cast<int>(note.velocity) + velJitter, 1, 127));
+
+            if (newStart != note.startSample)
+                m_handler(project::MoveMidiNote { clip->id, note.id, newStart, note.pitch });
+            if (newVel != note.velocity)
+                m_handler(project::SetMidiNoteVelocity { clip->id, note.id, newVel });
+        }
+        repaint();
+    };
+    addAndMakeVisible(m_btnHumanize);
 
     auto updateModeButtons = [this] {
         m_btnVelocity.setColour(juce::TextButton::buttonColourId, m_expressionMode == ExpressionMode::velocity ? juce::Colour::fromRGB(0, 160, 210) : juce::Colour::fromRGB(35, 38, 48));
@@ -647,7 +782,13 @@ void PianoRollView::resized()
     toolbarArea.removeFromLeft(6);
     m_swingCombo.setBounds(toolbarArea.removeFromLeft(104));
     toolbarArea.removeFromLeft(6);
-    m_quantizeButton.setBounds(toolbarArea.removeFromLeft(110));
+    m_quantizeButton.setBounds(toolbarArea.removeFromLeft(100));
+    toolbarArea.removeFromLeft(4);
+    m_btnEuclidean.setBounds(toolbarArea.removeFromLeft(80));
+    toolbarArea.removeFromLeft(4);
+    m_btnMarkov.setBounds(toolbarArea.removeFromLeft(75));
+    toolbarArea.removeFromLeft(4);
+    m_btnHumanize.setBounds(toolbarArea.removeFromLeft(75));
 
     // MPE & Tuning sub-lane buttons on the right side
     m_btnVocalTune.setBounds(toolbarArea.removeFromRight(85).reduced(2, 0));

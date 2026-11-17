@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace dawg::engine::dsp {
@@ -100,6 +101,36 @@ public:
         MusicalScaleType scale,
         float randomnessTemperature = 0.5f,
         std::uint32_t seed = 12345) noexcept;
+
+    struct GeneratedChord
+    {
+        std::uint8_t root {60};
+        std::array<std::uint8_t, 4> notes {}; // up to 4 voices (triad + 7th)
+        std::size_t voiceCount {3};
+        std::string romanNumeral;
+    };
+
+    // Generates a sequence of harmonic chord voicings via Markov transition probability matrix
+    [[nodiscard]] static std::vector<GeneratedChord> generateMarkovChords(
+        std::uint8_t rootNote,
+        MusicalScaleType scale,
+        std::size_t chordCount = 4,
+        float randomnessTemperature = 0.3f,
+        std::uint32_t seed = 424242) noexcept;
+
+    // Groove, Swing Templates & Humanization
+    enum class SwingTemplate : std::uint8_t
+    {
+        straight50,
+        mpc60_54,
+        mpc60_58,
+        mpc60_62,
+        sp1200_59,
+        sp1200_65,
+        triplet66
+    };
+
+    void applySwingTemplate(SwingTemplate tmpl) noexcept;
 
     // Groove, Swing & Humanization
     void setSwingPercentage(float swingPercent) noexcept { m_swingPercent = std::clamp(swingPercent, 50.0f, 75.0f); }

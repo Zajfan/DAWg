@@ -6091,6 +6091,131 @@ void testMultiTrackRecordingEngineSuite()
     require(std::abs(overview[0].max - 0.95f) < 1e-4f, "Block 0 max peak captured");
     require(std::abs(overview[0].min - (-0.75f)) < 1e-4f, "Block 0 min peak captured");
 }
+
+void testSidechainDuckingWarpMarkersAndMarkovChordsSuite()
+{
+    using dawg::engine::dsp::DynamicsCompressorNode;
+    using dawg::engine::dsp::CompressorSettings;
+    using dawg::engine::dsp::AudioWarpEngine;
+    using dawg::engine::dsp::PolymetricSequencerEngine;
+    using dawg::engine::dsp::MusicalScaleType;
+
+    // 1. DynamicsCompressorNode: Sidechain Filtering, Sidechain Listen & Gate
+    CompressorSettings cs {};
+    cs.bypassed = false;
+    cs.thresholdDb = -18.0f;
+    cs.ratio = 4.0f;
+    cs.attackMs = 0.5f;
+    cs.releaseMs = 50.0f;
+    cs.sidechainEnabled = true;
+    cs.sidechainListen = true;
+    cs.sidechainHpfHz = 100.0f;
+    cs.sidechainLpfHz = 4000.0f;
+
+    DynamicsCompressorNode comp {cs};
+    require(comp.prepare(48000.0, 128, 2), "Compressor prepares at 48kHz");
+
+    std::array<float, 128> mainAudioL {};
+    std::array<float, 128> mainAudioR {};
+    std::fill(mainAudioL.begin(), mainAudioL.end(), 0.1f);
+    std::fill(mainAudioR.begin(), mainAudioR.end(), 0.1f);
+
+    std::array<float, 128> scAudioL {};
+    std::array<float, 128> scAudioR {};
+    for (std::size_t i = 0; i < 128; ++i)
+    {
+        const float val = 0.8f * std::sin(2.0f * 3.14159265f * 1000.0f * static_cast<float>(i) / 48000.0f);
+        scAudioL[i] = val;
+        scAudioR[i] = val;
+    }
+
+    std::array<float*, 2> audioPlanes {mainAudioL.data(), mainAudioR.data()};
+    std::array<float*, 2> scPlanes {scAudioL.data(), scAudioR.data()};
+
+    dawg::engine::ProcessContext ctx {
+        .audio = dawg::engine::AudioBufferView {audioPlanes.data(), 2, 128},
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = dawg::engine::AudioBufferView {scPlanes.data(), 2, 128}
+    };
+
+    {
+        ScopedAllocationGuard guard;
+        comp.process(ctx);
+        require(g_allocationCount.load() == 0, "Sidechain listen process performs zero heap allocations");
+    }
+
+    // In sidechain listen mode, output audio channels are replaced by the filtered key signal (> 0.5)
+    float maxListenPeak = 0.0f;
+    for (const auto s : mainAudioL)
+        maxListenPeak = std::max(maxListenPeak, std::abs(s));
+    require(maxListenPeak > 0.6f, "Sidechain listen routed filtered key signal to main audio");
+
+    // Test Gate and Ducking
+    cs.sidechainListen = false;
+    cs.gateEnabled = true;
+    cs.gateThresholdDb = -40.0f;
+    cs.gateRatio = 8.0f;
+    comp.setSettings(cs);
+
+    // Process quiet audio below gate threshold with quiet sidechain
+    std::fill(mainAudioL.begin(), mainAudioL.end(), 0.0001f); // ~ -80 dBFS
+    std::fill(mainAudioR.begin(), mainAudioR.end(), 0.0001f);
+    std::fill(scAudioL.begin(), scAudioL.end(), 0.0001f);
+    std::fill(scAudioR.begin(), scAudioR.end(), 0.0001f);
+
+    comp.process(ctx);
+    require(comp.gateReductionDb() > 5.0f, "Gate attenuated sub-threshold quiet signal");
+
+    // Feed loud 1000 Hz sidechain signal to trigger compressor ducking
+    for (std::size_t i = 0; i < 128; ++i)
+    {
+        const float val = 1.0f * std::sin(2.0f * 3.14159265f * 1000.0f * static_cast<float>(i) / 48000.0f);
+        scAudioL[i] = val;
+        scAudioR[i] = val;
+    }
+    std::fill(mainAudioL.begin(), mainAudioL.end(), 0.5f);
+    std::fill(mainAudioR.begin(), mainAudioR.end(), 0.5f);
+
+    comp.process(ctx);
+    require(comp.gainReductionDb() > 2.0f, "External sidechain ducked main audio");
+
+    // 2. AudioWarpEngine: Markers & Quantize
+    AudioWarpEngine warpEngine;
+    warpEngine.addMarker(0, 0.0, true);
+    warpEngine.addMarker(24000, 1.05, true);
+    warpEngine.addMarker(48000, 2.0, true);
+    require(warpEngine.markerCount() == 3, "Warp markers registered");
+    warpEngine.quantizeMarkers(0.25, 1.0f);
+    require(std::abs(warpEngine.markers()[1].beatPosition - 1.0) < 0.01, "Marker quantized to beat grid");
+
+    // 3. PolymetricSequencerEngine: Euclidean & Markov Chords
+    PolymetricSequencerEngine seq;
+    seq.generateEuclidean(0, 5, 16, 0, 60, 0.85f);
+    const auto& trk = seq.getTrack(0);
+    require(trk.stepCount == 16, "Track step count set to 16");
+
+    std::size_t activeCount = 0;
+    for (std::size_t s = 0; s < trk.stepCount; ++s)
+    {
+        if (trk.steps[s].active)
+            ++activeCount;
+    }
+    require(activeCount == 5, "Euclidean algorithm generated exactly 5 hits in 16 steps");
+
+    // Markov Chord Generation
+    const auto chords = PolymetricSequencerEngine::generateMarkovChords(60, MusicalScaleType::major, 4, 0.2f);
+    require(chords.size() == 4, "Generated 4 harmonic chords");
+    for (const auto& ch : chords)
+    {
+        require(ch.voiceCount >= 3, "Chords have at least 3 voices (triad)");
+        require(!ch.romanNumeral.empty(), "Roman numeral populated");
+    }
+
+    // MPC60 Swing Template
+    seq.applySwingTemplate(PolymetricSequencerEngine::SwingTemplate::mpc60_58);
+    require(std::abs(seq.swingPercentage() - 58.0f) < 1e-3f, "MPC60 58% swing template applied");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -6266,4 +6391,5 @@ int main()
     testSslChannelStripAndConsoleRoutingMatrixSuite();
     testMpeVoiceManagerAndPolymetricSequencerSuite();
     testMultiTrackRecordingEngineSuite();
+    testSidechainDuckingWarpMarkersAndMarkovChordsSuite();
 }

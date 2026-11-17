@@ -92,9 +92,14 @@ public:
     void setAuxReturnMute(std::size_t auxIndex0Based, bool mute) noexcept;
     [[nodiscard]] bool getAuxReturnMute(std::size_t auxIndex0Based) const noexcept;
 
-    // Sidechain Key Routing
+    // Sidechain Key Routing & Listen Mode
     void setSidechainSource(std::size_t destChannel, std::size_t srcChannel) noexcept;
     [[nodiscard]] int getSidechainSource(std::size_t destChannel) const noexcept; // -1 if disabled
+    void setSidechainListen(std::size_t destChannel, bool listen) noexcept;
+    [[nodiscard]] bool getSidechainListen(std::size_t destChannel) const noexcept;
+    void setSidechainFilter(std::size_t destChannel, float hpfHz, float lpfHz) noexcept;
+    [[nodiscard]] float getSidechainHpf(std::size_t destChannel) const noexcept;
+    [[nodiscard]] float getSidechainLpf(std::size_t destChannel) const noexcept;
 
     // Compute effective channel gain including VCA modulation
     [[nodiscard]] float getEffectiveChannelGainLinear(std::size_t channelIndex) const noexcept;
@@ -122,6 +127,9 @@ private:
     std::array<float, maxAuxBuses> m_auxReturnGainDb {};
     std::array<bool, maxAuxBuses> m_auxReturnMute {};
     std::array<int, maxChannels> m_sidechainSources {};
+    std::array<bool, maxChannels> m_sidechainListen {};
+    std::array<float, maxChannels> m_sidechainHpf {};
+    std::array<float, maxChannels> m_sidechainLpf {};
 };
 
 } // namespace dawg::engine

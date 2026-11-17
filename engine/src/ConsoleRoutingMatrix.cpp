@@ -36,6 +36,9 @@ void ConsoleRoutingMatrix::reset() noexcept
     m_auxReturnGainDb.fill(0.0f);
     m_auxReturnMute.fill(false);
     m_sidechainSources.fill(-1);
+    m_sidechainListen.fill(false);
+    m_sidechainHpf.fill(20.0f);
+    m_sidechainLpf.fill(20000.0f);
 }
 
 void ConsoleRoutingMatrix::setChannelConfig(std::size_t channelIndex, const ChannelRoutingConfig& config) noexcept
@@ -180,6 +183,44 @@ int ConsoleRoutingMatrix::getSidechainSource(std::size_t destChannel) const noex
     if (destChannel < maxChannels)
         return m_sidechainSources[destChannel];
     return -1;
+}
+
+void ConsoleRoutingMatrix::setSidechainListen(std::size_t destChannel, bool listen) noexcept
+{
+    if (destChannel < maxChannels)
+    {
+        m_sidechainListen[destChannel] = listen;
+    }
+}
+
+bool ConsoleRoutingMatrix::getSidechainListen(std::size_t destChannel) const noexcept
+{
+    if (destChannel < maxChannels)
+        return m_sidechainListen[destChannel];
+    return false;
+}
+
+void ConsoleRoutingMatrix::setSidechainFilter(std::size_t destChannel, float hpfHz, float lpfHz) noexcept
+{
+    if (destChannel < maxChannels)
+    {
+        m_sidechainHpf[destChannel] = std::clamp(hpfHz, 20.0f, 2000.0f);
+        m_sidechainLpf[destChannel] = std::clamp(lpfHz, 500.0f, 20000.0f);
+    }
+}
+
+float ConsoleRoutingMatrix::getSidechainHpf(std::size_t destChannel) const noexcept
+{
+    if (destChannel < maxChannels)
+        return m_sidechainHpf[destChannel];
+    return 20.0f;
+}
+
+float ConsoleRoutingMatrix::getSidechainLpf(std::size_t destChannel) const noexcept
+{
+    if (destChannel < maxChannels)
+        return m_sidechainLpf[destChannel];
+    return 20000.0f;
 }
 
 float ConsoleRoutingMatrix::getEffectiveChannelGainLinear(std::size_t channelIndex) const noexcept

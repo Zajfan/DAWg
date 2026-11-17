@@ -139,6 +139,13 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
     m_armButton.setClickingTogglesState(true);
     m_eqButton.setClickingTogglesState(true);
     m_compButton.setClickingTogglesState(true);
+    m_scListenButton.setClickingTogglesState(true);
+    m_scListenButton.onClick = [this] {
+        if (m_scListenButton.getToggleState())
+            m_scListenButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(0, 180, 240));
+    };
+    addAndMakeVisible(m_scListenButton);
+
     m_synthButton.setClickingTogglesState(true);
     m_revButton.setClickingTogglesState(true);
     m_delayButton.setClickingTogglesState(true);
@@ -187,6 +194,26 @@ void ChannelStripComponent::paint(juce::Graphics& g)
     g.fillAll(juce::Colour::fromRGB(36, 38, 44));
     g.setColour(juce::Colour::fromRGB(50, 54, 62));
     g.drawRect(getLocalBounds(), 1);
+
+    // Visual Gain Reduction (GR) Overlay
+    if (m_gainReductionDb > 0.1f)
+    {
+        const auto faderBounds = m_fader.getBounds();
+        constexpr int grWidth = 4;
+        const int grX = faderBounds.getRight() - grWidth - 2;
+        const int grMaxHeight = std::max(10, faderBounds.getHeight() - 8);
+        const float clampedGr = std::clamp(m_gainReductionDb, 0.0f, 24.0f);
+        const int grHeight = static_cast<int>((clampedGr / 24.0f) * static_cast<float>(grMaxHeight));
+
+        const juce::Rectangle<int> grRect(grX, faderBounds.getY() + 4, grWidth, grHeight);
+        g.setColour(juce::Colour::fromRGB(255, 95, 45));
+        g.fillRect(grRect);
+
+        // Numeric GR Readout
+        g.setColour(juce::Colour::fromRGB(255, 140, 70));
+        g.setFont(juce::FontOptions(8.0f));
+        g.drawText("-" + juce::String(clampedGr, 1) + "dB", faderBounds.getX(), faderBounds.getY() - 10, faderBounds.getWidth(), 10, juce::Justification::centredRight);
+    }
 }
 
 void ChannelStripComponent::resized()
@@ -202,9 +229,10 @@ void ChannelStripComponent::resized()
     m_sslEqButton.setBounds(dspRow1.reduced(1));
     area.removeFromTop(1);
 
-    // DSP Inserts row 2: COMP, SYNTH
+    // DSP Inserts row 2: COMP, SC (Sidechain Listen), SYNTH
     auto dspRow2 = area.removeFromTop(16);
-    m_compButton.setBounds(dspRow2.removeFromLeft(dspRow2.getWidth() / 2).reduced(1));
+    m_compButton.setBounds(dspRow2.removeFromLeft(dspRow2.getWidth() * 2 / 5).reduced(1));
+    m_scListenButton.setBounds(dspRow2.removeFromLeft(dspRow2.getWidth() / 2).reduced(1));
     m_synthButton.setBounds(dspRow2.reduced(1));
     area.removeFromTop(1);
 
@@ -337,10 +365,24 @@ void MasterStripComponent::paint(juce::Graphics& g)
 
     meterArea.reduce(8, 4);
 
-    const int barWidth = (meterArea.getWidth() - 4) / 2;
+    const int grWidth = (m_meter.gainReductionDb > 0.1f) ? 4 : 0;
+    const int barWidth = (meterArea.getWidth() - 4 - grWidth) / 2;
 
     auto leftBar = meterArea.removeFromLeft(barWidth);
-    meterArea.removeFromLeft(4);
+    meterArea.removeFromLeft(2);
+    if (grWidth > 0)
+    {
+        auto grBar = meterArea.removeFromLeft(grWidth);
+        meterArea.removeFromLeft(2);
+        const float clampedGr = std::clamp(m_meter.gainReductionDb, 0.0f, 24.0f);
+        const int grH = static_cast<int>((clampedGr / 24.0f) * static_cast<float>(grBar.getHeight()));
+        g.setColour(juce::Colour::fromRGB(255, 90, 40));
+        g.fillRect(grBar.getX(), grBar.getY(), grBar.getWidth(), grH);
+    }
+    else
+    {
+        meterArea.removeFromLeft(2);
+    }
     auto rightBar = meterArea.removeFromLeft(barWidth);
 
     drawMeterBar(g, leftBar, m_displayPeakL, m_displayRmsL);

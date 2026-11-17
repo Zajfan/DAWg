@@ -101,6 +101,9 @@ private:
     juce::ComboBox m_gridCombo;
     juce::ComboBox m_swingCombo;
     juce::TextButton m_quantizeButton {"Quantize [Q]"};
+    juce::TextButton m_btnEuclidean {"Euclidean"};
+    juce::TextButton m_btnMarkov {"Chords"};
+    juce::TextButton m_btnHumanize {"Humanize"};
 
     ExpressionMode m_expressionMode {ExpressionMode::velocity};
     juce::TextButton m_btnVelocity {"Vel"};

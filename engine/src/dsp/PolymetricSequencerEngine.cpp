@@ -212,6 +212,101 @@ void PolymetricSequencerEngine::generateMarkovProgression(
     }
 }
 
+std::vector<PolymetricSequencerEngine::GeneratedChord> PolymetricSequencerEngine::generateMarkovChords(
+    std::uint8_t rootNote,
+    MusicalScaleType scale,
+    std::size_t chordCount,
+    float randomnessTemperature,
+    std::uint32_t seed) noexcept
+{
+    std::vector<GeneratedChord> chords;
+    if (chordCount == 0)
+        return chords;
+
+    chords.reserve(chordCount);
+    std::uint32_t prng = (seed == 0) ? 123456789u : seed;
+    auto nextRand = [&prng]() -> float {
+        prng = prng * 1664525u + 1013904223u;
+        return static_cast<float>(prng >> 16) / 65536.0f;
+    };
+
+    const bool isMinor = (scale == MusicalScaleType::naturalMinor || scale == MusicalScaleType::dorian || scale == MusicalScaleType::pentatonicMinor);
+    const std::array<std::uint8_t, 7> scaleIntervals = isMinor
+        ? std::array<std::uint8_t, 7>{0, 2, 3, 5, 7, 8, 10}
+        : std::array<std::uint8_t, 7>{0, 2, 4, 5, 7, 9, 11};
+
+    const std::array<const char*, 7> majorNumerals {"I", "ii", "iii", "IV", "V", "vi", "vii°"};
+    const std::array<const char*, 7> minorNumerals {"i", "ii°", "III", "iv", "v", "VI", "VII"};
+
+    std::size_t currentDegree = 0; // Start on tonic
+
+    for (std::size_t c = 0; c < chordCount; ++c)
+    {
+        GeneratedChord gc {};
+        gc.romanNumeral = isMinor ? minorNumerals[currentDegree] : majorNumerals[currentDegree];
+
+        // Root note
+        const std::uint8_t chordRoot = static_cast<std::uint8_t>(rootNote + scaleIntervals[currentDegree]);
+        gc.root = chordRoot;
+
+        // Build triad / 7th from diatonic scale degrees
+        const std::size_t deg3 = (currentDegree + 2) % 7;
+        const std::size_t deg5 = (currentDegree + 4) % 7;
+        const std::size_t deg7 = (currentDegree + 6) % 7;
+
+        const std::uint8_t note1 = chordRoot;
+        const std::uint8_t note3 = static_cast<std::uint8_t>(rootNote + scaleIntervals[deg3] + (deg3 < currentDegree ? 12 : 0));
+        const std::uint8_t note5 = static_cast<std::uint8_t>(rootNote + scaleIntervals[deg5] + (deg5 < currentDegree ? 12 : 0));
+        const std::uint8_t note7 = static_cast<std::uint8_t>(rootNote + scaleIntervals[deg7] + (deg7 < currentDegree ? 12 : 0));
+
+        gc.notes[0] = note1;
+        gc.notes[1] = note3;
+        gc.notes[2] = note5;
+        gc.notes[3] = note7;
+        gc.voiceCount = (nextRand() > 0.4f) ? 4 : 3;
+
+        chords.push_back(gc);
+
+        // Transition to next degree using Markov rules
+        const float r = nextRand();
+        const float temp = std::clamp(randomnessTemperature, 0.0f, 1.0f);
+
+        if (r < (1.0f - temp) * 0.85f)
+        {
+            switch (currentDegree)
+            {
+            case 0: currentDegree = (r < 0.35f) ? 3 : ((r < 0.65f) ? 4 : 5); break; // I -> IV, V, vi
+            case 1: currentDegree = 4; break;                                      // ii -> V
+            case 2: currentDegree = 5; break;                                      // iii -> vi
+            case 3: currentDegree = (r < 0.6f) ? 4 : 0; break;                     // IV -> V, I
+            case 4: currentDegree = (r < 0.7f) ? 0 : 5; break;                     // V -> I, vi
+            case 5: currentDegree = (r < 0.5f) ? 1 : 3; break;                     // vi -> ii, IV
+            default: currentDegree = 0; break;
+            }
+        }
+        else
+        {
+            currentDegree = static_cast<std::size_t>(nextRand() * 7.0f) % 7;
+        }
+    }
+
+    return chords;
+}
+
+void PolymetricSequencerEngine::applySwingTemplate(SwingTemplate tmpl) noexcept
+{
+    switch (tmpl)
+    {
+    case SwingTemplate::straight50: m_swingPercent = 50.0f; break;
+    case SwingTemplate::mpc60_54:   m_swingPercent = 54.0f; break;
+    case SwingTemplate::mpc60_58:   m_swingPercent = 58.0f; break;
+    case SwingTemplate::mpc60_62:   m_swingPercent = 62.0f; break;
+    case SwingTemplate::sp1200_59:  m_swingPercent = 59.0f; break;
+    case SwingTemplate::sp1200_65:  m_swingPercent = 65.0f; break;
+    case SwingTemplate::triplet66:  m_swingPercent = 66.7f; break;
+    }
+}
+
 double PolymetricSequencerEngine::getStepSamples(StepClockDivision div, double bpm, double sampleRate) const noexcept
 {
     const double beatSamples = (60.0 / std::max(20.0, bpm)) * sampleRate;
