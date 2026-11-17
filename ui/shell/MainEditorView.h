@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ChannelRackView.h"
+#include "CommandPaletteOverlay.h"
 #include "DragSplitterBar.h"
 #include "DrumPadSamplerView.h"
 #include "DspWireGridView.h"
@@ -18,6 +19,7 @@
 #include "SessionMatrixView.h"
 #include "SpatialRadarView.h"
 #include "TimelineView.h"
+#include "TrackInspectorView.h"
 #include "TransportBar.h"
 
 #include <dawg/media/WaveformCache.h>
@@ -101,11 +103,18 @@ public:
 
     enum class WorkspacePreset : std::uint8_t
     {
-        defaultArrangement,
-        dualScreenStudio,
-        beatmakerFocus,
+        songArrangement,
+        patternLabBeatmaker,
+        recordingComping,
+        mixingConsole,
+        soundDesignModular,
+        masteringSuite,
         livePerformanceRig,
-        masteringSuite
+        dualScreenStudio,
+
+        // Backward compatibility aliases
+        defaultArrangement = songArrangement,
+        beatmakerFocus = patternLabBeatmaker
     };
 
     enum class CenterViewMode : std::uint8_t
@@ -151,6 +160,19 @@ public:
     void toggleMaximizeDock();
     [[nodiscard]] bool isDockMaximized() const noexcept { return m_dockMaximized; }
 
+    // Left Track Inspector
+    void toggleTrackInspector();
+    [[nodiscard]] bool isTrackInspectorVisible() const noexcept { return m_inspectorVisible; }
+
+    // Command Palette (Ctrl+K / Cmd+K)
+    void openCommandPalette();
+
+    // Dual-Pane Dock Support
+    void toggleDualDock();
+    [[nodiscard]] bool isDualDockEnabled() const noexcept { return m_dualDockEnabled; }
+    void setSecondaryDockMode(BottomDockMode mode);
+    [[nodiscard]] BottomDockMode secondaryDockMode() const noexcept { return m_secondaryDockMode; }
+
     // Workspace Presets (Frontier 3)
     void applyWorkspacePreset(WorkspacePreset preset);
     void saveCurrentWorkspace();
@@ -172,6 +194,7 @@ public:
     bool keyPressed(const juce::KeyPress& key) override;
 
 private:
+    void layoutDockPanel(BottomDockMode mode, juce::Rectangle<int> bounds);
     EditorViewModel m_model;
     CommandHandler m_commandHandler;
     TransportCallbacks m_transportCallbacks;
@@ -183,8 +206,44 @@ private:
     TimelineView m_timelineView;
     SessionMatrixView m_sessionMatrixView;
 
-    // Bottom Dock
+    // Header Workspace Switcher & HUD
+    juce::TextButton m_btnWsArrangement {"Arrange [1]"};
+    juce::TextButton m_btnWsBeatmaker {"Beatmaker [2]"};
+    juce::TextButton m_btnWsRecording {"Record [3]"};
+    juce::TextButton m_btnWsMixing {"Mix [4]"};
+    juce::TextButton m_btnWsModular {"Modular [5]"};
+    juce::TextButton m_btnWsMastering {"Master [6]"};
+    juce::TextButton m_btnWsLive {"Live [7]"};
+    juce::TextButton m_btnWsSave {"Save As..."};
+    juce::TextButton m_btnToggleInspector {"Inspector [I]"};
+    juce::TextButton m_btnCommandPalette {"⌘K Search"};
+
+    // Left Track Inspector
+    TrackInspectorView m_trackInspector;
+    DragSplitterBar m_inspectorSplitter;
+    int m_inspectorWidth {210};
+    bool m_inspectorVisible {true};
+
+    // Command Palette Overlay (Ctrl+K)
+    CommandPaletteOverlay m_commandPalette;
+
+    // Bottom Dock (Categorized Smart Dock)
     BottomDockMode m_dockMode {BottomDockMode::mixer};
+    juce::TextButton m_btnCatMix {"🎚 Mix ▾"};
+    juce::TextButton m_btnCatEdit {"🎹 Edit ▾"};
+    juce::TextButton m_btnCatModular {"⚡ Synth ▾"};
+    juce::TextButton m_btnCatMaster {"📊 Master ▾"};
+    juce::Label m_lblActiveDock;
+    juce::TextButton m_tabBrowserButton {"Browser [B]"};
+    juce::TextButton m_btnDualDock {"◫ Dual"};
+    juce::TextButton m_detachDockButton {"↗"};
+    juce::TextButton m_maximizeDockButton {"⛶"};
+
+    bool m_dualDockEnabled {false};
+    BottomDockMode m_secondaryDockMode {BottomDockMode::pianoRoll};
+    float m_dockSplitRatio {0.5f};
+
+    // Legacy tab buttons preserved for backward compatibility
     juce::TextButton m_tabMixerButton {"Mixer Console [M]"};
     juce::TextButton m_tabPianoRollButton {"Piano Roll [P]"};
     juce::TextButton m_tabChannelRackButton {"Channel Rack [R]"};
@@ -196,9 +255,6 @@ private:
     juce::TextButton m_tabMasteringButton {"Mastering [U]"};
     juce::TextButton m_tabPitchBlobButton {"Pitch/Blob [H]"};
     juce::TextButton m_tabSampleZoneButton {"SFZ Zones [K]"};
-    juce::TextButton m_tabBrowserButton {"Browser [B]"};
-    juce::TextButton m_detachDockButton {"↗"};
-    juce::TextButton m_maximizeDockButton {"⛶"};
 
     MixerPanel m_mixerPanel;
     PianoRollView m_pianoRollView;
@@ -234,6 +290,7 @@ private:
     std::unique_ptr<FloatingPanelWindow> m_floatingSessionMatrix;
 
     // Draggable Splitters
+    DragSplitterBar m_dualDockSplitter;
     DragSplitterBar m_dockSplitter;
     DragSplitterBar m_sidebarSplitter;
 

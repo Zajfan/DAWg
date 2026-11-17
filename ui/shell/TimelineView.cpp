@@ -1158,6 +1158,9 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
 
             if (e.y >= ty && e.y < ty + m_trackLaneHeight)
             {
+                if (m_callbacks.trackSelected)
+                    m_callbacks.trackSelected(track.id);
+
                 const bool isFolder = track.isFolder || track.kind == project::TrackKind::folder;
                 if (isFolder && e.x >= 4 && e.x <= 26 && e.y >= ty + 4 && e.y <= ty + 28)
                 {

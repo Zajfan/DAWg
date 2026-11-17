@@ -17,6 +17,7 @@ public:
     using CommandHandler = std::function<void(project::ProjectCommand)>;
     using SeekCallback = std::function<void(std::int64_t samplePosition)>;
     using ActionCallback = std::function<void()>;
+    using TrackSelectedCallback = std::function<void(project::TrackId trackId)>;
 
     enum class SnapMode : std::uint8_t
     {
@@ -34,6 +35,7 @@ public:
         ActionCallback togglePlay;
         ActionCallback undo;
         ActionCallback redo;
+        TrackSelectedCallback trackSelected;
     };
 
     explicit TimelineView(Callbacks callbacks, media::WaveformCache* waveformCache = nullptr);

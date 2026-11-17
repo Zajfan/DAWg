@@ -33,6 +33,8 @@ public:
     void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
     bool keyPressed(const juce::KeyPress& key) override;
 
+    void quantizeNotes();
+
 private:
     enum class QuantizeGrid : std::uint8_t
     {
@@ -80,7 +82,6 @@ private:
     [[nodiscard]] bool isNoteSelected(project::NoteId id) const noexcept;
     [[nodiscard]] const project::MidiClip* findActiveClip() const noexcept;
     [[nodiscard]] const project::MidiNote* findNoteAt(juce::Point<int> pos, bool& outNearRightEdge) const noexcept;
-    void quantizeNotes();
     void selectAllNotes();
 
     CommandHandler m_handler;

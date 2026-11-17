@@ -1,4 +1,5 @@
 #include "MainEditorView.h"
+#include "DspEditorDialog.h"
 #include "PluginWindow.h"
 
 #include <utility>
@@ -113,9 +114,78 @@ MainEditorView::MainEditorView(EditorViewModel model,
             }
         },
         .undo = m_transportCallbacks.undo,
-        .redo = m_transportCallbacks.redo
+        .redo = m_transportCallbacks.redo,
+        .trackSelected = [this](project::TrackId trkId) {
+            m_trackInspector.setSelectedTrackId(trkId);
+        }
     }, waveformCache)
     , m_sessionMatrixView(m_commandHandler, m_transportCallbacks.audition)
+    , m_trackInspector(m_commandHandler, [this](project::TrackId trkId, std::size_t slotIdx) {
+        const project::Track* trk = nullptr;
+        for (const auto& t : m_model.project.tracks)
+        {
+            if (t.id == trkId)
+            {
+                trk = &t;
+                break;
+            }
+        }
+        if (trk != nullptr && slotIdx < trk->inserts.size())
+        {
+            DspEditorKind kind = DspEditorKind::parametricEq;
+            switch (trk->inserts[slotIdx].type)
+            {
+            case project::DspNodeType::parametricEq: kind = DspEditorKind::parametricEq; break;
+            case project::DspNodeType::dynamicsCompressor: kind = DspEditorKind::compressor; break;
+            case project::DspNodeType::tnhcSynth: kind = DspEditorKind::synth; break;
+            case project::DspNodeType::tnhcReverb: kind = DspEditorKind::reverb; break;
+            case project::DspNodeType::tnhcDelay: kind = DspEditorKind::delay; break;
+            case project::DspNodeType::brickwallLimiter:
+            case project::DspNodeType::clapPlugin:
+            case project::DspNodeType::drumPadSampler:
+                return;
+            }
+            DspEditorWindow::open(kind, trk->name);
+        }
+    })
+    , m_inspectorSplitter(DragSplitterBar::Orientation::vertical, [this](const int delta) {
+        if (m_inspectorVisible)
+        {
+            m_inspectorWidth = std::clamp(m_inspectorWidth + delta, 150, std::max(180, getWidth() - 320));
+            resized();
+        }
+    })
+    , m_commandPalette([this](const std::string& actionId) {
+        if (actionId == "panel:mixer") setDockMode(BottomDockMode::mixer);
+        else if (actionId == "panel:pianoRoll") setDockMode(BottomDockMode::pianoRoll);
+        else if (actionId == "panel:channelRack") setDockMode(BottomDockMode::channelRack);
+        else if (actionId == "panel:drumSampler") setDockMode(BottomDockMode::drumSampler);
+        else if (actionId == "panel:wireGrid") setDockMode(BottomDockMode::wireGrid);
+        else if (actionId == "panel:routingMatrix") setDockMode(BottomDockMode::routingMatrix);
+        else if (actionId == "panel:spatialRadar") setDockMode(BottomDockMode::spatialRadar);
+        else if (actionId == "panel:modulators") setDockMode(BottomDockMode::modulationRack);
+        else if (actionId == "panel:mastering") setDockMode(BottomDockMode::masteringSuite);
+        else if (actionId == "panel:pitchBlob") setDockMode(BottomDockMode::pitchComping);
+        else if (actionId == "panel:sampleZone") setDockMode(BottomDockMode::sampleZones);
+        else if (actionId == "panel:browser") togglePluginBrowser();
+        else if (actionId == "workspace:arrangement") applyWorkspacePreset(WorkspacePreset::songArrangement);
+        else if (actionId == "workspace:beatmaker") applyWorkspacePreset(WorkspacePreset::patternLabBeatmaker);
+        else if (actionId == "workspace:recording") applyWorkspacePreset(WorkspacePreset::recordingComping);
+        else if (actionId == "workspace:mixing") applyWorkspacePreset(WorkspacePreset::mixingConsole);
+        else if (actionId == "workspace:modular") applyWorkspacePreset(WorkspacePreset::soundDesignModular);
+        else if (actionId == "workspace:mastering") applyWorkspacePreset(WorkspacePreset::masteringSuite);
+        else if (actionId == "workspace:liveRig") applyWorkspacePreset(WorkspacePreset::livePerformanceRig);
+        else if (actionId == "action:toggleInspector") toggleTrackInspector();
+        else if (actionId == "action:toggleCenterView") toggleCenterViewMode();
+        else if (actionId == "action:quantize") m_pianoRollView.quantizeNotes();
+        else if (actionId == "action:addAudioTrack") { if (m_commandHandler) m_commandHandler(project::AddAudioTrack {"Audio " + std::to_string(m_model.trackCount() + 1)}); }
+        else if (actionId == "action:addMidiTrack") { if (m_commandHandler) m_commandHandler(project::AddInstrumentTrack {"Synth Lead"}); }
+        else if (actionId == "action:importWav") { if (m_transportCallbacks.importWav) m_transportCallbacks.importWav(); }
+        else if (actionId == "action:bounceStems") { if (m_menuCallbacks.exportStems) m_menuCallbacks.exportStems(); }
+        else if (actionId == "action:audioPool") { if (m_menuCallbacks.showAudioPool) m_menuCallbacks.showAudioPool(); }
+        else if (actionId == "action:maximizeDock") toggleMaximizeDock();
+        else if (actionId == "action:reDockAll") reDockAllPanels();
+    })
     , m_mixerPanel(m_commandHandler, m_transportCallbacks.setMasterLimiter)
     , m_pianoRollView(m_commandHandler)
     , m_channelRackView(m_commandHandler, m_transportCallbacks.audition)
@@ -125,6 +195,14 @@ MainEditorView::MainEditorView(EditorViewModel model,
     , m_spatialRadarView()
     , m_wireGridView()
     , m_masteringSuiteView()
+    , m_dualDockSplitter(DragSplitterBar::Orientation::vertical, [this](const int delta) {
+        if (m_dualDockEnabled)
+        {
+            const float newRatio = std::clamp(m_dockSplitRatio + static_cast<float>(delta) / static_cast<float>(std::max(100, getWidth())), 0.2f, 0.8f);
+            m_dockSplitRatio = newRatio;
+            resized();
+        }
+    })
     , m_dockSplitter(DragSplitterBar::Orientation::horizontal, [this](const int delta) {
         if (! m_dockMaximized)
         {
@@ -145,56 +223,132 @@ MainEditorView::MainEditorView(EditorViewModel model,
     addAndMakeVisible(m_timelineView);
     addChildComponent(m_sessionMatrixView); // hidden initially
 
-    // Dock switcher buttons
-    m_tabMixerButton.setClickingTogglesState(false);
-    m_tabMixerButton.onClick = [this] { setDockMode(BottomDockMode::mixer); };
-    addAndMakeVisible(m_tabMixerButton);
+    // 1. Workspace Header Buttons
+    auto setupWsBtn = [](juce::TextButton& btn) {
+        btn.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(32, 35, 44));
+        btn.setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(190, 195, 210));
+    };
+    setupWsBtn(m_btnWsArrangement);
+    m_btnWsArrangement.onClick = [this] { applyWorkspacePreset(WorkspacePreset::songArrangement); };
+    addAndMakeVisible(m_btnWsArrangement);
 
-    m_tabPianoRollButton.setClickingTogglesState(false);
-    m_tabPianoRollButton.onClick = [this] { setDockMode(BottomDockMode::pianoRoll); };
-    addAndMakeVisible(m_tabPianoRollButton);
+    setupWsBtn(m_btnWsBeatmaker);
+    m_btnWsBeatmaker.onClick = [this] { applyWorkspacePreset(WorkspacePreset::patternLabBeatmaker); };
+    addAndMakeVisible(m_btnWsBeatmaker);
 
-    m_tabChannelRackButton.setClickingTogglesState(false);
-    m_tabChannelRackButton.onClick = [this] { setDockMode(BottomDockMode::channelRack); };
-    addAndMakeVisible(m_tabChannelRackButton);
+    setupWsBtn(m_btnWsRecording);
+    m_btnWsRecording.onClick = [this] { applyWorkspacePreset(WorkspacePreset::recordingComping); };
+    addAndMakeVisible(m_btnWsRecording);
 
-    m_tabDrumSamplerButton.setClickingTogglesState(false);
-    m_tabDrumSamplerButton.onClick = [this] { setDockMode(BottomDockMode::drumSampler); };
-    addAndMakeVisible(m_tabDrumSamplerButton);
+    setupWsBtn(m_btnWsMixing);
+    m_btnWsMixing.onClick = [this] { applyWorkspacePreset(WorkspacePreset::mixingConsole); };
+    addAndMakeVisible(m_btnWsMixing);
 
-    m_tabRoutingMatrixButton.setClickingTogglesState(false);
-    m_tabRoutingMatrixButton.onClick = [this] { setDockMode(BottomDockMode::routingMatrix); };
-    addAndMakeVisible(m_tabRoutingMatrixButton);
+    setupWsBtn(m_btnWsModular);
+    m_btnWsModular.onClick = [this] { applyWorkspacePreset(WorkspacePreset::soundDesignModular); };
+    addAndMakeVisible(m_btnWsModular);
 
-    m_tabModulationButton.setClickingTogglesState(false);
-    m_tabModulationButton.onClick = [this] { setDockMode(BottomDockMode::modulationRack); };
-    addAndMakeVisible(m_tabModulationButton);
+    setupWsBtn(m_btnWsMastering);
+    m_btnWsMastering.onClick = [this] { applyWorkspacePreset(WorkspacePreset::masteringSuite); };
+    addAndMakeVisible(m_btnWsMastering);
 
-    m_tabSpatialRadarButton.setClickingTogglesState(false);
-    m_tabSpatialRadarButton.onClick = [this] { setDockMode(BottomDockMode::spatialRadar); };
-    addAndMakeVisible(m_tabSpatialRadarButton);
+    setupWsBtn(m_btnWsLive);
+    m_btnWsLive.onClick = [this] { applyWorkspacePreset(WorkspacePreset::livePerformanceRig); };
+    addAndMakeVisible(m_btnWsLive);
 
-    m_tabWireGridButton.setClickingTogglesState(false);
-    m_tabWireGridButton.onClick = [this] { setDockMode(BottomDockMode::wireGrid); };
-    addAndMakeVisible(m_tabWireGridButton);
+    setupWsBtn(m_btnWsSave);
+    m_btnWsSave.onClick = [this] { saveCurrentWorkspace(); };
+    addAndMakeVisible(m_btnWsSave);
 
-    m_tabMasteringButton.setClickingTogglesState(false);
-    m_tabMasteringButton.onClick = [this] { setDockMode(BottomDockMode::masteringSuite); };
-    addAndMakeVisible(m_tabMasteringButton);
+    m_btnToggleInspector.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(45, 95, 160));
+    m_btnToggleInspector.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+    m_btnToggleInspector.onClick = [this] { toggleTrackInspector(); };
+    addAndMakeVisible(m_btnToggleInspector);
 
-    m_tabPitchBlobButton.setClickingTogglesState(false);
-    m_tabPitchBlobButton.onClick = [this] { setDockMode(BottomDockMode::pitchComping); };
-    addAndMakeVisible(m_tabPitchBlobButton);
-    addAndMakeVisible(m_pitchBlobView);
+    m_btnCommandPalette.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(40, 55, 85));
+    m_btnCommandPalette.setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(140, 200, 255));
+    m_btnCommandPalette.onClick = [this] { openCommandPalette(); };
+    addAndMakeVisible(m_btnCommandPalette);
 
-    m_tabSampleZoneButton.setClickingTogglesState(false);
-    m_tabSampleZoneButton.onClick = [this] { setDockMode(BottomDockMode::sampleZones); };
-    addAndMakeVisible(m_tabSampleZoneButton);
-    addAndMakeVisible(m_sampleZoneView);
+    // 2. Left Track Inspector
+    addAndMakeVisible(m_trackInspector);
+    addAndMakeVisible(m_inspectorSplitter);
+
+    // 3. Command Palette
+    addChildComponent(m_commandPalette);
+
+    // 4. Categorized Smart Dock
+    m_btnCatMix.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(32, 38, 52));
+    m_btnCatMix.onClick = [this] {
+        juce::PopupMenu m;
+        m.addItem(1, "Mixer Console [M]", true, m_dockMode == BottomDockMode::mixer);
+        m.addItem(2, "Console Patchbay / Routing Matrix [X]", true, m_dockMode == BottomDockMode::routingMatrix);
+        m.addItem(3, "3D Spatial Radar & Binaural [Z]", true, m_dockMode == BottomDockMode::spatialRadar);
+        m.showMenuAsync(juce::PopupMenu::Options {}, [this](int r) {
+            if (r == 1) setDockMode(BottomDockMode::mixer);
+            else if (r == 2) setDockMode(BottomDockMode::routingMatrix);
+            else if (r == 3) setDockMode(BottomDockMode::spatialRadar);
+        });
+    };
+    addAndMakeVisible(m_btnCatMix);
+
+    m_btnCatEdit.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(32, 38, 52));
+    m_btnCatEdit.onClick = [this] {
+        juce::PopupMenu m;
+        m.addItem(1, "Piano Roll Editor (MPE) [P]", true, m_dockMode == BottomDockMode::pianoRoll);
+        m.addItem(2, "Channel Rack & Step Sequencer [R]", true, m_dockMode == BottomDockMode::channelRack);
+        m.addItem(3, "Drum Pad Sampler (MPC) [D]", true, m_dockMode == BottomDockMode::drumSampler);
+        m.addItem(4, "Multi-Sample SFZ Zones [K]", true, m_dockMode == BottomDockMode::sampleZones);
+        m.showMenuAsync(juce::PopupMenu::Options {}, [this](int r) {
+            if (r == 1) setDockMode(BottomDockMode::pianoRoll);
+            else if (r == 2) setDockMode(BottomDockMode::channelRack);
+            else if (r == 3) setDockMode(BottomDockMode::drumSampler);
+            else if (r == 4) setDockMode(BottomDockMode::sampleZones);
+        });
+    };
+    addAndMakeVisible(m_btnCatEdit);
+
+    m_btnCatModular.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(32, 38, 52));
+    m_btnCatModular.onClick = [this] {
+        juce::PopupMenu m;
+        m.addItem(1, "Modular DSP Wire Grid [G]", true, m_dockMode == BottomDockMode::wireGrid);
+        m.addItem(2, "Modulation Rack (LFO/Env/Step) [O]", true, m_dockMode == BottomDockMode::modulationRack);
+        m.showMenuAsync(juce::PopupMenu::Options {}, [this](int r) {
+            if (r == 1) setDockMode(BottomDockMode::wireGrid);
+            else if (r == 2) setDockMode(BottomDockMode::modulationRack);
+        });
+    };
+    addAndMakeVisible(m_btnCatModular);
+
+    m_btnCatMaster.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(32, 38, 52));
+    m_btnCatMaster.onClick = [this] {
+        juce::PopupMenu m;
+        m.addItem(1, "Mastering Suite & Loudness Radar [U]", true, m_dockMode == BottomDockMode::masteringSuite);
+        m.addItem(2, "Pitch Contour & Vocal Tuner [H]", true, m_dockMode == BottomDockMode::pitchComping);
+        m.addItem(3, "Project Audio Pool [A]", true, false);
+        m.showMenuAsync(juce::PopupMenu::Options {}, [this](int r) {
+            if (r == 1) setDockMode(BottomDockMode::masteringSuite);
+            else if (r == 2) setDockMode(BottomDockMode::pitchComping);
+            else if (r == 3 && m_menuCallbacks.showAudioPool) m_menuCallbacks.showAudioPool();
+        });
+    };
+    addAndMakeVisible(m_btnCatMaster);
+
+    m_lblActiveDock.setFont(juce::FontOptions {11.0f}.withStyle("Bold"));
+    m_lblActiveDock.setColour(juce::Label::textColourId, juce::Colour::fromRGB(0, 220, 255));
+    m_lblActiveDock.setText("● Mixer Console", juce::dontSendNotification);
+    addAndMakeVisible(m_lblActiveDock);
+
+    m_btnDualDock.setTooltip("Split bottom dock into dual side-by-side panes");
+    m_btnDualDock.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(28, 30, 36));
+    m_btnDualDock.onClick = [this] { toggleDualDock(); };
+    addAndMakeVisible(m_btnDualDock);
 
     m_tabBrowserButton.setClickingTogglesState(false);
     m_tabBrowserButton.onClick = [this] { togglePluginBrowser(); };
     addAndMakeVisible(m_tabBrowserButton);
+
+    addChildComponent(m_dualDockSplitter);
 
     // Detach and Maximize dock controls
     m_detachDockButton.setTooltip("Detach active panel to floating window (Multi-Screen)");
@@ -241,6 +395,8 @@ MainEditorView::MainEditorView(EditorViewModel model,
     addChildComponent(m_spatialRadarView);
     addChildComponent(m_wireGridView);
     addChildComponent(m_masteringSuiteView);
+    addChildComponent(m_pitchBlobView);
+    addChildComponent(m_sampleZoneView);
 
     m_pluginBrowser = std::make_unique<PluginBrowserPanel>(
         [this](const plugins::PluginDescriptor& plugin, bool createNewTrack) {
@@ -360,6 +516,78 @@ void MainEditorView::togglePluginBrowser()
     resized();
 }
 
+void MainEditorView::toggleTrackInspector()
+{
+    m_inspectorVisible = ! m_inspectorVisible;
+    m_trackInspector.setVisible(m_inspectorVisible);
+    m_inspectorSplitter.setVisible(m_inspectorVisible);
+    m_btnToggleInspector.setColour(juce::TextButton::buttonColourId,
+        m_inspectorVisible ? juce::Colour::fromRGB(45, 95, 160) : juce::Colour::fromRGB(32, 35, 44));
+    resized();
+}
+
+void MainEditorView::openCommandPalette()
+{
+    m_commandPalette.open();
+}
+
+void MainEditorView::toggleDualDock()
+{
+    m_dualDockEnabled = ! m_dualDockEnabled;
+    m_dualDockSplitter.setVisible(m_dualDockEnabled);
+    m_btnDualDock.setColour(juce::TextButton::buttonColourId,
+        m_dualDockEnabled ? juce::Colour::fromRGB(45, 95, 160) : juce::Colour::fromRGB(28, 30, 36));
+    setDockMode(m_dockMode);
+    resized();
+}
+
+void MainEditorView::setSecondaryDockMode(BottomDockMode mode)
+{
+    m_secondaryDockMode = mode;
+    setDockMode(m_dockMode);
+    resized();
+}
+
+void MainEditorView::layoutDockPanel(BottomDockMode mode, juce::Rectangle<int> bounds)
+{
+    switch (mode)
+    {
+    case BottomDockMode::mixer:
+        if (! m_floatingMixer) m_mixerPanel.setBounds(bounds);
+        break;
+    case BottomDockMode::pianoRoll:
+        if (! m_floatingPianoRoll) m_pianoRollView.setBounds(bounds);
+        break;
+    case BottomDockMode::channelRack:
+        if (! m_floatingChannelRack) m_channelRackView.setBounds(bounds);
+        break;
+    case BottomDockMode::drumSampler:
+        if (! m_floatingDrumSampler) m_drumSamplerView.setBounds(bounds);
+        break;
+    case BottomDockMode::routingMatrix:
+        if (! m_floatingRoutingMatrix) m_routingMatrixView.setBounds(bounds);
+        break;
+    case BottomDockMode::modulationRack:
+        if (! m_floatingModulationRack) m_modulationRackView.setBounds(bounds);
+        break;
+    case BottomDockMode::spatialRadar:
+        if (! m_floatingSpatialRadar) m_spatialRadarView.setBounds(bounds);
+        break;
+    case BottomDockMode::wireGrid:
+        if (! m_floatingWireGrid) m_wireGridView.setBounds(bounds);
+        break;
+    case BottomDockMode::masteringSuite:
+        if (! m_floatingMasteringSuite) m_masteringSuiteView.setBounds(bounds);
+        break;
+    case BottomDockMode::pitchComping:
+        if (! m_floatingPitchBlob) m_pitchBlobView.setBounds(bounds);
+        break;
+    case BottomDockMode::sampleZones:
+        if (! m_floatingSampleZone) m_sampleZoneView.setBounds(bounds);
+        break;
+    }
+}
+
 void MainEditorView::setDockMode(BottomDockMode mode)
 {
     m_dockMode = mode;
@@ -420,52 +648,75 @@ void MainEditorView::setDockMode(BottomDockMode mode)
         return;
     }
 
-    const bool isMixer = (m_dockMode == BottomDockMode::mixer);
-    const bool isPianoRoll = (m_dockMode == BottomDockMode::pianoRoll);
-    const bool isChannelRack = (m_dockMode == BottomDockMode::channelRack);
-    const bool isDrumSampler = (m_dockMode == BottomDockMode::drumSampler);
-    const bool isRoutingMatrix = (m_dockMode == BottomDockMode::routingMatrix);
-    const bool isModulationRack = (m_dockMode == BottomDockMode::modulationRack);
-    const bool isSpatialRadar = (m_dockMode == BottomDockMode::spatialRadar);
-    const bool isWireGrid = (m_dockMode == BottomDockMode::wireGrid);
-    const bool isMastering = (m_dockMode == BottomDockMode::masteringSuite);
-    const bool isPitchBlob = (m_dockMode == BottomDockMode::pitchComping);
-    const bool isSampleZone = (m_dockMode == BottomDockMode::sampleZones);
+    auto isPanelActive = [this](BottomDockMode checkMode) {
+        if (m_dockMode == checkMode) return true;
+        if (m_dualDockEnabled && m_secondaryDockMode == checkMode) return true;
+        return false;
+    };
 
-    if (! m_floatingMixer) m_mixerPanel.setVisible(isMixer);
-    if (! m_floatingPianoRoll) m_pianoRollView.setVisible(isPianoRoll);
-    if (! m_floatingChannelRack) m_channelRackView.setVisible(isChannelRack);
-    if (! m_floatingDrumSampler) m_drumSamplerView.setVisible(isDrumSampler);
-    if (! m_floatingRoutingMatrix) m_routingMatrixView.setVisible(isRoutingMatrix);
-    if (! m_floatingModulationRack) m_modulationRackView.setVisible(isModulationRack);
-    if (! m_floatingSpatialRadar) m_spatialRadarView.setVisible(isSpatialRadar);
-    if (! m_floatingWireGrid) m_wireGridView.setVisible(isWireGrid);
-    if (! m_floatingMasteringSuite) m_masteringSuiteView.setVisible(isMastering);
-    if (! m_floatingPitchBlob) m_pitchBlobView.setVisible(isPitchBlob);
-    if (! m_floatingSampleZone) m_sampleZoneView.setVisible(isSampleZone);
+    if (! m_floatingMixer) m_mixerPanel.setVisible(isPanelActive(BottomDockMode::mixer));
+    if (! m_floatingPianoRoll) m_pianoRollView.setVisible(isPanelActive(BottomDockMode::pianoRoll));
+    if (! m_floatingChannelRack) m_channelRackView.setVisible(isPanelActive(BottomDockMode::channelRack));
+    if (! m_floatingDrumSampler) m_drumSamplerView.setVisible(isPanelActive(BottomDockMode::drumSampler));
+    if (! m_floatingRoutingMatrix) m_routingMatrixView.setVisible(isPanelActive(BottomDockMode::routingMatrix));
+    if (! m_floatingModulationRack) m_modulationRackView.setVisible(isPanelActive(BottomDockMode::modulationRack));
+    if (! m_floatingSpatialRadar) m_spatialRadarView.setVisible(isPanelActive(BottomDockMode::spatialRadar));
+    if (! m_floatingWireGrid) m_wireGridView.setVisible(isPanelActive(BottomDockMode::wireGrid));
+    if (! m_floatingMasteringSuite) m_masteringSuiteView.setVisible(isPanelActive(BottomDockMode::masteringSuite));
+    if (! m_floatingPitchBlob) m_pitchBlobView.setVisible(isPanelActive(BottomDockMode::pitchComping));
+    if (! m_floatingSampleZone) m_sampleZoneView.setVisible(isPanelActive(BottomDockMode::sampleZones));
+
+    // Update active label text
+    juce::String dockName;
+    switch (m_dockMode)
+    {
+    case BottomDockMode::mixer: dockName = "● Mix: Console"; break;
+    case BottomDockMode::routingMatrix: dockName = "● Mix: Patchbay"; break;
+    case BottomDockMode::spatialRadar: dockName = "● Mix: Spatial 3D"; break;
+    case BottomDockMode::pianoRoll: dockName = "● Edit: Piano Roll"; break;
+    case BottomDockMode::channelRack: dockName = "● Edit: Channel Rack"; break;
+    case BottomDockMode::drumSampler: dockName = "● Edit: Drum Sampler"; break;
+    case BottomDockMode::sampleZones: dockName = "● Edit: SFZ Zones"; break;
+    case BottomDockMode::wireGrid: dockName = "● Synth: DSP Wire Grid"; break;
+    case BottomDockMode::modulationRack: dockName = "● Synth: Modulators"; break;
+    case BottomDockMode::masteringSuite: dockName = "● Master: Suite"; break;
+    case BottomDockMode::pitchComping: dockName = "● Master: Pitch Blob"; break;
+    }
+    m_lblActiveDock.setText(dockName, juce::dontSendNotification);
+
+    // Update category button styling
+    const bool catMix = (m_dockMode == BottomDockMode::mixer || m_dockMode == BottomDockMode::routingMatrix || m_dockMode == BottomDockMode::spatialRadar);
+    const bool catEdit = (m_dockMode == BottomDockMode::pianoRoll || m_dockMode == BottomDockMode::channelRack || m_dockMode == BottomDockMode::drumSampler || m_dockMode == BottomDockMode::sampleZones);
+    const bool catModular = (m_dockMode == BottomDockMode::wireGrid || m_dockMode == BottomDockMode::modulationRack);
+    const bool catMaster = (m_dockMode == BottomDockMode::masteringSuite || m_dockMode == BottomDockMode::pitchComping);
+
+    m_btnCatMix.setColour(juce::TextButton::buttonColourId, catMix ? juce::Colour::fromRGB(45, 95, 160) : juce::Colour::fromRGB(32, 38, 52));
+    m_btnCatEdit.setColour(juce::TextButton::buttonColourId, catEdit ? juce::Colour::fromRGB(120, 60, 160) : juce::Colour::fromRGB(32, 38, 52));
+    m_btnCatModular.setColour(juce::TextButton::buttonColourId, catModular ? juce::Colour::fromRGB(0, 150, 170) : juce::Colour::fromRGB(32, 38, 52));
+    m_btnCatMaster.setColour(juce::TextButton::buttonColourId, catMaster ? juce::Colour::fromRGB(180, 110, 30) : juce::Colour::fromRGB(32, 38, 52));
 
     m_tabMixerButton.setColour(juce::TextButton::buttonColourId,
-                               isMixer ? juce::Colour::fromRGB(45, 95, 145) : juce::Colour::fromRGB(28, 30, 36));
+                               m_dockMode == BottomDockMode::mixer ? juce::Colour::fromRGB(45, 95, 145) : juce::Colour::fromRGB(28, 30, 36));
     m_tabPianoRollButton.setColour(juce::TextButton::buttonColourId,
-                                   isPianoRoll ? juce::Colour::fromRGB(120, 60, 160) : juce::Colour::fromRGB(28, 30, 36));
+                                   m_dockMode == BottomDockMode::pianoRoll ? juce::Colour::fromRGB(120, 60, 160) : juce::Colour::fromRGB(28, 30, 36));
     m_tabChannelRackButton.setColour(juce::TextButton::buttonColourId,
-                                     isChannelRack ? juce::Colour::fromRGB(190, 80, 50) : juce::Colour::fromRGB(28, 30, 36));
+                                     m_dockMode == BottomDockMode::channelRack ? juce::Colour::fromRGB(190, 80, 50) : juce::Colour::fromRGB(28, 30, 36));
     m_tabDrumSamplerButton.setColour(juce::TextButton::buttonColourId,
-                                     isDrumSampler ? juce::Colour::fromRGB(210, 140, 40) : juce::Colour::fromRGB(28, 30, 36));
+                                     m_dockMode == BottomDockMode::drumSampler ? juce::Colour::fromRGB(210, 140, 40) : juce::Colour::fromRGB(28, 30, 36));
     m_tabRoutingMatrixButton.setColour(juce::TextButton::buttonColourId,
-                                       isRoutingMatrix ? juce::Colour::fromRGB(110, 50, 150) : juce::Colour::fromRGB(28, 30, 36));
+                                       m_dockMode == BottomDockMode::routingMatrix ? juce::Colour::fromRGB(110, 50, 150) : juce::Colour::fromRGB(28, 30, 36));
     m_tabModulationButton.setColour(juce::TextButton::buttonColourId,
-                                    isModulationRack ? juce::Colour::fromRGB(45, 120, 95) : juce::Colour::fromRGB(28, 30, 36));
+                                    m_dockMode == BottomDockMode::modulationRack ? juce::Colour::fromRGB(45, 120, 95) : juce::Colour::fromRGB(28, 30, 36));
     m_tabSpatialRadarButton.setColour(juce::TextButton::buttonColourId,
-                                      isSpatialRadar ? juce::Colour::fromRGB(65, 145, 225) : juce::Colour::fromRGB(28, 30, 36));
+                                      m_dockMode == BottomDockMode::spatialRadar ? juce::Colour::fromRGB(65, 145, 225) : juce::Colour::fromRGB(28, 30, 36));
     m_tabWireGridButton.setColour(juce::TextButton::buttonColourId,
-                                  isWireGrid ? juce::Colour::fromRGB(0, 180, 200) : juce::Colour::fromRGB(28, 30, 36));
+                                  m_dockMode == BottomDockMode::wireGrid ? juce::Colour::fromRGB(0, 180, 200) : juce::Colour::fromRGB(28, 30, 36));
     m_tabMasteringButton.setColour(juce::TextButton::buttonColourId,
-                                   isMastering ? juce::Colour::fromRGB(200, 140, 40) : juce::Colour::fromRGB(28, 30, 36));
+                                   m_dockMode == BottomDockMode::masteringSuite ? juce::Colour::fromRGB(200, 140, 40) : juce::Colour::fromRGB(28, 30, 36));
     m_tabPitchBlobButton.setColour(juce::TextButton::buttonColourId,
-                                   isPitchBlob ? juce::Colour::fromRGB(220, 80, 130) : juce::Colour::fromRGB(28, 30, 36));
+                                   m_dockMode == BottomDockMode::pitchComping ? juce::Colour::fromRGB(220, 80, 130) : juce::Colour::fromRGB(28, 30, 36));
     m_tabSampleZoneButton.setColour(juce::TextButton::buttonColourId,
-                                    isSampleZone ? juce::Colour::fromRGB(40, 160, 100) : juce::Colour::fromRGB(28, 30, 36));
+                                    m_dockMode == BottomDockMode::sampleZones ? juce::Colour::fromRGB(40, 160, 100) : juce::Colour::fromRGB(28, 30, 36));
     resized();
 }
 
@@ -867,55 +1118,142 @@ void MainEditorView::toggleMaximizeDock()
 
 void MainEditorView::applyWorkspacePreset(WorkspacePreset preset)
 {
+    auto resetPresetButtons = [this] {
+        const auto idleCol = juce::Colour::fromRGB(32, 35, 44);
+        const auto idleTxt = juce::Colour::fromRGB(190, 195, 210);
+        m_btnWsArrangement.setColour(juce::TextButton::buttonColourId, idleCol);
+        m_btnWsArrangement.setColour(juce::TextButton::textColourOffId, idleTxt);
+        m_btnWsBeatmaker.setColour(juce::TextButton::buttonColourId, idleCol);
+        m_btnWsBeatmaker.setColour(juce::TextButton::textColourOffId, idleTxt);
+        m_btnWsRecording.setColour(juce::TextButton::buttonColourId, idleCol);
+        m_btnWsRecording.setColour(juce::TextButton::textColourOffId, idleTxt);
+        m_btnWsMixing.setColour(juce::TextButton::buttonColourId, idleCol);
+        m_btnWsMixing.setColour(juce::TextButton::textColourOffId, idleTxt);
+        m_btnWsModular.setColour(juce::TextButton::buttonColourId, idleCol);
+        m_btnWsModular.setColour(juce::TextButton::textColourOffId, idleTxt);
+        m_btnWsMastering.setColour(juce::TextButton::buttonColourId, idleCol);
+        m_btnWsMastering.setColour(juce::TextButton::textColourOffId, idleTxt);
+        m_btnWsLive.setColour(juce::TextButton::buttonColourId, idleCol);
+        m_btnWsLive.setColour(juce::TextButton::textColourOffId, idleTxt);
+    };
+    auto highlightBtn = [](juce::TextButton& btn) {
+        btn.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(45, 95, 160));
+        btn.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+    };
+
+    resetPresetButtons();
+
     switch (preset)
     {
-    case WorkspacePreset::defaultArrangement:
+    case WorkspacePreset::songArrangement:
         reDockAllPanels();
         setCenterViewMode(CenterViewMode::arrangement);
+        m_inspectorVisible = true;
+        m_trackInspector.setVisible(true);
+        m_inspectorSplitter.setVisible(true);
+        m_inspectorWidth = 210;
         setDockMode(BottomDockMode::mixer);
         m_dockHeight = 220;
         m_dockMaximized = false;
         if (m_browserVisible)
             togglePluginBrowser();
+        highlightBtn(m_btnWsArrangement);
         break;
 
-    case WorkspacePreset::dualScreenStudio:
+    case WorkspacePreset::patternLabBeatmaker:
         reDockAllPanels();
         setCenterViewMode(CenterViewMode::arrangement);
-        setDockMode(BottomDockMode::pianoRoll);
-        detachPanel(DetachablePanel::mixer);
-        m_dockHeight = 260;
+        m_inspectorVisible = true;
+        m_trackInspector.setVisible(true);
+        m_inspectorSplitter.setVisible(true);
+        setDockMode(BottomDockMode::drumSampler);
+        m_dockHeight = 280;
         m_dockMaximized = false;
-        break;
-
-    case WorkspacePreset::beatmakerFocus:
-        reDockAllPanels();
-        setCenterViewMode(CenterViewMode::arrangement);
-        detachPanel(DetachablePanel::channelRack);
-        setDockMode(BottomDockMode::pianoRoll);
         if (! m_browserVisible)
         {
             togglePluginBrowser();
             setSidebarTab(SidebarTab::samples);
         }
-        m_sidebarWidth = 320;
-        m_dockHeight = 240;
-        m_dockMaximized = false;
+        m_sidebarWidth = 300;
+        highlightBtn(m_btnWsBeatmaker);
         break;
 
-    case WorkspacePreset::livePerformanceRig:
+    case WorkspacePreset::recordingComping:
         reDockAllPanels();
-        setCenterViewMode(CenterViewMode::sessionView);
-        setDockMode(BottomDockMode::mixer);
-        m_dockHeight = 240;
+        setCenterViewMode(CenterViewMode::arrangement);
+        m_inspectorVisible = true;
+        m_trackInspector.setVisible(true);
+        m_inspectorSplitter.setVisible(true);
+        m_inspectorWidth = 260;
+        setDockMode(BottomDockMode::pitchComping);
+        m_dockHeight = 280;
         m_dockMaximized = false;
+        if (m_browserVisible)
+            togglePluginBrowser();
+        highlightBtn(m_btnWsRecording);
+        break;
+
+    case WorkspacePreset::mixingConsole:
+        reDockAllPanels();
+        setCenterViewMode(CenterViewMode::arrangement);
+        m_inspectorVisible = true;
+        m_trackInspector.setVisible(true);
+        m_inspectorSplitter.setVisible(true);
+        setDockMode(BottomDockMode::mixer);
+        m_dockHeight = 380;
+        m_dockMaximized = false;
+        if (m_browserVisible)
+            togglePluginBrowser();
+        highlightBtn(m_btnWsMixing);
+        break;
+
+    case WorkspacePreset::soundDesignModular:
+        reDockAllPanels();
+        setCenterViewMode(CenterViewMode::arrangement);
+        m_inspectorVisible = true;
+        m_trackInspector.setVisible(true);
+        m_inspectorSplitter.setVisible(true);
+        setDockMode(BottomDockMode::wireGrid);
+        m_dockHeight = 360;
+        m_dockMaximized = false;
+        highlightBtn(m_btnWsModular);
         break;
 
     case WorkspacePreset::masteringSuite:
         reDockAllPanels();
         setCenterViewMode(CenterViewMode::arrangement);
+        m_inspectorVisible = false;
+        m_trackInspector.setVisible(false);
+        m_inspectorSplitter.setVisible(false);
+        setDockMode(BottomDockMode::masteringSuite);
+        m_dockHeight = 380;
+        m_dockMaximized = false;
+        if (m_browserVisible)
+            togglePluginBrowser();
+        highlightBtn(m_btnWsMastering);
+        break;
+
+    case WorkspacePreset::livePerformanceRig:
+        reDockAllPanels();
+        setCenterViewMode(CenterViewMode::sessionView);
+        m_inspectorVisible = false;
+        m_trackInspector.setVisible(false);
+        m_inspectorSplitter.setVisible(false);
         setDockMode(BottomDockMode::mixer);
-        m_dockHeight = 360;
+        m_dockHeight = 240;
+        m_dockMaximized = false;
+        highlightBtn(m_btnWsLive);
+        break;
+
+    case WorkspacePreset::dualScreenStudio:
+        reDockAllPanels();
+        setCenterViewMode(CenterViewMode::arrangement);
+        m_inspectorVisible = true;
+        m_trackInspector.setVisible(true);
+        m_inspectorSplitter.setVisible(true);
+        setDockMode(BottomDockMode::pianoRoll);
+        detachPanel(DetachablePanel::mixer);
+        m_dockHeight = 260;
         m_dockMaximized = false;
         break;
     }
@@ -968,6 +1306,7 @@ void MainEditorView::setViewModel(EditorViewModel model)
     m_transportBar.setViewModel(m_model);
     m_timelineView.setViewModel(m_model);
     m_sessionMatrixView.setViewModel(m_model);
+    m_trackInspector.setViewModel(m_model);
     m_mixerPanel.setViewModel(m_model);
     m_pianoRollView.setViewModel(m_model);
     m_channelRackView.setViewModel(m_model);
@@ -984,6 +1323,7 @@ void MainEditorView::setSnapshot(project::ProjectSnapshot snapshot)
     m_transportBar.setViewModel(m_model);
     m_timelineView.setViewModel(m_model);
     m_sessionMatrixView.setViewModel(m_model);
+    m_trackInspector.setViewModel(m_model);
     m_mixerPanel.setViewModel(m_model);
     m_pianoRollView.setViewModel(m_model);
     m_channelRackView.setViewModel(m_model);
@@ -1250,10 +1590,37 @@ void MainEditorView::menuItemSelected(int menuItemID, int)
 
 bool MainEditorView::keyPressed(const juce::KeyPress& key)
 {
+    // Command Palette (Ctrl+K or Cmd+K)
+    if ((key.getModifiers().isCtrlDown() || key.getModifiers().isCommandDown()) && (key.getKeyCode() == 'K' || key.getKeyCode() == 'k'))
+    {
+        openCommandPalette();
+        return true;
+    }
+
+    // Track Inspector Toggle [I]
+    if (! key.getModifiers().isCtrlDown() && ! key.getModifiers().isCommandDown() && ! key.getModifiers().isAltDown()
+        && (key.getKeyCode() == 'I' || key.getKeyCode() == 'i'))
+    {
+        toggleTrackInspector();
+        return true;
+    }
+
+    // Number keys 1..7 for Workspace Presets
+    if (! key.getModifiers().isCtrlDown() && ! key.getModifiers().isCommandDown() && ! key.getModifiers().isAltDown())
+    {
+        if (key.getKeyCode() == '1') { applyWorkspacePreset(WorkspacePreset::songArrangement); return true; }
+        if (key.getKeyCode() == '2') { applyWorkspacePreset(WorkspacePreset::patternLabBeatmaker); return true; }
+        if (key.getKeyCode() == '3') { applyWorkspacePreset(WorkspacePreset::recordingComping); return true; }
+        if (key.getKeyCode() == '4') { applyWorkspacePreset(WorkspacePreset::mixingConsole); return true; }
+        if (key.getKeyCode() == '5') { applyWorkspacePreset(WorkspacePreset::soundDesignModular); return true; }
+        if (key.getKeyCode() == '6') { applyWorkspacePreset(WorkspacePreset::masteringSuite); return true; }
+        if (key.getKeyCode() == '7') { applyWorkspacePreset(WorkspacePreset::livePerformanceRig); return true; }
+    }
+
     // Function key workspace presets
     if (key.getKeyCode() == juce::KeyPress::F1Key)
     {
-        applyWorkspacePreset(WorkspacePreset::defaultArrangement);
+        applyWorkspacePreset(WorkspacePreset::songArrangement);
         return true;
     }
     if (key.getKeyCode() == juce::KeyPress::F2Key)
@@ -1263,7 +1630,7 @@ bool MainEditorView::keyPressed(const juce::KeyPress& key)
     }
     if (key.getKeyCode() == juce::KeyPress::F3Key)
     {
-        applyWorkspacePreset(WorkspacePreset::beatmakerFocus);
+        applyWorkspacePreset(WorkspacePreset::patternLabBeatmaker);
         return true;
     }
     if (key.getKeyCode() == juce::KeyPress::F4Key)
@@ -1416,10 +1783,24 @@ void MainEditorView::resized()
     // 1. Top Application Menu Bar (24 px)
     m_menuBar.setBounds(area.removeFromTop(24));
 
-    // 2. Transport Header Bar (44 px)
+    // 2. Workspace Preset Bar & HUD (28 px)
+    auto wsBar = area.removeFromTop(28);
+    m_btnToggleInspector.setBounds(wsBar.removeFromLeft(105).reduced(2, 2));
+    m_btnCommandPalette.setBounds(wsBar.removeFromRight(100).reduced(2, 2));
+
+    m_btnWsArrangement.setBounds(wsBar.removeFromLeft(85).reduced(2, 2));
+    m_btnWsBeatmaker.setBounds(wsBar.removeFromLeft(95).reduced(2, 2));
+    m_btnWsRecording.setBounds(wsBar.removeFromLeft(80).reduced(2, 2));
+    m_btnWsMixing.setBounds(wsBar.removeFromLeft(70).reduced(2, 2));
+    m_btnWsModular.setBounds(wsBar.removeFromLeft(85).reduced(2, 2));
+    m_btnWsMastering.setBounds(wsBar.removeFromLeft(80).reduced(2, 2));
+    m_btnWsLive.setBounds(wsBar.removeFromLeft(65).reduced(2, 2));
+    m_btnWsSave.setBounds(wsBar.removeFromLeft(75).reduced(2, 2));
+
+    // 3. Transport Header Bar (44 px)
     m_transportBar.setBounds(area.removeFromTop(44));
 
-    // 3. Right Sidebar Plugin / Sample Browser with vertical drag splitter
+    // 4. Right Sidebar Plugin / Sample Browser with vertical drag splitter
     if (m_browserVisible && ! m_floatingBrowser)
     {
         auto sidebarArea = area.removeFromRight(m_sidebarWidth);
@@ -1440,53 +1821,71 @@ void MainEditorView::resized()
         m_sidebarSplitter.setVisible(false);
     }
 
-    // 4. Bottom Dock Area (Variable Height, Collapsible, or Maximized)
-    const bool allDockedPanelsDetached = (m_floatingMixer && m_floatingPianoRoll && m_floatingChannelRack && m_floatingDrumSampler && m_floatingRoutingMatrix && m_floatingModulationRack && m_floatingSpatialRadar && m_floatingWireGrid && m_floatingMasteringSuite);
+    // 5. Left Track Inspector with vertical drag splitter
+    if (m_inspectorVisible)
+    {
+        m_trackInspector.setVisible(true);
+        m_trackInspector.setBounds(area.removeFromLeft(m_inspectorWidth));
+        m_inspectorSplitter.setVisible(true);
+        m_inspectorSplitter.setBounds(area.removeFromLeft(5));
+    }
+    else
+    {
+        m_trackInspector.setVisible(false);
+        m_inspectorSplitter.setVisible(false);
+    }
+
+    // 6. Bottom Dock Area (Variable Height, Collapsible, or Maximized)
+    const bool allDockedPanelsDetached = (m_floatingMixer && m_floatingPianoRoll && m_floatingChannelRack && m_floatingDrumSampler && m_floatingRoutingMatrix && m_floatingModulationRack && m_floatingSpatialRadar && m_floatingWireGrid && m_floatingMasteringSuite && m_floatingPitchBlob && m_floatingSampleZone);
     if (! allDockedPanelsDetached)
     {
-        const int actualDockHeight = m_dockMaximized ? (area.getHeight() - 30) : m_dockHeight;
+        const int actualDockHeight = m_dockMaximized ? (area.getHeight() - 20) : m_dockHeight;
         auto bottomDockArea = area.removeFromBottom(std::clamp(actualDockHeight, 40, std::max(50, area.getHeight() + actualDockHeight - 40)));
 
         m_dockSplitter.setVisible(true);
         m_dockSplitter.setBounds(area.removeFromBottom(5));
 
-        auto tabHeader = bottomDockArea.removeFromTop(24);
-        m_tabMixerButton.setBounds(tabHeader.removeFromLeft(105).reduced(2, 2));
-        m_tabPianoRollButton.setBounds(tabHeader.removeFromLeft(100).reduced(2, 2));
-        m_tabChannelRackButton.setBounds(tabHeader.removeFromLeft(110).reduced(2, 2));
-        m_tabDrumSamplerButton.setBounds(tabHeader.removeFromLeft(110).reduced(2, 2));
-        m_tabRoutingMatrixButton.setBounds(tabHeader.removeFromLeft(90).reduced(2, 2));
-        m_tabModulationButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
-        m_tabSpatialRadarButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
-        m_tabWireGridButton.setBounds(tabHeader.removeFromLeft(110).reduced(2, 2));
-        m_tabMasteringButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
-        m_tabPitchBlobButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
-        m_tabSampleZoneButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
-        m_tabBrowserButton.setBounds(tabHeader.removeFromLeft(80).reduced(2, 2));
+        auto tabHeader = bottomDockArea.removeFromTop(26);
+        m_btnCatMix.setBounds(tabHeader.removeFromLeft(75).reduced(2, 2));
+        m_btnCatEdit.setBounds(tabHeader.removeFromLeft(75).reduced(2, 2));
+        m_btnCatModular.setBounds(tabHeader.removeFromLeft(85).reduced(2, 2));
+        m_btnCatMaster.setBounds(tabHeader.removeFromLeft(85).reduced(2, 2));
+        m_lblActiveDock.setBounds(tabHeader.removeFromLeft(160).reduced(2, 2));
 
         m_maximizeDockButton.setBounds(tabHeader.removeFromRight(26).reduced(2, 2));
         m_detachDockButton.setBounds(tabHeader.removeFromRight(26).reduced(2, 2));
+        m_btnDualDock.setBounds(tabHeader.removeFromRight(65).reduced(2, 2));
+        m_tabBrowserButton.setBounds(tabHeader.removeFromRight(85).reduced(2, 2));
 
-        if (! m_floatingMixer) m_mixerPanel.setBounds(bottomDockArea);
-        if (! m_floatingPianoRoll) m_pianoRollView.setBounds(bottomDockArea);
-        if (! m_floatingChannelRack) m_channelRackView.setBounds(bottomDockArea);
-        if (! m_floatingDrumSampler) m_drumSamplerView.setBounds(bottomDockArea);
-        if (! m_floatingRoutingMatrix) m_routingMatrixView.setBounds(bottomDockArea);
-        if (! m_floatingModulationRack) m_modulationRackView.setBounds(bottomDockArea);
-        if (! m_floatingSpatialRadar) m_spatialRadarView.setBounds(bottomDockArea);
-        if (! m_floatingWireGrid) m_wireGridView.setBounds(bottomDockArea);
-        if (! m_floatingMasteringSuite) m_masteringSuiteView.setBounds(bottomDockArea);
-        if (! m_floatingPitchBlob) m_pitchBlobView.setBounds(bottomDockArea);
-        if (! m_floatingSampleZone) m_sampleZoneView.setBounds(bottomDockArea);
+        if (m_dualDockEnabled)
+        {
+            const int totalW = bottomDockArea.getWidth();
+            const int leftW = std::clamp(static_cast<int>(totalW * m_dockSplitRatio), 80, std::max(100, totalW - 80));
+            auto leftPane = bottomDockArea.removeFromLeft(leftW);
+            m_dualDockSplitter.setVisible(true);
+            m_dualDockSplitter.setBounds(bottomDockArea.removeFromLeft(5));
+            auto rightPane = bottomDockArea;
+
+            layoutDockPanel(m_dockMode, leftPane);
+            layoutDockPanel(m_secondaryDockMode, rightPane);
+        }
+        else
+        {
+            m_dualDockSplitter.setVisible(false);
+            layoutDockPanel(m_dockMode, bottomDockArea);
+        }
     }
     else
     {
         m_dockSplitter.setVisible(false);
     }
 
-    // 5. Center View: Arrangement Timeline or Session Matrix Grid
+    // 7. Center View: Arrangement Timeline or Session Matrix Grid
     m_timelineView.setBounds(area);
     m_sessionMatrixView.setBounds(area);
+
+    // 8. Command Palette Overlay (Covers entire local bounds)
+    m_commandPalette.setBounds(getLocalBounds());
 }
 
 void MainEditorView::loadVocalStem(const float* samples, const std::size_t sampleCount, const double sampleRate)
