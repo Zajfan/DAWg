@@ -125,6 +125,19 @@ void PitchBlobCompingView::setViewModel(const EditorViewModel& model)
     repaint();
 }
 
+void PitchBlobCompingView::loadVocalStem(const float* samples, const std::size_t sampleCount, const double sampleRate)
+{
+    if (samples != nullptr && sampleCount > 0)
+    {
+        m_pitchEditor.analyzeAudio(samples, sampleCount, sampleRate);
+        if (m_snapToScale)
+        {
+            m_pitchEditor.quantizeToScale(m_scaleClasses, 1.0f);
+        }
+        repaint();
+    }
+}
+
 void PitchBlobCompingView::resized()
 {
     auto bounds = getLocalBounds();

@@ -10,6 +10,7 @@
 #include "MixerPanel.h"
 #include "ModulationRackView.h"
 #include "PianoRollView.h"
+#include "PitchBlobCompingView.h"
 #include "PluginBrowserPanel.h"
 #include "RoutingMatrixView.h"
 #include "SampleBrowserPanel.h"
@@ -75,7 +76,8 @@ public:
         modulationRack,
         spatialRadar,
         wireGrid,
-        masteringSuite
+        masteringSuite,
+        pitchComping
     };
 
     enum class DetachablePanel : std::uint8_t
@@ -90,6 +92,7 @@ public:
         spatialRadar,
         wireGrid,
         masteringSuite,
+        pitchComping,
         browser
     };
 
@@ -126,6 +129,7 @@ public:
     void setWaveformCache(media::WaveformCache* cache);
     void setDockMode(BottomDockMode mode);
     [[nodiscard]] BottomDockMode dockMode() const noexcept { return m_dockMode; }
+    void loadVocalStem(const float* samples, std::size_t sampleCount, double sampleRate);
     void toggleCenterViewMode();
     void setCenterViewMode(CenterViewMode mode);
     [[nodiscard]] CenterViewMode centerViewMode() const noexcept { return m_centerViewMode; }
@@ -187,6 +191,7 @@ private:
     juce::TextButton m_tabSpatialRadarButton {"Spatial 3D [Z]"};
     juce::TextButton m_tabWireGridButton {"Modular Grid [G]"};
     juce::TextButton m_tabMasteringButton {"Mastering [U]"};
+    juce::TextButton m_tabPitchBlobButton {"Pitch/Blob [H]"};
     juce::TextButton m_tabBrowserButton {"Browser [B]"};
     juce::TextButton m_detachDockButton {"↗"};
     juce::TextButton m_maximizeDockButton {"⛶"};
@@ -200,6 +205,7 @@ private:
     SpatialRadarView m_spatialRadarView;
     DspWireGridView m_wireGridView;
     MasteringSuiteView m_masteringSuiteView;
+    PitchBlobCompingView m_pitchBlobView;
     std::unique_ptr<PluginBrowserPanel> m_pluginBrowser;
     std::unique_ptr<SampleBrowserPanel> m_sampleBrowser;
     juce::TextButton m_sidebarTabPluginsButton {"Plugins"};
@@ -217,6 +223,7 @@ private:
     std::unique_ptr<FloatingPanelWindow> m_floatingSpatialRadar;
     std::unique_ptr<FloatingPanelWindow> m_floatingWireGrid;
     std::unique_ptr<FloatingPanelWindow> m_floatingMasteringSuite;
+    std::unique_ptr<FloatingPanelWindow> m_floatingPitchBlob;
     std::unique_ptr<FloatingPanelWindow> m_floatingBrowser;
     std::unique_ptr<FloatingPanelWindow> m_floatingSessionMatrix;
 

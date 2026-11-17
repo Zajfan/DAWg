@@ -551,6 +551,127 @@ MixerPanel::MixerPanel(CommandHandler handler, LimiterCallback limiterCb)
     m_toggleModulatorsBtn.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(38, 42, 50));
     addAndMakeVisible(m_toggleModulatorsBtn);
     addAndMakeVisible(m_modulatorRack);
+
+    // Mixer Scene Snapshots (Mix A vs Mix B)
+    m_sceneAButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff238636));
+    m_sceneAButton.onClick = [this] { switchScene(false); };
+    addAndMakeVisible(m_sceneAButton);
+
+    m_sceneBButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff21262d));
+    m_sceneBButton.onClick = [this] { switchScene(true); };
+    addAndMakeVisible(m_sceneBButton);
+
+    m_copySceneButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff30363d));
+    m_copySceneButton.onClick = [this] { copyActiveSceneToOpposite(); };
+    addAndMakeVisible(m_copySceneButton);
+
+    // VCA Spill Controls
+    m_vcaAllButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1f6feb));
+    m_vcaAllButton.onClick = [this] { setVcaSpill(0); };
+    addAndMakeVisible(m_vcaAllButton);
+
+    for (int v = 0; v < 8; ++v)
+    {
+        m_vcaSpillButtons[static_cast<std::size_t>(v)].setButtonText("V" + std::to_string(v + 1));
+        m_vcaSpillButtons[static_cast<std::size_t>(v)].setColour(juce::TextButton::buttonColourId, juce::Colour(0xff21262d));
+        m_vcaSpillButtons[static_cast<std::size_t>(v)].onClick = [this, v] { setVcaSpill(v + 1); };
+        addAndMakeVisible(m_vcaSpillButtons[static_cast<std::size_t>(v)]);
+    }
+
+    m_spillStatusLabel.setFont(juce::FontOptions(10.0f).withStyle("Bold"));
+    m_spillStatusLabel.setColour(juce::Label::textColourId, juce::Colour(0xffa371f7));
+    addAndMakeVisible(m_spillStatusLabel);
+}
+
+void MixerPanel::captureCurrentScene(MixerScene& target)
+{
+    target.channels.clear();
+    target.channels.reserve(m_strips.size());
+    for (const auto& strip : m_strips)
+    {
+        target.channels.push_back(ChannelMixSnapshot {
+            .trackId = strip->trackId(),
+            .gainLinear = strip->gainLinear(),
+            .pan = strip->pan(),
+            .muted = strip->isMuted(),
+            .solo = strip->isSolo(),
+            .phaseInvert = strip->isPhaseInvert()
+        });
+    }
+}
+
+void MixerPanel::applyScene(const MixerScene& scene)
+{
+    if (! m_handler) return;
+
+    for (const auto& ch : scene.channels)
+    {
+        m_handler(project::SetTrackGainPan { ch.trackId, ch.gainLinear, ch.pan, ch.phaseInvert });
+        m_handler(project::SetTrackMute { ch.trackId, ch.muted });
+        m_handler(project::SetTrackSolo { ch.trackId, ch.solo });
+    }
+}
+
+void MixerPanel::switchScene(const bool toSceneB)
+{
+    if (toSceneB == m_activeSceneIsB) return;
+
+    // Capture current active scene first
+    if (m_activeSceneIsB) {
+        captureCurrentScene(m_sceneB);
+    } else {
+        captureCurrentScene(m_sceneA);
+    }
+
+    m_activeSceneIsB = toSceneB;
+
+    if (m_activeSceneIsB) {
+        if (!m_sceneB.channels.empty()) applyScene(m_sceneB);
+    } else {
+        if (!m_sceneA.channels.empty()) applyScene(m_sceneA);
+    }
+
+    m_sceneAButton.setColour(juce::TextButton::buttonColourId, !m_activeSceneIsB ? juce::Colour(0xff238636) : juce::Colour(0xff21262d));
+    m_sceneBButton.setColour(juce::TextButton::buttonColourId, m_activeSceneIsB ? juce::Colour(0xff238636) : juce::Colour(0xff21262d));
+    m_copySceneButton.setButtonText(m_activeSceneIsB ? "B ➔ A" : "A ➔ B");
+}
+
+void MixerPanel::copyActiveSceneToOpposite()
+{
+    if (m_activeSceneIsB) {
+        captureCurrentScene(m_sceneB);
+        m_sceneA = m_sceneB;
+    } else {
+        captureCurrentScene(m_sceneA);
+        m_sceneB = m_sceneA;
+    }
+}
+
+void MixerPanel::setVcaSpill(const int vcaGroup)
+{
+    m_vcaSpillGroup = std::clamp(vcaGroup, 0, 8);
+
+    m_vcaAllButton.setColour(juce::TextButton::buttonColourId,
+                             m_vcaSpillGroup == 0 ? juce::Colour(0xff1f6feb) : juce::Colour(0xff21262d));
+
+    for (int v = 0; v < 8; ++v)
+    {
+        const bool active = (m_vcaSpillGroup == (v + 1));
+        m_vcaSpillButtons[static_cast<std::size_t>(v)].setColour(
+            juce::TextButton::buttonColourId,
+            active ? juce::Colour(0xffa371f7) : juce::Colour(0xff21262d));
+    }
+
+    if (m_vcaSpillGroup == 0)
+    {
+        m_spillStatusLabel.setText("", juce::dontSendNotification);
+    }
+    else
+    {
+        m_spillStatusLabel.setText("SPILL: VCA " + juce::String(m_vcaSpillGroup), juce::dontSendNotification);
+    }
+
+    resized();
 }
 
 void MixerPanel::toggleModulatorRack()
@@ -595,6 +716,21 @@ void MixerPanel::paint(juce::Graphics& g)
 void MixerPanel::resized()
 {
     auto area = getLocalBounds();
+
+    // Scene & VCA Spill Top Toolbar
+    auto toolbar = area.removeFromTop(24).reduced(4, 2);
+    m_sceneAButton.setBounds(toolbar.removeFromLeft(48).reduced(1));
+    m_sceneBButton.setBounds(toolbar.removeFromLeft(48).reduced(1));
+    m_copySceneButton.setBounds(toolbar.removeFromLeft(54).reduced(1));
+    toolbar.removeFromLeft(8);
+
+    m_vcaAllButton.setBounds(toolbar.removeFromLeft(36).reduced(1));
+    for (int v = 0; v < 8; ++v)
+    {
+        m_vcaSpillButtons[static_cast<std::size_t>(v)].setBounds(toolbar.removeFromLeft(28).reduced(1));
+    }
+    m_spillStatusLabel.setBounds(toolbar.removeFromLeft(120).reduced(2, 0));
+
     constexpr int masterWidth = 84;
     auto masterArea = area.removeFromRight(masterWidth);
     m_toggleModulatorsBtn.setBounds(masterArea.removeFromTop(20).reduced(2, 1));
@@ -609,15 +745,20 @@ void MixerPanel::resized()
     m_viewport.setBounds(area);
 
     constexpr int stripWidth = 76;
-    const int totalWidth = static_cast<int>(m_strips.size()) * stripWidth;
-    m_tracksContainer.setBounds(0, 0, std::max(totalWidth, m_viewport.getWidth()), m_viewport.getHeight());
-
-    int x = 0;
+    int visibleCount = 0;
     for (auto& strip : m_strips)
     {
-        strip->setBounds(x, 0, stripWidth, m_tracksContainer.getHeight());
-        x += stripWidth;
+        const bool visible = (m_vcaSpillGroup == 0 || strip->vcaGroup() == m_vcaSpillGroup);
+        strip->setVisible(visible);
+        if (visible)
+        {
+            strip->setBounds(visibleCount * stripWidth, 0, stripWidth, m_tracksContainer.getHeight());
+            ++visibleCount;
+        }
     }
+
+    const int totalWidth = visibleCount * stripWidth;
+    m_tracksContainer.setBounds(0, 0, std::max(totalWidth, m_viewport.getWidth()), m_viewport.getHeight());
 }
 
 } // namespace dawg::ui

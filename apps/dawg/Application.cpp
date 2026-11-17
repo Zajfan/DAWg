@@ -769,6 +769,10 @@ void Application::openAudioPool()
 
         ui::AudioPoolWindow::open(*m_audioPoolManager, [this] {
             refreshMainComponent();
+        }, [this](const float* samples, std::size_t sampleCount, double sampleRate) {
+            if (m_mainComponent != nullptr) {
+                m_mainComponent->loadVocalStem(samples, sampleCount, sampleRate);
+            }
         });
     }
 }

@@ -182,6 +182,11 @@ MainEditorView::MainEditorView(EditorViewModel model,
     m_tabMasteringButton.onClick = [this] { setDockMode(BottomDockMode::masteringSuite); };
     addAndMakeVisible(m_tabMasteringButton);
 
+    m_tabPitchBlobButton.setClickingTogglesState(false);
+    m_tabPitchBlobButton.onClick = [this] { setDockMode(BottomDockMode::pitchComping); };
+    addAndMakeVisible(m_tabPitchBlobButton);
+    addAndMakeVisible(m_pitchBlobView);
+
     m_tabBrowserButton.setClickingTogglesState(false);
     m_tabBrowserButton.onClick = [this] { togglePluginBrowser(); };
     addAndMakeVisible(m_tabBrowserButton);
@@ -207,6 +212,8 @@ MainEditorView::MainEditorView(EditorViewModel model,
             detachPanel(DetachablePanel::wireGrid);
         else if (m_dockMode == BottomDockMode::masteringSuite)
             detachPanel(DetachablePanel::masteringSuite);
+        else if (m_dockMode == BottomDockMode::pitchComping)
+            detachPanel(DetachablePanel::pitchComping);
     };
     addAndMakeVisible(m_detachDockButton);
 
@@ -395,6 +402,11 @@ void MainEditorView::setDockMode(BottomDockMode mode)
         m_floatingMasteringSuite->toFront(true);
         return;
     }
+    if (m_dockMode == BottomDockMode::pitchComping && m_floatingPitchBlob)
+    {
+        m_floatingPitchBlob->toFront(true);
+        return;
+    }
 
     const bool isMixer = (m_dockMode == BottomDockMode::mixer);
     const bool isPianoRoll = (m_dockMode == BottomDockMode::pianoRoll);
@@ -405,6 +417,7 @@ void MainEditorView::setDockMode(BottomDockMode mode)
     const bool isSpatialRadar = (m_dockMode == BottomDockMode::spatialRadar);
     const bool isWireGrid = (m_dockMode == BottomDockMode::wireGrid);
     const bool isMastering = (m_dockMode == BottomDockMode::masteringSuite);
+    const bool isPitchBlob = (m_dockMode == BottomDockMode::pitchComping);
 
     if (! m_floatingMixer) m_mixerPanel.setVisible(isMixer);
     if (! m_floatingPianoRoll) m_pianoRollView.setVisible(isPianoRoll);
@@ -415,6 +428,7 @@ void MainEditorView::setDockMode(BottomDockMode mode)
     if (! m_floatingSpatialRadar) m_spatialRadarView.setVisible(isSpatialRadar);
     if (! m_floatingWireGrid) m_wireGridView.setVisible(isWireGrid);
     if (! m_floatingMasteringSuite) m_masteringSuiteView.setVisible(isMastering);
+    if (! m_floatingPitchBlob) m_pitchBlobView.setVisible(isPitchBlob);
 
     m_tabMixerButton.setColour(juce::TextButton::buttonColourId,
                                isMixer ? juce::Colour::fromRGB(45, 95, 145) : juce::Colour::fromRGB(28, 30, 36));
@@ -434,6 +448,8 @@ void MainEditorView::setDockMode(BottomDockMode mode)
                                   isWireGrid ? juce::Colour::fromRGB(0, 180, 200) : juce::Colour::fromRGB(28, 30, 36));
     m_tabMasteringButton.setColour(juce::TextButton::buttonColourId,
                                    isMastering ? juce::Colour::fromRGB(200, 140, 40) : juce::Colour::fromRGB(28, 30, 36));
+    m_tabPitchBlobButton.setColour(juce::TextButton::buttonColourId,
+                                   isPitchBlob ? juce::Colour::fromRGB(220, 80, 130) : juce::Colour::fromRGB(28, 30, 36));
     resized();
 }
 
@@ -619,6 +635,22 @@ void MainEditorView::detachPanel(DetachablePanel panel)
         }
         break;
 
+    case DetachablePanel::pitchComping:
+        if (! m_floatingPitchBlob)
+        {
+            removeChildComponent(&m_pitchBlobView);
+            m_floatingPitchBlob = std::make_unique<FloatingPanelWindow>(
+                "Pitch Blob & Swipe Comping - DAWg",
+                &m_pitchBlobView,
+                [this] { reDockPanel(DetachablePanel::pitchComping); });
+
+            m_floatingPitchBlob->setBounds(250, 250, 880, 520);
+            m_floatingPitchBlob->setVisible(true);
+            m_tabPitchBlobButton.setButtonText("Pitch/Blob [↙]");
+            setDockMode(m_dockMode == BottomDockMode::pitchComping ? BottomDockMode::mixer : m_dockMode);
+        }
+        break;
+
     case DetachablePanel::browser:
         break;
     }
@@ -729,6 +761,16 @@ void MainEditorView::reDockPanel(DetachablePanel panel)
         }
         break;
 
+    case DetachablePanel::pitchComping:
+        if (m_floatingPitchBlob)
+        {
+            m_floatingPitchBlob.reset();
+            addChildComponent(m_pitchBlobView);
+            m_tabPitchBlobButton.setButtonText("Pitch/Blob [H]");
+            setDockMode(BottomDockMode::pitchComping);
+        }
+        break;
+
     case DetachablePanel::browser:
         break;
     }
@@ -748,6 +790,7 @@ void MainEditorView::reDockAllPanels()
     reDockPanel(DetachablePanel::spatialRadar);
     reDockPanel(DetachablePanel::wireGrid);
     reDockPanel(DetachablePanel::masteringSuite);
+    reDockPanel(DetachablePanel::pitchComping);
 }
 
 bool MainEditorView::isPanelDetached(DetachablePanel panel) const noexcept
@@ -764,6 +807,7 @@ bool MainEditorView::isPanelDetached(DetachablePanel panel) const noexcept
     case DetachablePanel::spatialRadar: return m_floatingSpatialRadar != nullptr;
     case DetachablePanel::wireGrid: return m_floatingWireGrid != nullptr;
     case DetachablePanel::masteringSuite: return m_floatingMasteringSuite != nullptr;
+    case DetachablePanel::pitchComping: return m_floatingPitchBlob != nullptr;
     case DetachablePanel::browser: return false;
     }
     return false;
@@ -1372,6 +1416,7 @@ void MainEditorView::resized()
         m_tabSpatialRadarButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
         m_tabWireGridButton.setBounds(tabHeader.removeFromLeft(110).reduced(2, 2));
         m_tabMasteringButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
+        m_tabPitchBlobButton.setBounds(tabHeader.removeFromLeft(95).reduced(2, 2));
         m_tabBrowserButton.setBounds(tabHeader.removeFromLeft(80).reduced(2, 2));
 
         m_maximizeDockButton.setBounds(tabHeader.removeFromRight(26).reduced(2, 2));
@@ -1386,6 +1431,7 @@ void MainEditorView::resized()
         if (! m_floatingSpatialRadar) m_spatialRadarView.setBounds(bottomDockArea);
         if (! m_floatingWireGrid) m_wireGridView.setBounds(bottomDockArea);
         if (! m_floatingMasteringSuite) m_masteringSuiteView.setBounds(bottomDockArea);
+        if (! m_floatingPitchBlob) m_pitchBlobView.setBounds(bottomDockArea);
     }
     else
     {
@@ -1395,6 +1441,12 @@ void MainEditorView::resized()
     // 5. Center View: Arrangement Timeline or Session Matrix Grid
     m_timelineView.setBounds(area);
     m_sessionMatrixView.setBounds(area);
+}
+
+void MainEditorView::loadVocalStem(const float* samples, const std::size_t sampleCount, const double sampleRate)
+{
+    setDockMode(BottomDockMode::pitchComping);
+    m_pitchBlobView.loadVocalStem(samples, sampleCount, sampleRate);
 }
 
 } // namespace dawg::ui

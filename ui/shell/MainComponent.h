@@ -41,6 +41,7 @@ public:
     void setProjectSnapshot(project::ProjectSnapshot);
     void setAudioStatus(const AudioStatus&);
     void setWaveformCache(media::WaveformCache* cache);
+    void loadVocalStem(const float* samples, std::size_t sampleCount, double sampleRate) { m_editor.loadVocalStem(samples, sampleCount, sampleRate); }
     void paint(juce::Graphics&) override;
     void resized() override;
 

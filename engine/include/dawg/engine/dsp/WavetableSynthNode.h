@@ -112,6 +112,11 @@ public:
     void noteOff(std::uint8_t note) noexcept;
     void allNotesOff() noexcept;
 
+    // MPE (MIDI Polyphonic Expression) 5D Control API
+    void notePitchBend(std::uint8_t note, float semitones) noexcept;
+    void notePressure(std::uint8_t note, float pressure) noexcept;
+    void noteSlide(std::uint8_t note, float slide) noexcept;
+
     [[nodiscard]] std::size_t activeVoiceCount() const noexcept;
 
 private:
@@ -123,6 +128,11 @@ private:
         std::uint8_t note {0};
         std::uint8_t velocity {0};
         double noteFrequency {440.0};
+
+        // MPE 5D Note Expressions
+        float pitchBendSemitones {0.0f}; // Glide (-48.0 to +48.0 semitones)
+        float pressure {0.0f};           // Press (0.0 to 1.0)
+        float slide {0.0f};              // Slide / CC 74 (0.0 to 1.0)
 
         std::array<double, oscCount> oscPhases {0.0, 0.0, 0.0, 0.0};
         double subPhase {0.0};

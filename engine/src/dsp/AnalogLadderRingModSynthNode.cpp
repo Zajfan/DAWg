@@ -173,6 +173,9 @@ void AnalogLadderRingModSynthNode::noteOn(std::uint8_t note, std::uint8_t veloci
     target->note = note;
     target->velocity = velocity;
     target->noteFreq = 440.0 * std::pow(2.0, (static_cast<double>(note) - 69.0) / 12.0);
+    target->pitchBendSemitones = 0.0f;
+    target->pressure = 0.0f;
+    target->slide = 0.0f;
     target->phases.fill(0.0);
 
     target->ampStage = EnvStage::attack;
@@ -180,6 +183,33 @@ void AnalogLadderRingModSynthNode::noteOn(std::uint8_t note, std::uint8_t veloci
 
     target->filtStage = EnvStage::attack;
     target->filtLevel = 0.0f;
+}
+
+void AnalogLadderRingModSynthNode::notePitchBend(const std::uint8_t note, const float semitones) noexcept
+{
+    for (auto& v : m_voices) {
+        if (v.active && v.note == note) {
+            v.pitchBendSemitones = std::clamp(semitones, -48.0f, 48.0f);
+        }
+    }
+}
+
+void AnalogLadderRingModSynthNode::notePressure(const std::uint8_t note, const float pressure) noexcept
+{
+    for (auto& v : m_voices) {
+        if (v.active && v.note == note) {
+            v.pressure = std::clamp(pressure, 0.0f, 1.0f);
+        }
+    }
+}
+
+void AnalogLadderRingModSynthNode::noteSlide(const std::uint8_t note, const float slide) noexcept
+{
+    for (auto& v : m_voices) {
+        if (v.active && v.note == note) {
+            v.slide = std::clamp(slide, 0.0f, 1.0f);
+        }
+    }
 }
 
 void AnalogLadderRingModSynthNode::noteOff(std::uint8_t note) noexcept
@@ -320,7 +350,7 @@ void AnalogLadderRingModSynthNode::process(ProcessContext& context) noexcept
             for (std::size_t o = 0; o < oscCount; ++o) {
                 const auto& cfg = m_oscConfigs[o];
                 const double octMultiplier = std::pow(2.0, cfg.octave);
-                const double semiMultiplier = std::pow(2.0, (cfg.semitones + cfg.fineTuneCents / 100.0) / 12.0);
+                const double semiMultiplier = std::pow(2.0, (cfg.semitones + voice.pitchBendSemitones + cfg.fineTuneCents / 100.0) / 12.0);
                 const double freq = voice.noteFreq * octMultiplier * semiMultiplier;
                 const double inc = freq / m_sampleRate;
 
@@ -347,8 +377,8 @@ void AnalogLadderRingModSynthNode::process(ProcessContext& context) noexcept
             // 3. Headphone Overdrive Feedback Loop
             preFilterAudio += m_feedbackAmount * std::tanh(voice.feedbackPrevL * 1.5f);
 
-            // 4. Modulated Filter Cutoffs
-            const float envOffset = voice.filtLevel * m_filtEnvAmount * 6000.0f;
+            // 4. Modulated Filter Cutoffs with MPE Pressure and Slide
+            const float envOffset = voice.filtLevel * m_filtEnvAmount * 6000.0f + voice.pressure * 5000.0f + voice.slide * 2500.0f;
             const float fcTrans = std::clamp(m_transistorCutoffHz + envOffset, 20.0f, static_cast<float>(m_sampleRate * 0.45));
             const float fcDiode = std::clamp(m_diodeCutoffHz + envOffset, 20.0f, static_cast<float>(m_sampleRate * 0.45));
 

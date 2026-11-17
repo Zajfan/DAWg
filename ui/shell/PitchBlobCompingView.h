@@ -24,6 +24,7 @@ public:
 
     void setViewModel(const EditorViewModel& model);
     void setNoteModifiedCallback(NoteModifiedCallback cb) noexcept { m_noteCallback = std::move(cb); }
+    void loadVocalStem(const float* samples, std::size_t sampleCount, double sampleRate);
 
     void paint(juce::Graphics& g) override;
     void resized() override;

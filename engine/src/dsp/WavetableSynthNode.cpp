@@ -250,10 +250,40 @@ void WavetableSynthNode::noteOn(std::uint8_t note, std::uint8_t velocity) noexce
     target->note = note;
     target->velocity = velocity;
     target->noteFrequency = 440.0 * std::pow(2.0, (static_cast<double>(note) - 69.0) / 12.0);
+    target->pitchBendSemitones = 0.0f;
+    target->pressure = 0.0f;
+    target->slide = 0.0f;
     target->oscPhases.fill(0.0);
     target->subPhase = 0.0;
     target->ampStage = EnvStage::attack;
     target->ampLevel = 0.0f;
+}
+
+void WavetableSynthNode::notePitchBend(const std::uint8_t note, const float semitones) noexcept
+{
+    for (auto& v : m_voices) {
+        if (v.active && v.note == note) {
+            v.pitchBendSemitones = std::clamp(semitones, -48.0f, 48.0f);
+        }
+    }
+}
+
+void WavetableSynthNode::notePressure(const std::uint8_t note, const float pressure) noexcept
+{
+    for (auto& v : m_voices) {
+        if (v.active && v.note == note) {
+            v.pressure = std::clamp(pressure, 0.0f, 1.0f);
+        }
+    }
+}
+
+void WavetableSynthNode::noteSlide(const std::uint8_t note, const float slide) noexcept
+{
+    for (auto& v : m_voices) {
+        if (v.active && v.note == note) {
+            v.slide = std::clamp(slide, 0.0f, 1.0f);
+        }
+    }
 }
 
 void WavetableSynthNode::noteOff(std::uint8_t note) noexcept
@@ -406,7 +436,7 @@ void WavetableSynthNode::process(ProcessContext& context) noexcept
                 }
 
                 const double semitones = cfg.semitones + (cfg.fineTuneCents / 100.0);
-                const double oscFreq = voice.noteFrequency * std::pow(2.0, semitones / 12.0);
+                const double oscFreq = voice.noteFrequency * std::pow(2.0, (semitones + voice.pitchBendSemitones) / 12.0);
                 const double phaseInc = oscFreq / m_sampleRate;
 
                 const float warpedPhase = applySpectralWarp(
@@ -428,7 +458,7 @@ void WavetableSynthNode::process(ProcessContext& context) noexcept
 
             // 2. Sub-Oscillator
             if (m_subEnabled && m_subLevel > 0.001f) {
-                const double subFreq = voice.noteFrequency / std::pow(2.0, m_subOctaveDown);
+                const double subFreq = (voice.noteFrequency * std::pow(2.0, voice.pitchBendSemitones / 12.0)) / std::pow(2.0, m_subOctaveDown);
                 const double subPhaseInc = subFreq / m_sampleRate;
 
                 float subSamp = 0.0f;
@@ -463,22 +493,37 @@ void WavetableSynthNode::process(ProcessContext& context) noexcept
                 voiceAudioR += noise;
             }
 
-            // 4. State Variable Filter processing
+            // 4. State Variable Filter processing with MPE pressure/slide modulation
+            float voiceA1 = a1;
+            float voiceA2 = a2;
+            float voiceA3 = a3;
+            float voiceK = k;
+
+            if (voice.pressure > 0.001f || voice.slide > 0.001f) {
+                const float mpeCutoff = std::clamp(m_cutoffHz + voice.pressure * 5000.0f + voice.slide * 2500.0f, 20.0f, static_cast<float>(m_sampleRate * 0.45));
+                const float mpeRes = std::clamp(m_resonance + voice.slide * 2.0f, 0.5f, 15.0f);
+                const float voiceG = std::tan(std::numbers::pi_v<float> * mpeCutoff / static_cast<float>(m_sampleRate));
+                voiceK = 1.0f / mpeRes;
+                voiceA1 = 1.0f / (1.0f + voiceG * (voiceG + voiceK));
+                voiceA2 = voiceG * voiceA1;
+                voiceA3 = voiceG * voiceA2;
+            }
+
             auto processSvf = [&](float in, float& ic1, float& ic2) -> float {
                 if (m_filterDrive > 0.01f) {
                     in = std::tanh(in * (1.0f + m_filterDrive * 2.0f));
                 }
                 const float v3 = in - ic2;
-                const float v1 = a1 * ic1 + a2 * v3;
-                const float v2 = ic2 + a2 * ic1 + a3 * v3;
+                const float v1 = voiceA1 * ic1 + voiceA2 * v3;
+                const float v2 = ic2 + voiceA2 * ic1 + voiceA3 * v3;
                 ic1 = 2.0f * v1 - ic1;
                 ic2 = 2.0f * v2 - ic2;
 
                 switch (m_filterMode) {
                 case WavetableFilterMode::lowpass:  return v2;
                 case WavetableFilterMode::bandpass: return v1;
-                case WavetableFilterMode::highpass: return in - k * v1 - v2;
-                case WavetableFilterMode::notch:    return in - k * v1;
+                case WavetableFilterMode::highpass: return in - voiceK * v1 - v2;
+                case WavetableFilterMode::notch:    return in - voiceK * v1;
                 }
                 return v2;
             };

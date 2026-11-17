@@ -3970,6 +3970,21 @@ void testWavetableSynthAnd2DMorphingGrid()
     require(maxSynth > 0.05f && maxSynth < 2.0f && !std::isnan(maxSynth),
             "Wavetable synth generates rich anti-aliased output across 2D morph plane");
 
+    // 5. Test MPE 5D Note Expressions (Glide/PitchBend, Press/Pressure, Slide/Timbre)
+    synth.notePitchBend(60, 2.0f);
+    synth.notePressure(60, 0.75f);
+    synth.noteSlide(60, 0.6f);
+
+    std::fill(chL.begin(), chL.end(), 0.0f);
+    std::fill(chR.begin(), chR.end(), 0.0f);
+    synth.process(ctx);
+
+    float mpeMax = 0.0f;
+    for (float s : chL) {
+        mpeMax = std::max(mpeMax, std::abs(s));
+    }
+    require(mpeMax > 0.01f && !std::isnan(mpeMax), "MPE 5D modulated wavetable output verified");
+
     synth.noteOff(60);
 }
 
@@ -4088,6 +4103,21 @@ void testAnalogLadderRingModSynthAndFeedback()
     }
     require(maxSynth > 0.05f && maxSynth < 2.5f && !std::isnan(maxSynth),
             "Analog synth with diode ring mod and dual ladder filters generates thick, stable output");
+
+    // Test MPE 5D Note Expressions on Dual Ladder Filter
+    synth.notePitchBend(48, -1.5f);
+    synth.notePressure(48, 0.85f);
+    synth.noteSlide(48, 0.70f);
+
+    std::fill(chL.begin(), chL.end(), 0.0f);
+    std::fill(chR.begin(), chR.end(), 0.0f);
+    synth.process(ctx);
+
+    float mpeMax = 0.0f;
+    for (float s : chL) {
+        mpeMax = std::max(mpeMax, std::abs(s));
+    }
+    require(mpeMax > 0.01f && !std::isnan(mpeMax), "MPE 5D modulated analog ladder output verified");
 
     synth.noteOff(48);
 }

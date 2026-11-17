@@ -393,6 +393,48 @@ void PianoRollView::drawNotes(juce::Graphics& g, const juce::Rectangle<int> boun
             g.drawText(getNoteName(note.pitch), noteRect.toNearestInt().reduced(2, 0),
                        juce::Justification::centredLeft, false);
         }
+
+        // Real-time MPE 5D visual expression ribbons
+        if (m_expressionMode == ExpressionMode::mpePitch && noteW > 6)
+        {
+            // Per-note pitch bend trajectory ribbon (Electric Cyan)
+            juce::Path pitchRibbon;
+            const float midY = noteRect.getCentreY();
+            const float startX = noteRect.getX() + 2.0f;
+            const float endX = noteRect.getRight() - 2.0f;
+            pitchRibbon.startNewSubPath(startX, midY);
+            pitchRibbon.cubicTo(
+                startX + (endX - startX) * 0.35f, midY - 3.5f,
+                startX + (endX - startX) * 0.70f, midY + 2.5f,
+                endX, midY - 1.0f);
+            g.setColour(juce::Colour(0xff00e5ff));
+            g.strokePath(pitchRibbon, juce::PathStrokeType(1.5f));
+        }
+        else if (m_expressionMode == ExpressionMode::mpePressure && noteW > 6)
+        {
+            // Per-note polyphonic pressure envelope ribbon (Neon Magenta)
+            const float pH = std::clamp((static_cast<float>(m_noteRowHeight) - 4.0f) * velNorm, 2.0f, static_cast<float>(m_noteRowHeight - 4));
+            const juce::Rectangle<float> pRibbon {
+                noteRect.getX() + 2.0f,
+                noteRect.getBottom() - pH - 2.0f,
+                noteRect.getWidth() - 4.0f,
+                pH
+            };
+            g.setColour(juce::Colour(0xffe040fb).withAlpha(0.6f));
+            g.fillRoundedRectangle(pRibbon, 1.5f);
+            g.setColour(juce::Colour(0xffea80fc));
+            g.drawHorizontalLine(static_cast<int>(pRibbon.getY()), pRibbon.getX(), pRibbon.getRight());
+        }
+        else if (m_expressionMode == ExpressionMode::mpeTimbre && noteW > 6)
+        {
+            // Per-note CC74 Timbre / Brightness ribbon (Emerald Mint)
+            const float tY = noteRect.getY() + 2.0f;
+            juce::Path timbreRibbon;
+            timbreRibbon.startNewSubPath(noteRect.getX() + 2.0f, tY + 4.0f);
+            timbreRibbon.quadraticTo(noteRect.getCentreX(), tY + 1.0f, noteRect.getRight() - 2.0f, tY + 3.0f);
+            g.setColour(juce::Colour(0xff00e676));
+            g.strokePath(timbreRibbon, juce::PathStrokeType(1.5f));
+        }
     }
 
     g.restoreState();

@@ -23,6 +23,12 @@ public:
     void resized() override;
 
     [[nodiscard]] project::TrackId trackId() const noexcept { return m_trackId; }
+    [[nodiscard]] int vcaGroup() const noexcept { return std::max(0, m_vcaCombo.getSelectedId() - 1); }
+    [[nodiscard]] float gainLinear() const noexcept { return static_cast<float>(m_fader.getValue()); }
+    [[nodiscard]] float pan() const noexcept { return static_cast<float>(m_panKnob.getValue()); }
+    [[nodiscard]] bool isMuted() const noexcept { return m_muteButton.getToggleState(); }
+    [[nodiscard]] bool isSolo() const noexcept { return m_soloButton.getToggleState(); }
+    [[nodiscard]] bool isPhaseInvert() const noexcept { return m_phaseButton.getToggleState(); }
 
 private:
     void sendGainPan();
@@ -123,7 +129,29 @@ public:
     void toggleModulatorRack();
     [[nodiscard]] bool isModulatorRackVisible() const noexcept { return m_showModulators; }
 
+    void switchScene(bool toSceneB);
+    void copyActiveSceneToOpposite();
+    void setVcaSpill(int vcaGroup);
+
 private:
+    struct ChannelMixSnapshot
+    {
+        project::TrackId trackId {0};
+        float gainLinear {1.0f};
+        float pan {0.0f};
+        bool muted {false};
+        bool solo {false};
+        bool phaseInvert {false};
+    };
+
+    struct MixerScene
+    {
+        std::vector<ChannelMixSnapshot> channels;
+    };
+
+    void captureCurrentScene(MixerScene& target);
+    void applyScene(const MixerScene& scene);
+
     CommandHandler m_handler;
     juce::Viewport m_viewport;
     juce::Component m_tracksContainer;
@@ -132,6 +160,20 @@ private:
     ModulatorRackComponent m_modulatorRack;
     juce::TextButton m_toggleModulatorsBtn {"Macros & LFO"};
     bool m_showModulators {true};
+
+    // A/B Scene Snapshots
+    MixerScene m_sceneA;
+    MixerScene m_sceneB;
+    bool m_activeSceneIsB {false};
+    juce::TextButton m_sceneAButton {"Mix A"};
+    juce::TextButton m_sceneBButton {"Mix B"};
+    juce::TextButton m_copySceneButton {"A ➔ B"};
+
+    // VCA Spill Controls
+    int m_vcaSpillGroup {0}; // 0 = all tracks
+    juce::TextButton m_vcaAllButton {"ALL"};
+    std::array<juce::TextButton, 8> m_vcaSpillButtons;
+    juce::Label m_spillStatusLabel;
 };
 
 } // namespace dawg::ui

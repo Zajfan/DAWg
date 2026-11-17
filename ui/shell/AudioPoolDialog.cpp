@@ -1,10 +1,16 @@
 #include "AudioPoolDialog.h"
 
+#include <dawg/media/StemSeparatorService.h>
+#include <juce_audio_formats/juce_audio_formats.h>
+
 namespace dawg::ui {
 
 AudioPoolComponent::AudioPoolComponent(persistence::AudioPoolManager& poolManager,
-                                       std::function<void()> onProjectChanged)
-    : m_poolManager(poolManager), m_onProjectChanged(std::move(onProjectChanged))
+                                       std::function<void()> onProjectChanged,
+                                       VocalStemCallback vocalStemCb)
+    : m_poolManager(poolManager)
+    , m_onProjectChanged(std::move(onProjectChanged))
+    , m_vocalStemCallback(std::move(vocalStemCb))
 {
     m_titleLabel.setText("Project Audio Pool & Media Manager", juce::dontSendNotification);
     m_titleLabel.setFont(juce::FontOptions(17.0f, juce::Font::bold));
@@ -20,8 +26,15 @@ AudioPoolComponent::AudioPoolComponent(persistence::AudioPoolManager& poolManage
     m_listBox.setColour(juce::ListBox::backgroundColourId, juce::Colour(0xff0d1117));
     addAndMakeVisible(m_listBox);
 
+    m_stemSplitButton.onClick = [this] {
+        splitSelectedAssetIntoStems();
+    };
+    m_stemSplitButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff238636));
+    addAndMakeVisible(m_stemSplitButton);
+
     m_relinkButton.onClick = [this] {
         const auto results = m_poolManager.relinkMissingAssets(std::filesystem::current_path(), true);
+        (void)results;
         refreshPoolView();
         if (m_onProjectChanged) m_onProjectChanged();
     };
@@ -29,6 +42,7 @@ AudioPoolComponent::AudioPoolComponent(persistence::AudioPoolManager& poolManage
 
     m_purgeButton.onClick = [this] {
         const auto purged = m_poolManager.purgeUnusedAssets(true);
+        (void)purged;
         refreshPoolView();
         if (m_onProjectChanged) m_onProjectChanged();
     };
@@ -40,6 +54,81 @@ AudioPoolComponent::AudioPoolComponent(persistence::AudioPoolManager& poolManage
     addAndMakeVisible(m_consolidateButton);
 
     refreshPoolView();
+}
+
+void AudioPoolComponent::splitSelectedAssetIntoStems()
+{
+    const int selRow = m_listBox.getSelectedRow();
+    const auto& items = m_poolManager.poolItems();
+    if (items.empty()) return;
+
+    const std::size_t idx = (selRow >= 0 && static_cast<std::size_t>(selRow) < items.size())
+        ? static_cast<std::size_t>(selRow)
+        : 0;
+
+    const auto& item = items[idx];
+    const auto fsPath = std::filesystem::path(item.resolvedPath.empty() ? item.originalPath : item.resolvedPath);
+    if (item.isMissing || !std::filesystem::exists(fsPath)) return;
+
+    juce::AudioFormatManager formatMgr;
+    formatMgr.registerBasicFormats();
+    const juce::File srcFile(juce::String(fsPath.string()));
+    std::unique_ptr<juce::AudioFormatReader> reader(formatMgr.createReaderFor(srcFile));
+    if (reader == nullptr || reader->lengthInSamples == 0) return;
+
+    const auto numSamples = static_cast<std::size_t>(reader->lengthInSamples);
+    std::vector<float> left(numSamples, 0.0f);
+    std::vector<float> right(numSamples, 0.0f);
+    juce::AudioBuffer<float> tempBuf(static_cast<int>(reader->numChannels), static_cast<int>(numSamples));
+    reader->read(&tempBuf, 0, static_cast<int>(numSamples), 0, true, true);
+
+    std::copy(tempBuf.getReadPointer(0), tempBuf.getReadPointer(0) + numSamples, left.begin());
+    if (reader->numChannels > 1) {
+        std::copy(tempBuf.getReadPointer(1), tempBuf.getReadPointer(1) + numSamples, right.begin());
+    } else {
+        right = left;
+    }
+
+    const auto stems = media::StemSeparatorService::separate4Stems(
+        left.data(), right.data(), numSamples, reader->sampleRate);
+
+    const auto parentDir = fsPath.parent_path();
+    const auto baseName = fsPath.stem().string();
+
+    auto writeStem = [&](const std::string& label, const std::vector<float>& l, const std::vector<float>& r) {
+        const auto outPath = parentDir / (baseName + "_" + label + ".wav");
+        juce::File outFile(juce::String(outPath.string()));
+        outFile.deleteFile();
+        std::unique_ptr<juce::OutputStream> outStream(outFile.createOutputStream());
+        if (outStream != nullptr) {
+            juce::WavAudioFormat wavFormat;
+            juce::AudioFormatWriterOptions writerOptions;
+            writerOptions = writerOptions
+                .withSampleRate(reader->sampleRate)
+                .withNumChannels(2)
+                .withBitsPerSample(24);
+            auto writer = wavFormat.createWriterFor(outStream, writerOptions);
+            if (writer != nullptr) {
+                juce::AudioBuffer<float> b(2, static_cast<int>(numSamples));
+                std::copy(l.begin(), l.end(), b.getWritePointer(0));
+                std::copy(r.begin(), r.end(), b.getWritePointer(1));
+                writer->writeFromAudioSampleBuffer(b, 0, static_cast<int>(numSamples));
+            }
+        }
+    };
+
+    writeStem("Drums", stems.drumsL, stems.drumsR);
+    writeStem("Bass", stems.bassL, stems.bassR);
+    writeStem("Vocals", stems.vocalsL, stems.vocalsR);
+    writeStem("Other", stems.otherL, stems.otherR);
+
+    // Send extracted vocal stem audio to PitchBlobCompingView
+    if (m_vocalStemCallback) {
+        m_vocalStemCallback(stems.vocalsL.data(), stems.vocalsL.size(), reader->sampleRate);
+    }
+
+    refreshPoolView();
+    if (m_onProjectChanged) m_onProjectChanged();
 }
 
 void AudioPoolComponent::refreshPoolView()
@@ -144,27 +233,32 @@ void AudioPoolComponent::resized()
     m_statsLabel.setBounds(area.removeFromTop(22));
     area.removeFromTop(10);
 
-    auto btnRow = area.removeFromBottom(32);
-    m_relinkButton.setBounds(btnRow.removeFromLeft(160));
-    btnRow.removeFromLeft(10);
-    m_purgeButton.setBounds(btnRow.removeFromLeft(160));
-    btnRow.removeFromLeft(10);
-    m_consolidateButton.setBounds(btnRow.removeFromLeft(220));
+    auto btnRow2 = area.removeFromBottom(28);
+    m_stemSplitButton.setBounds(btnRow2);
+    area.removeFromBottom(8);
 
-    area.removeFromBottom(12);
+    auto btnRow = area.removeFromBottom(28);
+    m_relinkButton.setBounds(btnRow.removeFromLeft(150));
+    btnRow.removeFromLeft(8);
+    m_purgeButton.setBounds(btnRow.removeFromLeft(150));
+    btnRow.removeFromLeft(8);
+    m_consolidateButton.setBounds(btnRow.removeFromLeft(200));
+
+    area.removeFromBottom(10);
     m_listBox.setBounds(area);
 }
 
 AudioPoolWindow::AudioPoolWindow(persistence::AudioPoolManager& poolManager,
-                                 std::function<void()> onProjectChanged)
+                                 std::function<void()> onProjectChanged,
+                                 AudioPoolComponent::VocalStemCallback vocalStemCb)
     : juce::DocumentWindow("Project Audio Pool",
                            juce::Colour(0xff161b22),
                            juce::DocumentWindow::closeButton)
 {
     setUsingNativeTitleBar(true);
-    setContentOwned(new AudioPoolComponent(poolManager, std::move(onProjectChanged)), true);
+    setContentOwned(new AudioPoolComponent(poolManager, std::move(onProjectChanged), std::move(vocalStemCb)), true);
     setResizable(true, true);
-    centreWithSize(680, 480);
+    centreWithSize(720, 520);
     setVisible(true);
 }
 
@@ -174,9 +268,10 @@ void AudioPoolWindow::closeButtonPressed()
 }
 
 void AudioPoolWindow::open(persistence::AudioPoolManager& poolManager,
-                           std::function<void()> onProjectChanged)
+                           std::function<void()> onProjectChanged,
+                           AudioPoolComponent::VocalStemCallback vocalStemCb)
 {
-    new AudioPoolWindow(poolManager, std::move(onProjectChanged));
+    new AudioPoolWindow(poolManager, std::move(onProjectChanged), std::move(vocalStemCb));
 }
 
 } // namespace dawg::ui
