@@ -58,12 +58,15 @@ public:
     struct MenuCallbacks
     {
         ActionHandler newProject;
+        std::function<void(const std::string& templateName)> newFromTemplate;
         ActionHandler openProject;
         ActionHandler saveProject;
         ActionHandler saveProjectAs;
         ActionHandler exportBounce;
         ActionHandler exportStems;
         ActionHandler showAudioPool;
+        ActionHandler consolidateProject;
+        ActionHandler rescanPlugins;
         ActionHandler audioPreferences;
         ActionHandler showShortcuts;
         ActionHandler showAbout;
@@ -141,6 +144,10 @@ public:
     void setWaveformCache(media::WaveformCache* cache);
     void setDockMode(BottomDockMode mode);
     [[nodiscard]] BottomDockMode dockMode() const noexcept { return m_dockMode; }
+    [[nodiscard]] PianoRollView& pianoRoll() noexcept { return m_pianoRollView; }
+    [[nodiscard]] const PianoRollView& pianoRoll() const noexcept { return m_pianoRollView; }
+    [[nodiscard]] TimelineView& timeline() noexcept { return m_timelineView; }
+    [[nodiscard]] const TimelineView& timeline() const noexcept { return m_timelineView; }
     void loadVocalStem(const float* samples, std::size_t sampleCount, double sampleRate);
     void toggleCenterViewMode();
     void setCenterViewMode(CenterViewMode mode);

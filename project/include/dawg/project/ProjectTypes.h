@@ -224,6 +224,7 @@ struct DspNodeDescriptor
     std::string name;
     std::string pluginId;
     std::vector<float> parameters;
+    std::string stateData {};
 
     friend bool operator==(const DspNodeDescriptor&, const DspNodeDescriptor&) = default;
 };
@@ -292,6 +293,17 @@ struct LoopSetting
     std::uint64_t endSample {0};
 
     friend bool operator==(const LoopSetting&, const LoopSetting&) = default;
+};
+
+struct PunchSetting
+{
+    bool enabled {false};
+    std::uint64_t punchInSample {0};
+    std::uint64_t punchOutSample {0};
+    std::uint8_t prerollBars {0}; // 0 = off, 1 = 1 bar, 2 = 2 bars
+    std::uint8_t countInBars {0}; // 0 = off, 1 = 1 bar, 2 = 2 bars
+
+    friend bool operator==(const PunchSetting&, const PunchSetting&) = default;
 };
 
 } // namespace dawg::project

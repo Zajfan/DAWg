@@ -248,6 +248,7 @@ void TimelineView::paint(juce::Graphics& g)
     drawTracksAndClips(g, tracksBounds);
     drawRazorAndSlipOverlay(g);
     drawLoopRegion(g, getLocalBounds());
+    drawPunchRegion(g, getLocalBounds());
     drawPlayhead(g, getLocalBounds());
 }
 
@@ -959,6 +960,36 @@ void TimelineView::drawLoopRegion(juce::Graphics& g, juce::Rectangle<int> bounds
     g.drawHorizontalLine(bounds.getY(), static_cast<float>(loopStartPx), static_cast<float>(loopEndPx));
     g.drawVerticalLine(loopStartPx, static_cast<float>(bounds.getY()), static_cast<float>(bounds.getY() + 10));
     g.drawVerticalLine(loopEndPx, static_cast<float>(bounds.getY()), static_cast<float>(bounds.getY() + 10));
+}
+
+void TimelineView::drawPunchRegion(juce::Graphics& g, juce::Rectangle<int> bounds)
+{
+    if (! m_model.project.punch.enabled)
+        return;
+
+    const int punchStartPx = m_headerWidth + sampleToPixel(static_cast<std::int64_t>(m_model.project.punch.punchInSample));
+    const int punchEndPx = m_headerWidth + sampleToPixel(static_cast<std::int64_t>(m_model.project.punch.punchOutSample));
+
+    if (punchEndPx <= punchStartPx)
+        return;
+
+    const auto punchRect = juce::Rectangle<int> {
+        punchStartPx,
+        bounds.getY(),
+        punchEndPx - punchStartPx,
+        bounds.getHeight()
+    };
+
+    g.setColour(juce::Colour::fromRGB(220, 50, 50).withAlpha(0.12f));
+    g.fillRect(punchRect);
+
+    g.setColour(juce::Colour::fromRGB(240, 70, 70));
+    g.drawHorizontalLine(bounds.getY(), static_cast<float>(punchStartPx), static_cast<float>(punchEndPx));
+    g.drawVerticalLine(punchStartPx, static_cast<float>(bounds.getY()), static_cast<float>(bounds.getY() + 10));
+    g.drawVerticalLine(punchEndPx, static_cast<float>(bounds.getY()), static_cast<float>(bounds.getY() + 10));
+
+    g.setFont(juce::FontOptions {9.0f}.withStyle("Bold"));
+    g.drawText("[> PUNCH <]", punchStartPx + 2, bounds.getY() + 1, std::min(80, punchEndPx - punchStartPx), 10, juce::Justification::centredLeft);
 }
 
 void TimelineView::drawPlayhead(juce::Graphics& g, juce::Rectangle<int> bounds)

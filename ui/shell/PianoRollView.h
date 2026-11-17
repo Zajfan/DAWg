@@ -34,6 +34,9 @@ public:
     bool keyPressed(const juce::KeyPress& key) override;
 
     void quantizeNotes();
+    void toggleStepRecord();
+    [[nodiscard]] bool isStepRecordEnabled() const noexcept { return m_stepRecordEnabled; }
+    void handleIncomingStepNote(std::uint8_t pitch, std::uint8_t velocity);
 
 private:
     enum class QuantizeGrid : std::uint8_t
@@ -107,6 +110,9 @@ private:
     juce::TextButton m_btnEuclidean {"Euclidean"};
     juce::TextButton m_btnMarkov {"Chords"};
     juce::TextButton m_btnHumanize {"Humanize"};
+    juce::TextButton m_btnStepRecord {"Step Rec"};
+    bool m_stepRecordEnabled {false};
+    std::uint64_t m_stepCursorSample {0};
 
     ExpressionMode m_expressionMode {ExpressionMode::velocity};
     juce::TextButton m_btnVelocity {"Vel"};

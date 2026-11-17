@@ -208,6 +208,10 @@ PianoRollView::PianoRollView(CommandHandler handler, AuditionCallback auditionCb
     };
     addAndMakeVisible(m_btnHumanize);
 
+    m_btnStepRecord.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(50, 55, 68));
+    m_btnStepRecord.onClick = [this] { toggleStepRecord(); };
+    addAndMakeVisible(m_btnStepRecord);
+
     auto updateModeButtons = [this] {
         m_btnVelocity.setColour(juce::TextButton::buttonColourId, m_expressionMode == ExpressionMode::velocity ? juce::Colour::fromRGB(0, 160, 210) : juce::Colour::fromRGB(35, 38, 48));
         m_btnPitch.setColour(juce::TextButton::buttonColourId, m_expressionMode == ExpressionMode::mpePitch ? juce::Colour::fromRGB(180, 70, 200) : juce::Colour::fromRGB(35, 38, 48));
@@ -328,6 +332,53 @@ void PianoRollView::quantizeNotes()
             m_handler(project::MoveMidiNote {clip->id, note.id, newStart, note.pitch});
         }
     }
+}
+
+void PianoRollView::toggleStepRecord()
+{
+    m_stepRecordEnabled = ! m_stepRecordEnabled;
+    if (m_stepRecordEnabled)
+    {
+        m_stepCursorSample = static_cast<std::uint64_t>(std::max<std::int64_t>(0, m_model.playbackPosition));
+    }
+    m_btnStepRecord.setColour(juce::TextButton::buttonColourId,
+        m_stepRecordEnabled ? juce::Colour::fromRGB(220, 50, 50) : juce::Colour::fromRGB(50, 55, 68));
+    repaint();
+}
+
+void PianoRollView::handleIncomingStepNote(const std::uint8_t pitch, const std::uint8_t velocity)
+{
+    if (! m_stepRecordEnabled || ! m_handler)
+        return;
+
+    const auto* clip = findActiveClip();
+    if (clip == nullptr)
+        return;
+
+    const double stepSamples = gridIntervalSamples();
+    const auto noteStart = m_stepCursorSample;
+    const auto noteLen = static_cast<std::uint64_t>(std::max(1.0, stepSamples));
+
+    project::NoteId maxId = 0;
+    for (const auto& n : clip->notes)
+        maxId = std::max(maxId, n.id);
+
+    project::MidiNote n;
+    n.id = maxId + 1;
+    n.pitch = pitch;
+    n.velocity = velocity > 0 ? velocity : 100;
+    n.startSample = noteStart;
+    n.lengthSamples = noteLen;
+
+    m_handler(project::AddMidiNote { clip->id, n });
+
+    if (m_auditionCallback)
+    {
+        m_auditionCallback(pitch, velocity > 0 ? velocity : 100, true);
+    }
+
+    m_stepCursorSample += static_cast<std::uint64_t>(stepSamples);
+    repaint();
 }
 
 void PianoRollView::selectAllNotes()
@@ -801,6 +852,17 @@ void PianoRollView::drawPlayhead(juce::Graphics& g, const juce::Rectangle<int> b
         g.setColour(juce::Colour::fromRGB(255, 51, 102));
         g.drawVerticalLine(px, static_cast<float>(bounds.getY()), static_cast<float>(bounds.getBottom()));
     }
+
+    if (m_stepRecordEnabled)
+    {
+        const int stepPx = m_keyWidth + sampleToPixel(static_cast<std::int64_t>(m_stepCursorSample));
+        if (stepPx >= bounds.getX() && stepPx <= bounds.getRight())
+        {
+            g.setColour(juce::Colour::fromRGB(255, 60, 60));
+            g.drawVerticalLine(stepPx, static_cast<float>(bounds.getY()), static_cast<float>(bounds.getBottom()));
+            g.fillRect(stepPx - 3, bounds.getY(), 7, 7);
+        }
+    }
 }
 
 void PianoRollView::paint(juce::Graphics& g)
@@ -838,6 +900,8 @@ void PianoRollView::resized()
     m_btnMarkov.setBounds(toolbarArea.removeFromLeft(75));
     toolbarArea.removeFromLeft(4);
     m_btnHumanize.setBounds(toolbarArea.removeFromLeft(75));
+    toolbarArea.removeFromLeft(4);
+    m_btnStepRecord.setBounds(toolbarArea.removeFromLeft(75));
 
     // MPE & Tuning sub-lane buttons on the right side
     m_btnVocalTune.setBounds(toolbarArea.removeFromRight(80).reduced(2, 0));

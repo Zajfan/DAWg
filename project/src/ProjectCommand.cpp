@@ -99,6 +99,8 @@ bool Project::apply(const ProjectCommand& command)
             return setProjectTempo(operation.bpm, operation.timeSigNumerator, operation.timeSigDenominator, operation.metronomeEnabled);
         else if constexpr (std::is_same_v<Operation, SetProjectLoop>)
             return setProjectLoop(operation.enabled, operation.startSample, operation.endSample);
+        else if constexpr (std::is_same_v<Operation, SetProjectPunch>)
+            return setProjectPunch(operation.enabled, operation.punchInSample, operation.punchOutSample, operation.prerollBars, operation.countInBars);
         else if constexpr (std::is_same_v<Operation, AddTrackInsert>)
             return addTrackInsert(operation.trackId, operation.descriptor);
         else if constexpr (std::is_same_v<Operation, RemoveTrackInsert>)

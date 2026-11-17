@@ -71,6 +71,14 @@ enum MenuId
     cmdAudioPreferences = 40,
     cmdToggleMetronome = 41,
     cmdToggleLimiter = 42,
+    cmdRescanPlugins = 43,
+
+    // Templates & Bundler
+    cmdTemplateModernTrap = 90,
+    cmdTemplateSynthwave = 91,
+    cmdTemplateAcousticRock = 92,
+    cmdTemplateMastering = 93,
+    cmdConsolidateProject = 94,
 
     // Help
     cmdShortcuts = 50,
@@ -185,6 +193,13 @@ MainEditorView::MainEditorView(EditorViewModel model,
         else if (actionId == "action:audioPool") { if (m_menuCallbacks.showAudioPool) m_menuCallbacks.showAudioPool(); }
         else if (actionId == "action:maximizeDock") toggleMaximizeDock();
         else if (actionId == "action:reDockAll") reDockAllPanels();
+        else if (actionId == "action:consolidate") { if (m_menuCallbacks.consolidateProject) m_menuCallbacks.consolidateProject(); }
+        else if (actionId == "action:rescanPlugins") { if (m_menuCallbacks.rescanPlugins) m_menuCallbacks.rescanPlugins(); }
+        else if (actionId == "action:stepRecord") m_pianoRollView.toggleStepRecord();
+        else if (actionId == "template:modernTrap") { if (m_menuCallbacks.newFromTemplate) m_menuCallbacks.newFromTemplate("modernTrap"); }
+        else if (actionId == "template:synthwave") { if (m_menuCallbacks.newFromTemplate) m_menuCallbacks.newFromTemplate("synthwaveCyberpunk"); }
+        else if (actionId == "template:acousticRock") { if (m_menuCallbacks.newFromTemplate) m_menuCallbacks.newFromTemplate("multiMicAcousticRock"); }
+        else if (actionId == "template:mastering") { if (m_menuCallbacks.newFromTemplate) m_menuCallbacks.newFromTemplate("masteringSession"); }
     })
     , m_mixerPanel(m_commandHandler, m_transportCallbacks.setMasterLimiter)
     , m_pianoRollView(m_commandHandler)
@@ -1355,12 +1370,21 @@ juce::PopupMenu MainEditorView::getMenuForIndex(int menuIndex, const juce::Strin
     {
     case 0: // File
         menu.addItem(cmdNewProject, "New Project", true, false);
+        {
+            juce::PopupMenu tmplMenu;
+            tmplMenu.addItem(cmdTemplateModernTrap, "Modern Trap / Beatmaker");
+            tmplMenu.addItem(cmdTemplateSynthwave, "Synthwave / Cyberpunk");
+            tmplMenu.addItem(cmdTemplateAcousticRock, "Multi-Mic Acoustic Rock");
+            tmplMenu.addItem(cmdTemplateMastering, "Mastering Session");
+            menu.addSubMenu("New from Template", tmplMenu);
+        }
         menu.addItem(cmdOpenProject, "Open Project...  (Ctrl+O)", true, false);
         menu.addItem(cmdSaveProject, "Save Project  (Ctrl+S)", true, false);
         menu.addItem(cmdSaveProjectAs, "Save Project As...  (Ctrl+Shift+S)", true, false);
         menu.addSeparator();
         menu.addItem(cmdExportBounce, "Export Master Bounce...  (Ctrl+B)", true, false);
         menu.addItem(cmdExportStems, "Export Multi-Track Stems...", true, false);
+        menu.addItem(cmdConsolidateProject, "Consolidate & Archive Project...", true, false);
         menu.addSeparator();
         menu.addItem(cmdProjectAudioPool, "Project Audio Pool & Relinker...", true, false);
         menu.addSeparator();
@@ -1427,6 +1451,7 @@ juce::PopupMenu MainEditorView::getMenuForIndex(int menuIndex, const juce::Strin
 
     case 5: // Options
         menu.addItem(cmdAudioPreferences, "Audio Hardware & MIDI Preferences...", true, false);
+        menu.addItem(cmdRescanPlugins, "Rescan VST3 & CLAP Plugins...", true, false);
         menu.addSeparator();
         menu.addItem(cmdToggleMetronome, "Metronome Click", true, m_model.project.tempo.metronomeEnabled);
         menu.addItem(cmdToggleLimiter, "Master Limiter Protection", true, m_model.masterLimiterEnabled);
@@ -1562,6 +1587,24 @@ void MainEditorView::menuItemSelected(int menuItemID, int)
 
     case cmdAudioPreferences:
         if (m_menuCallbacks.audioPreferences) m_menuCallbacks.audioPreferences();
+        break;
+    case cmdRescanPlugins:
+        if (m_menuCallbacks.rescanPlugins) m_menuCallbacks.rescanPlugins();
+        break;
+    case cmdConsolidateProject:
+        if (m_menuCallbacks.consolidateProject) m_menuCallbacks.consolidateProject();
+        break;
+    case cmdTemplateModernTrap:
+        if (m_menuCallbacks.newFromTemplate) m_menuCallbacks.newFromTemplate("modernTrap");
+        break;
+    case cmdTemplateSynthwave:
+        if (m_menuCallbacks.newFromTemplate) m_menuCallbacks.newFromTemplate("synthwaveCyberpunk");
+        break;
+    case cmdTemplateAcousticRock:
+        if (m_menuCallbacks.newFromTemplate) m_menuCallbacks.newFromTemplate("multiMicAcousticRock");
+        break;
+    case cmdTemplateMastering:
+        if (m_menuCallbacks.newFromTemplate) m_menuCallbacks.newFromTemplate("masteringSession");
         break;
     case cmdToggleMetronome:
         if (m_commandHandler)

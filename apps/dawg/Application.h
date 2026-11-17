@@ -59,9 +59,12 @@ private:
     void undo();
     void redo();
     void newProject();
+    void newFromTemplate(const std::string& templateName);
     void promptOpenProject();
     void openProjectFile(const juce::File& file);
     void saveProject(bool promptSaveAs = false);
+    void promptConsolidateProject();
+    void rescanPlugins();
     void promptExportBounce(bool stemsOnly = false);
     void openAudioPreferences();
     void openAudioPool();

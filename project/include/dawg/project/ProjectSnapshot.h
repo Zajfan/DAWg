@@ -19,17 +19,18 @@ struct ProjectSnapshot
     std::vector<AutomationLane> automationLanes;
     TempoSetting tempo {};
     LoopSetting loop {};
+    PunchSetting punch {};
 
     ProjectSnapshot() = default;
     ProjectSnapshot(std::uint32_t version, ProjectId projId, std::string projName,
                     std::vector<Track> trk = {}, std::vector<AudioAsset> ast = {},
                     std::vector<AudioClip> clp = {}, std::vector<MidiClip> mClips = {},
                     std::vector<AutomationLane> lanes = {},
-                    TempoSetting tmp = {}, LoopSetting lp = {})
+                    TempoSetting tmp = {}, LoopSetting lp = {}, PunchSetting pn = {})
         : formatVersion(version), id(projId), name(std::move(projName)),
           tracks(std::move(trk)), assets(std::move(ast)), clips(std::move(clp)),
           midiClips(std::move(mClips)), automationLanes(std::move(lanes)),
-          tempo(tmp), loop(lp) {}
+          tempo(tmp), loop(lp), punch(pn) {}
 
     friend bool operator==(const ProjectSnapshot&, const ProjectSnapshot&) = default;
 };

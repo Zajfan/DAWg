@@ -42,6 +42,8 @@ public:
     void setAudioStatus(const AudioStatus&);
     void setWaveformCache(media::WaveformCache* cache);
     void loadVocalStem(const float* samples, std::size_t sampleCount, double sampleRate) { m_editor.loadVocalStem(samples, sampleCount, sampleRate); }
+    [[nodiscard]] MainEditorView& editor() noexcept { return m_editor; }
+    [[nodiscard]] const MainEditorView& editor() const noexcept { return m_editor; }
     void paint(juce::Graphics&) override;
     void resized() override;
 

@@ -2,6 +2,7 @@ add_library(dawg_project_model STATIC
     src/ArrangementTimelineEngine.cpp
     src/Project.cpp
     src/ProjectCommand.cpp
+    src/ProjectTemplateFactory.cpp
     src/TakeLaneComping.cpp
 )
 target_include_directories(dawg_project_model PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

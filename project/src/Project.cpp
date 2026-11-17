@@ -896,6 +896,23 @@ bool Project::setProjectLoop(const bool enabled, const std::uint64_t startSample
     return true;
 }
 
+bool Project::setProjectPunch(const bool enabled, const std::uint64_t punchInSample,
+                              const std::uint64_t punchOutSample, const std::uint8_t prerollBars,
+                              const std::uint8_t countInBars)
+{
+    if (enabled && punchOutSample <= punchInSample)
+        return false;
+
+    m_state.punch = PunchSetting {
+        .enabled = enabled,
+        .punchInSample = punchInSample,
+        .punchOutSample = punchOutSample,
+        .prerollBars = prerollBars,
+        .countInBars = countInBars
+    };
+    return true;
+}
+
 MidiClipId Project::addMidiClip(MidiClip clip)
 {
     if (clip.trackId != 0)

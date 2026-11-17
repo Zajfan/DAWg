@@ -49,15 +49,24 @@ void CommandPaletteOverlay::rebuildCatalog()
         { "workspace:mastering", "Workspace: Mastering Suite", "Workspaces", "6" },
         { "workspace:liveRig", "Workspace: Live Performance Rig", "Workspaces", "7" },
 
+        // Templates
+        { "template:modernTrap", "Template: Modern Trap / Beatmaker", "Templates", "" },
+        { "template:synthwave", "Template: Synthwave / Cyberpunk", "Templates", "" },
+        { "template:acousticRock", "Template: Multi-Mic Acoustic Rock", "Templates", "" },
+        { "template:mastering", "Template: Mastering Session", "Templates", "" },
+
         // Actions
         { "action:toggleInspector", "Toggle Left Track Inspector", "Actions", "I" },
         { "action:toggleCenterView", "Toggle Arrangement / Clip Matrix", "Actions", "Tab" },
         { "action:quantize", "Quantize Selected Notes", "Actions", "Q" },
+        { "action:stepRecord", "Toggle Piano Roll Step Recording", "Actions", "" },
         { "action:addAudioTrack", "Add Audio Track", "Actions", "" },
         { "action:addMidiTrack", "Add Instrument / MIDI Track", "Actions", "" },
         { "action:importWav", "Import Audio / WAV", "Actions", "" },
         { "action:bounceStems", "Export Stems & Master Audio", "Actions", "" },
         { "action:audioPool", "Open Project Audio Pool", "Actions", "" },
+        { "action:consolidate", "Consolidate & Archive Project", "Actions", "" },
+        { "action:rescanPlugins", "Rescan VST3 & CLAP System Plugins", "Actions", "" },
         { "action:calibrateLatency", "Calibrate Hardware Loopback Latency", "Actions", "" },
         { "action:maximizeDock", "Maximize Active Dock Pane", "Actions", "F11" },
         { "action:detachActive", "Detach Active Panel to Window", "Actions", "" },

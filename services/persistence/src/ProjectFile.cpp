@@ -243,6 +243,8 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
                     for (const auto& p : ins.at("parameters"))
                         desc.parameters.push_back(p.get<float>());
                 }
+                if (ins.contains("stateData") && ins.at("stateData").is_string())
+                    desc.stateData = ins.at("stateData").get<std::string>();
                 parsedTrack.inserts.push_back(std::move(desc));
             }
         }
@@ -396,6 +398,19 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
                 .startSample = startSample.get<std::uint64_t>(),
                 .endSample = endSample.get<std::uint64_t>()
             };
+        }
+
+        if (document.contains("punch"))
+        {
+            const auto& punch = document.at("punch");
+            if (punch.is_object())
+            {
+                snapshot.punch.enabled = punch.value("enabled", false);
+                snapshot.punch.punchInSample = punch.value("punchInSample", static_cast<std::uint64_t>(0));
+                snapshot.punch.punchOutSample = punch.value("punchOutSample", static_cast<std::uint64_t>(0));
+                snapshot.punch.prerollBars = punch.value("prerollBars", static_cast<std::uint8_t>(0));
+                snapshot.punch.countInBars = punch.value("countInBars", static_cast<std::uint8_t>(0));
+            }
         }
 
         if (document.contains("midiClips"))
@@ -561,14 +576,17 @@ std::expected<void, ProjectFileError> saveProject(
                         case project::DspNodeType::tnhcDelay: typeStr = "tnhcDelay"; break;
                         case project::DspNodeType::drumPadSampler: typeStr = "drumPadSampler"; break;
                         }
-                        inserts.push_back({
+                        Json insJson = {
                             {"slotIndex", ins.slotIndex},
                             {"type", typeStr},
                             {"bypassed", ins.bypassed},
                             {"name", ins.name},
                             {"pluginId", ins.pluginId},
                             {"parameters", ins.parameters}
-                        });
+                        };
+                        if (! ins.stateData.empty())
+                            insJson["stateData"] = ins.stateData;
+                        inserts.push_back(std::move(insJson));
                     }
                     trackJson["inserts"] = std::move(inserts);
                 }
@@ -627,6 +645,13 @@ std::expected<void, ProjectFileError> saveProject(
                 {"enabled", snapshot.loop.enabled},
                 {"startSample", snapshot.loop.startSample},
                 {"endSample", snapshot.loop.endSample}
+            };
+            document["punch"] = {
+                {"enabled", snapshot.punch.enabled},
+                {"punchInSample", snapshot.punch.punchInSample},
+                {"punchOutSample", snapshot.punch.punchOutSample},
+                {"prerollBars", snapshot.punch.prerollBars},
+                {"countInBars", snapshot.punch.countInBars}
             };
             if (! snapshot.midiClips.empty())
             {

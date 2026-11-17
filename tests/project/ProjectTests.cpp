@@ -1,5 +1,6 @@
 #include <dawg/project/ArrangementTimelineEngine.h>
 #include <dawg/project/Project.h>
+#include <dawg/project/ProjectTemplateFactory.h>
 #include <dawg/project/TakeLaneComping.h>
 
 #include <algorithm>
@@ -1094,6 +1095,40 @@ void testFolderTracksAndPhaseLockedCompGroups()
     require(snareComp.compSlices().empty(), "Snare slices cleared");
     require(ohComp.compSlices().empty(), "Overheads slices cleared");
 }
+
+void testPunchSettingsAndStarterTemplates()
+{
+    auto proj = Project::create("Punch Project", 1);
+    require(! proj.snapshot().punch.enabled, "punch disabled by default");
+
+    // Enable punch with 2-bar preroll and 1-bar count-in
+    require(proj.apply(SetProjectPunch { true, 48000, 192000, 2, 1 }), "enable punch");
+    require(proj.snapshot().punch.enabled, "punch enabled in snapshot");
+    require(proj.snapshot().punch.punchInSample == 48000, "punchInSample verified");
+    require(proj.snapshot().punch.punchOutSample == 192000, "punchOutSample verified");
+    require(proj.snapshot().punch.prerollBars == 2, "prerollBars verified");
+    require(proj.snapshot().punch.countInBars == 1, "countInBars verified");
+
+    // Invalid range rejection: punchOut <= punchIn
+    require(! proj.apply(SetProjectPunch { true, 100000, 50000, 0, 0 }), "reject punch where out <= in");
+
+    // Verify starter templates
+    const auto trapSnap = ProjectTemplateFactory::createModernTrapTemplate();
+    require(trapSnap.tempo.bpm == 140.0, "modern trap bpm is 140");
+    require(trapSnap.tracks.size() >= 5, "modern trap has >= 5 tracks (808, kick, hats, snare, melody)");
+
+    const auto synthSnap = ProjectTemplateFactory::createSynthwaveCyberpunkTemplate();
+    require(synthSnap.tempo.bpm == 110.0, "synthwave bpm is 110");
+    require(synthSnap.tracks.size() >= 4, "synthwave has >= 4 tracks");
+
+    const auto rockSnap = ProjectTemplateFactory::createMultiMicAcousticRockTemplate();
+    require(rockSnap.tempo.bpm == 124.0, "rock template bpm is 124");
+    require(rockSnap.tracks.size() >= 6, "multi-mic rock template has drum & guitar tracks");
+
+    const auto masterSnap = ProjectTemplateFactory::createMasteringSessionTemplate();
+    require(! masterSnap.tracks.empty(), "mastering session has tracks");
+    require(masterSnap.tracks[0].inserts.size() >= 3, "mastering session has EQ, comp, and limiter");
+}
 }
 
 int main()
@@ -1117,5 +1152,6 @@ int main()
     testPitchBlobEditorAndGrooveQuantizer();
     testArrangementTimelineAndBezierAutomationSuite();
     testFolderTracksAndPhaseLockedCompGroups();
-    std::puts("PASS: 19 project behavior tests");
+    testPunchSettingsAndStarterTemplates();
+    std::puts("PASS: 20 project behavior tests");
 }

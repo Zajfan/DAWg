@@ -301,6 +301,15 @@ struct UnfreezeTrack
     TrackId id {0};
 };
 
+struct SetProjectPunch
+{
+    bool enabled {false};
+    std::uint64_t punchInSample {0};
+    std::uint64_t punchOutSample {0};
+    std::uint8_t prerollBars {0};
+    std::uint8_t countInBars {0};
+};
+
 using ProjectCommand = std::variant<
     AddAudioTrack,
     AddInstrumentTrack,
@@ -347,6 +356,7 @@ using ProjectCommand = std::variant<
     MoveAutomationPoint,
     SetProjectTempo,
     SetProjectLoop,
+    SetProjectPunch,
     AddTrackInsert,
     RemoveTrackInsert,
     SetTrackInsertBypassed>;

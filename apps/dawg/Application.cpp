@@ -18,7 +18,11 @@
 #include <dawg/media/OfflineRenderService.h>
 #include <dawg/media/WaveformCache.h>
 #include <dawg/persistence/AudioPoolManager.h>
+#include <dawg/persistence/ProjectBundlerService.h>
 #include <dawg/persistence/ProjectFile.h>
+#include <dawg/plugins/PluginScanner.h>
+#include <dawg/project/ProjectTemplateFactory.h>
+#include "../../ui/shell/MidiLearnManager.h"
 
 #include <algorithm>
 #include <cmath>
@@ -54,7 +58,11 @@ void Application::initialise(const juce::String&)
     m_windowManager = std::make_unique<platform::juce::window::WindowManager>();
     restartAudio();
 
+    ui::MidiLearnManager::instance().setControllerManager(&m_audioBridge->controllerManager());
+
     m_audioBridge->setMidiControlCallback([this](const engine::ProcessedMidiControl& ctrl) {
+        ui::MidiLearnManager::instance().dispatchControl(ctrl);
+
         if (ctrl.mcuEvent.type == engine::McuType::transport)
         {
             switch (ctrl.mcuEvent.transport)
@@ -107,6 +115,10 @@ void Application::initialise(const juce::String&)
         {
             handleIncomingLiveMidiNote(pitch, velocity, isNoteOn);
         }
+        if (isNoteOn && m_mainComponent != nullptr && m_mainComponent->editor().pianoRoll().isStepRecordEnabled())
+        {
+            m_mainComponent->editor().pianoRoll().handleIncomingStepNote(pitch, velocity);
+        }
     });
 
     static_cast<void>(m_state->flushRenderSnapshot());
@@ -141,12 +153,15 @@ void Application::initialise(const juce::String&)
 
     ui::MainEditorView::MenuCallbacks menuCallbacks {
         .newProject = [this] { newProject(); },
+        .newFromTemplate = [this](const std::string& tName) { newFromTemplate(tName); },
         .openProject = [this] { promptOpenProject(); },
         .saveProject = [this] { saveProject(false); },
         .saveProjectAs = [this] { saveProject(true); },
         .exportBounce = [this] { promptExportBounce(false); },
         .exportStems = [this] { promptExportBounce(true); },
         .showAudioPool = [this] { openAudioPool(); },
+        .consolidateProject = [this] { promptConsolidateProject(); },
+        .rescanPlugins = [this] { rescanPlugins(); },
         .audioPreferences = [this] { openAudioPreferences(); },
         .showShortcuts = [this] { showKeyboardShortcuts(); },
         .showAbout = [this] { showAboutDialog(); }
@@ -450,6 +465,16 @@ void Application::stopRecordingSession()
     if (! clipId.has_value())
         return;
 
+    // Register Take into track's multi-take comping lanes
+    project::Take newTake {
+        .id = static_cast<std::uint32_t>(m_takeCounter),
+        .assetId = *assetId,
+        .sourceOffset = 0,
+        .lengthSamples = recordedTake.clip.lengthSamples,
+        .name = "Take " + std::to_string(m_takeCounter)
+    };
+    dispatchProjectCommand(project::AddTakeToTrack { m_recordingTrackId, std::move(newTake) });
+
     if (m_diskStreamPool)
     {
         recordedTake.clip.id = *clipId;
@@ -598,6 +623,84 @@ void Application::newProject()
     m_state = std::make_unique<ApplicationState>(*m_controller, *m_engine);
     static_cast<void>(m_state->flushRenderSnapshot());
     refreshMainComponent();
+}
+
+void Application::newFromTemplate(const std::string& templateName)
+{
+    m_currentProjectFilePath.clear();
+    if (m_diskStreamPool)
+        m_diskStreamPool->stop();
+    if (m_state)
+        m_state->clearClipBuffers();
+
+    project::ProjectSnapshot snap;
+    if (templateName == "modernTrap")
+        snap = project::ProjectTemplateFactory::createModernTrapTemplate();
+    else if (templateName == "synthwaveCyberpunk")
+        snap = project::ProjectTemplateFactory::createSynthwaveCyberpunkTemplate();
+    else if (templateName == "multiMicAcousticRock")
+        snap = project::ProjectTemplateFactory::createMultiMicAcousticRockTemplate();
+    else if (templateName == "masteringSession")
+        snap = project::ProjectTemplateFactory::createMasteringSessionTemplate();
+    else
+        snap = createStudioStarterProject().snapshot();
+
+    auto projOpt = project::Project::fromSnapshot(std::move(snap));
+    auto proj = projOpt.has_value() ? std::move(*projOpt) : createStudioStarterProject();
+
+    m_controller = std::make_unique<commands::ProjectController>(std::move(proj));
+    m_state = std::make_unique<ApplicationState>(*m_controller, *m_engine);
+    static_cast<void>(m_state->flushRenderSnapshot());
+    refreshMainComponent();
+}
+
+void Application::promptConsolidateProject()
+{
+    if (! m_controller) return;
+
+    m_fileChooser = std::make_unique<juce::FileChooser>(
+        "Choose Destination Directory for Consolidated Project Archive",
+        juce::File::getSpecialLocation(juce::File::userHomeDirectory),
+        "*");
+    m_fileChooser->launchAsync(
+        juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+        [this](const juce::FileChooser& chooser) {
+            const auto dir = chooser.getResult();
+            if (dir.isDirectory() && m_controller)
+            {
+                persistence::ProjectBundlerService bundler;
+                const auto snapshot = m_controller->snapshot();
+                const auto projectRoot = (! m_currentProjectFilePath.empty() && std::filesystem::exists(m_currentProjectFilePath))
+                    ? std::filesystem::path(m_currentProjectFilePath).parent_path()
+                    : std::filesystem::current_path();
+                const auto targetDir = std::filesystem::path(dir.getFullPathName().toStdString()) / "Consolidated_Project";
+                const auto res = bundler.consolidateAndArchive(snapshot, targetDir, projectRoot);
+                if (res.has_value())
+                {
+                    juce::AlertWindow::showMessageBoxAsync(
+                        juce::AlertWindow::InfoIcon,
+                        "Consolidate Project",
+                        "Project consolidated and archived successfully to:\n" + juce::String(targetDir.string()));
+                }
+                else
+                {
+                    juce::AlertWindow::showMessageBoxAsync(
+                        juce::AlertWindow::WarningIcon,
+                        "Consolidate Project Failed",
+                        "Could not consolidate assets to bundle directory.");
+                }
+            }
+        });
+}
+
+void Application::rescanPlugins()
+{
+    const auto descs = plugins::PluginScanner::scanAll();
+    juce::AlertWindow::showMessageBoxAsync(
+        juce::AlertWindow::InfoIcon,
+        "Plugin Scanner",
+        "Scanned system directories (~/.vst3, /usr/lib/vst3, ~/.clap, /usr/lib/clap).\nFound "
+            + juce::String(descs.size()) + " third-party audio plugins.");
 }
 
 void Application::promptOpenProject()

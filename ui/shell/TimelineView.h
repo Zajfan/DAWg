@@ -96,6 +96,7 @@ private:
     void drawRazorAndSlipOverlay(juce::Graphics& g);
     void drawPlayhead(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawLoopRegion(juce::Graphics& g, juce::Rectangle<int> bounds);
+    void drawPunchRegion(juce::Graphics& g, juce::Rectangle<int> bounds);
 
     [[nodiscard]] int sampleToPixel(std::int64_t sample) const noexcept;
     [[nodiscard]] std::int64_t pixelToSample(int x) const noexcept;

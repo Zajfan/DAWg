@@ -1,4 +1,5 @@
 #include "TrackInspectorView.h"
+#include "MidiLearnManager.h"
 
 #include <cmath>
 
@@ -108,6 +109,44 @@ TrackInspectorView::TrackInspectorView(CommandHandler commandHandler, OpenDspEdi
         const float db = (linear > 0.0001f) ? (20.0f * std::log10(linear)) : -100.0f;
         m_lblVolumeDb.setText((db <= -60.0f) ? "-inf dB" : juce::String(db, 1) + " dB", juce::dontSendNotification);
     };
+    m_faderVolume.onContextMenu = [this](const juce::MouseEvent&) {
+        if (! m_selectedTrackId.has_value()) return;
+        const auto trkId = *m_selectedTrackId;
+        juce::PopupMenu menu;
+        menu.addItem(1, "Learn MIDI CC (Volume)");
+        menu.addItem(2, "Reset to 0 dB (1.0)");
+        menu.showMenuAsync(juce::PopupMenu::Options {}, [this, trkId](int result) {
+            if (result == 1)
+            {
+                const std::uint32_t targetId = static_cast<std::uint32_t>(trkId * 10 + 1);
+                MidiLearnManager::instance().registerParameter(
+                    targetId,
+                    "Track " + std::to_string(trkId) + " Volume",
+                    [this, trkId](float normVal) {
+                        const float linear = normVal * 1.414f;
+                        const auto* trk = findTrackInModel(m_model, trkId);
+                        const float pan = trk != nullptr ? trk->pan : 0.0f;
+                        const bool phase = trk != nullptr ? trk->phaseInvert : false;
+                        if (m_commandHandler)
+                        {
+                            m_commandHandler(project::SetTrackGainPan { trkId, linear, pan, phase });
+                        }
+                    }
+                );
+                MidiLearnManager::instance().startLearning(targetId);
+            }
+            else if (result == 2)
+            {
+                const auto* trk = findTrackInModel(m_model, trkId);
+                const float pan = trk != nullptr ? trk->pan : 0.0f;
+                const bool phase = trk != nullptr ? trk->phaseInvert : false;
+                if (m_commandHandler)
+                {
+                    m_commandHandler(project::SetTrackGainPan { trkId, 1.0f, pan, phase });
+                }
+            }
+        });
+    };
     addAndMakeVisible(m_faderVolume);
 
     m_lblVolumeDb.setFont(juce::FontOptions {10.0f});
@@ -131,6 +170,44 @@ TrackInspectorView::TrackInspectorView(CommandHandler commandHandler, OpenDspEdi
         if (std::abs(pan) < 0.02f) m_lblPan.setText("Pan: C", juce::dontSendNotification);
         else if (pan < 0.0f) m_lblPan.setText("L " + juce::String(static_cast<int>(-pan * 100)), juce::dontSendNotification);
         else m_lblPan.setText("R " + juce::String(static_cast<int>(pan * 100)), juce::dontSendNotification);
+    };
+    m_knobPan.onContextMenu = [this](const juce::MouseEvent&) {
+        if (! m_selectedTrackId.has_value()) return;
+        const auto trkId = *m_selectedTrackId;
+        juce::PopupMenu menu;
+        menu.addItem(1, "Learn MIDI CC (Pan)");
+        menu.addItem(2, "Reset to Center (0.0)");
+        menu.showMenuAsync(juce::PopupMenu::Options {}, [this, trkId](int result) {
+            if (result == 1)
+            {
+                const std::uint32_t targetId = static_cast<std::uint32_t>(trkId * 10 + 2);
+                MidiLearnManager::instance().registerParameter(
+                    targetId,
+                    "Track " + std::to_string(trkId) + " Pan",
+                    [this, trkId](float normVal) {
+                        const float pan = normVal * 2.0f - 1.0f;
+                        const auto* trk = findTrackInModel(m_model, trkId);
+                        const float gain = trk != nullptr ? trk->gainLinear : 1.0f;
+                        const bool phase = trk != nullptr ? trk->phaseInvert : false;
+                        if (m_commandHandler)
+                        {
+                            m_commandHandler(project::SetTrackGainPan { trkId, gain, pan, phase });
+                        }
+                    }
+                );
+                MidiLearnManager::instance().startLearning(targetId);
+            }
+            else if (result == 2)
+            {
+                const auto* trk = findTrackInModel(m_model, trkId);
+                const float gain = trk != nullptr ? trk->gainLinear : 1.0f;
+                const bool phase = trk != nullptr ? trk->phaseInvert : false;
+                if (m_commandHandler)
+                {
+                    m_commandHandler(project::SetTrackGainPan { trkId, gain, 0.0f, phase });
+                }
+            }
+        });
     };
     addAndMakeVisible(m_knobPan);
 

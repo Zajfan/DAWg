@@ -73,6 +73,7 @@ public:
     [[nodiscard]] bool setClipGainFade(ClipId id, float gainLinear, std::uint32_t fadeInSamples, std::uint32_t fadeOutSamples);
     [[nodiscard]] bool setProjectTempo(double bpm, std::uint8_t numerator, std::uint8_t denominator, bool metronomeEnabled);
     [[nodiscard]] bool setProjectLoop(bool enabled, std::uint64_t startSample, std::uint64_t endSample);
+    [[nodiscard]] bool setProjectPunch(bool enabled, std::uint64_t punchInSample, std::uint64_t punchOutSample, std::uint8_t prerollBars = 0, std::uint8_t countInBars = 0);
     [[nodiscard]] bool apply(const ProjectCommand& command);
 
 private:

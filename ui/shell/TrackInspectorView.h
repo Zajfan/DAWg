@@ -10,6 +10,22 @@
 
 namespace dawg::ui {
 
+class MidiLearnableSlider final : public juce::Slider
+{
+public:
+    std::function<void(const juce::MouseEvent&)> onContextMenu;
+
+    void mouseDown(const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu() && onContextMenu)
+        {
+            onContextMenu(e);
+            return;
+        }
+        juce::Slider::mouseDown(e);
+    }
+};
+
 // Collapsible Left Track Inspector (Logic Pro / Cubase / Studio One style)
 // Displays full channel strip parameters, I/O routing, monitoring, record arm,
 // peak/RMS meter fader, pan, and vertical DSP insert slots for the selected track.
@@ -55,12 +71,12 @@ private:
     juce::TextButton m_btnPolarity {"Ø"};
 
     // Volume & Meter
-    juce::Slider m_faderVolume;
+    MidiLearnableSlider m_faderVolume;
     juce::Label m_lblVolumeDb;
     float m_meterLevelDb {-60.0f};
 
     // Pan
-    juce::Slider m_knobPan;
+    MidiLearnableSlider m_knobPan;
     juce::Label m_lblPan;
 
     // Output Destination

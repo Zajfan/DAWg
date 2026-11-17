@@ -32,10 +32,16 @@ public:
         m_paramNames.erase(targetId);
     }
 
-    void startLearning(std::uint32_t targetId, engine::MidiControllerManager* controllerManager)
+    void setControllerManager(engine::MidiControllerManager* controllerManager) noexcept
+    {
+        m_activeControllerManager = controllerManager;
+    }
+
+    void startLearning(std::uint32_t targetId, engine::MidiControllerManager* controllerManager = nullptr)
     {
         m_learningTargetId = targetId;
-        m_activeControllerManager = controllerManager;
+        if (controllerManager != nullptr)
+            m_activeControllerManager = controllerManager;
         if (m_activeControllerManager != nullptr)
         {
             m_activeControllerManager->startLearn(targetId, 0.0f, 1.0f);

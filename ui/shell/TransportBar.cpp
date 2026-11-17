@@ -41,6 +41,17 @@ TransportBar::TransportBar(Callbacks callbacks)
             m_preRollButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff238636));
         else
             m_preRollButton.removeColour(juce::TextButton::buttonColourId);
+
+        if (m_callbacks.commandHandler)
+        {
+            m_callbacks.commandHandler(project::SetProjectPunch {
+                .enabled = m_punchActive,
+                .punchInSample = m_model.project.punch.punchInSample,
+                .punchOutSample = m_model.project.punch.punchOutSample,
+                .prerollBars = static_cast<std::uint8_t>(m_preRollBars),
+                .countInBars = static_cast<std::uint8_t>(m_preRollBars > 0 ? 1 : 0)
+            });
+        }
     };
     addAndMakeVisible(m_preRollButton);
 
@@ -57,6 +68,19 @@ TransportBar::TransportBar(Callbacks callbacks)
         {
             m_punchButton.removeColour(juce::TextButton::buttonColourId);
             m_punchRangeBadge.setVisible(false);
+        }
+
+        if (m_callbacks.commandHandler)
+        {
+            const auto inSample = m_model.project.punch.punchInSample;
+            const auto outSample = m_model.project.punch.punchOutSample > inSample ? m_model.project.punch.punchOutSample : (inSample + 48000 * 4);
+            m_callbacks.commandHandler(project::SetProjectPunch {
+                .enabled = m_punchActive,
+                .punchInSample = inSample,
+                .punchOutSample = outSample,
+                .prerollBars = static_cast<std::uint8_t>(m_preRollBars),
+                .countInBars = static_cast<std::uint8_t>(m_preRollBars > 0 ? 1 : 0)
+            });
         }
     };
     addAndMakeVisible(m_punchButton);
@@ -248,6 +272,32 @@ void TransportBar::updateButtons()
     {
         m_loopButton.removeColour(juce::TextButton::buttonColourId);
     }
+
+    // Punch button
+    m_punchActive = m_model.project.punch.enabled;
+    m_punchButton.setButtonText(m_punchActive ? "Punch: ON" : "Punch: OFF");
+    if (m_punchActive)
+    {
+        m_punchButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xffd29922));
+        const double inSec = static_cast<double>(m_model.project.punch.punchInSample) / 48000.0;
+        const double outSec = static_cast<double>(m_model.project.punch.punchOutSample) / 48000.0;
+        m_punchRangeBadge.setText(juce::String(inSec, 1) + "s - " + juce::String(outSec, 1) + "s", juce::dontSendNotification);
+        m_punchRangeBadge.setVisible(true);
+    }
+    else
+    {
+        m_punchButton.removeColour(juce::TextButton::buttonColourId);
+        m_punchRangeBadge.setVisible(false);
+    }
+
+    // Pre-Roll button
+    m_preRollBars = m_model.project.punch.prerollBars;
+    m_preRollButton.setButtonText(m_preRollBars == 0 ? "Pre-Roll: OFF"
+        : (m_preRollBars == 1 ? "Pre-Roll: 1 Bar" : "Pre-Roll: 2 Bars"));
+    if (m_preRollBars > 0)
+        m_preRollButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff238636));
+    else
+        m_preRollButton.removeColour(juce::TextButton::buttonColourId);
 
     // Undo / Redo enable
     m_undoButton.setEnabled(m_model.canUndo);
