@@ -131,6 +131,98 @@ void MpeVoiceManager::setTimbreSlide(std::uint8_t channel, float slide0To1) noex
     }
 }
 
+void MpeVoiceManager::advance(double deltaSeconds) noexcept
+{
+    if (deltaSeconds <= 0.0)
+        return;
+
+    constexpr float twoPi = 2.0f * 3.14159265358979323846f;
+
+    for (auto& v : m_voices)
+    {
+        if (!v.active)
+            continue;
+
+        v.timeElapsedSec += deltaSeconds;
+
+        // 1. Per-note vibrato calculation
+        if (v.vibratoDepth > 0.0001f && v.vibratoRateHz > 0.0f)
+        {
+            float amp = 0.0f;
+            if (v.timeElapsedSec > static_cast<double>(v.vibratoDelaySec))
+            {
+                const double tSinceDelay = v.timeElapsedSec - static_cast<double>(v.vibratoDelaySec);
+                const float fadeIn = (v.vibratoFadeInSec > 0.0001f)
+                    ? std::clamp(static_cast<float>(tSinceDelay / static_cast<double>(v.vibratoFadeInSec)), 0.0f, 1.0f)
+                    : 1.0f;
+                amp = v.vibratoDepth * fadeIn;
+            }
+            const float lfoPhase = static_cast<float>(std::fmod(v.timeElapsedSec * static_cast<double>(v.vibratoRateHz) * static_cast<double>(twoPi), static_cast<double>(twoPi)));
+            v.currentVibratoOffset = amp * std::sin(lfoPhase);
+        }
+        else
+        {
+            v.currentVibratoOffset = 0.0f;
+        }
+
+        // 2. Per-note pitch slide calculation
+        if (std::abs(v.slideSemitones) > 0.0001f)
+        {
+            if (v.slideDurationSec > 0.0001f)
+            {
+                const float progress = std::clamp(static_cast<float>(v.timeElapsedSec / static_cast<double>(v.slideDurationSec)), 0.0f, 1.0f);
+                // Smooth cosine-shaped slide
+                const float shaped = 0.5f * (1.0f - std::cos(progress * 3.14159265358979323846f));
+                v.currentSlideOffset = v.slideSemitones * shaped;
+            }
+            else
+            {
+                v.currentSlideOffset = v.slideSemitones;
+            }
+        }
+        else
+        {
+            v.currentSlideOffset = 0.0f;
+        }
+    }
+}
+
+void MpeVoiceManager::setVoiceVibrato(
+    std::uint8_t channel,
+    std::uint8_t noteNumber,
+    float depthSemitones,
+    float rateHz,
+    float delaySec) noexcept
+{
+    for (auto& v : m_voices)
+    {
+        if (v.active && v.channel == channel && v.noteNumber == noteNumber)
+        {
+            v.vibratoDepth = std::clamp(depthSemitones, 0.0f, 2.0f);
+            v.vibratoRateHz = std::clamp(rateHz, 0.5f, 15.0f);
+            v.vibratoDelaySec = std::max(0.0f, delaySec);
+            break;
+        }
+    }
+}
+
+void MpeVoiceManager::setVoiceSlide(
+    std::uint8_t channel,
+    std::uint8_t noteNumber,
+    float slideSemitones,
+    float durationSec) noexcept
+{
+    for (auto& v : m_voices)
+    {
+        if (v.active && v.channel == channel && v.noteNumber == noteNumber)
+        {
+            v.slideSemitones = std::clamp(slideSemitones, -24.0f, 24.0f);
+            v.slideDurationSec = std::max(0.001f, durationSec);
+            break;
+        }
+    }
+}
+
 void MpeVoiceManager::processMidiEvent(const MidiEvent& event) noexcept
 {
     if (event.size < 2)

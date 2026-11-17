@@ -63,6 +63,8 @@ private:
         mpePitch,
         mpePressure,
         mpeTimbre,
+        mpeVibrato,
+        mpeSlide,
         vocalPitchTune
     };
 
@@ -110,6 +112,8 @@ private:
     juce::TextButton m_btnPitch {"MPE Pitch"};
     juce::TextButton m_btnPressure {"Pressure"};
     juce::TextButton m_btnTimbre {"Timbre CC74"};
+    juce::TextButton m_btnVibrato {"Vibrato"};
+    juce::TextButton m_btnSlide {"Slide"};
     juce::TextButton m_btnVocalTune {"Vocal Tune"};
 
     int m_toolbarHeight {28};

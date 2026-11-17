@@ -24,6 +24,23 @@ struct MpeNoteState
     float slide {0.5f};         // Dimension 4: CC74 Timbre / Brightness (0.0 to 1.0)
     float lift {0.0f};          // Dimension 5: Release Velocity (0.0 to 1.0)
 
+    // Micro-Pitch Vibrato LFO & Pitch Slide Envelopes
+    float vibratoRateHz {5.5f};
+    float vibratoDepth {0.0f};       // Semitones (0.0 to 2.0)
+    float vibratoDelaySec {0.15f};   // Delay before vibrato fades in
+    float vibratoFadeInSec {0.1f};   // Fade in time
+    float slideSemitones {0.0f};     // Continuous micro-pitch slide offset
+    float slideDurationSec {0.2f};   // Duration of pitch slide
+
+    double timeElapsedSec {0.0};
+    float currentVibratoOffset {0.0f};
+    float currentSlideOffset {0.0f};
+
+    [[nodiscard]] float effectivePitchSemitones() const noexcept
+    {
+        return glide + currentVibratoOffset + currentSlideOffset;
+    }
+
     std::uint64_t noteAge {0};  // Voice allocation / stealing timestamp
 };
 
@@ -59,6 +76,20 @@ public:
     void setPressure(std::uint8_t channel, float pressure) noexcept;
     void setPitchBend(std::uint8_t channel, std::uint16_t raw14Bit) noexcept;
     void setTimbreSlide(std::uint8_t channel, float slide0To1) noexcept;
+
+    // Per-Note Micro-Pitch Vibrato & Slide Envelopes
+    void advance(double deltaSeconds) noexcept;
+    void setVoiceVibrato(
+        std::uint8_t channel,
+        std::uint8_t noteNumber,
+        float depthSemitones,
+        float rateHz = 5.5f,
+        float delaySec = 0.15f) noexcept;
+    void setVoiceSlide(
+        std::uint8_t channel,
+        std::uint8_t noteNumber,
+        float slideSemitones,
+        float durationSec = 0.2f) noexcept;
 
     // Active Voice Queries
     [[nodiscard]] std::size_t activeVoiceCount() const noexcept;

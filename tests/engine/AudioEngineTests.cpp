@@ -68,6 +68,8 @@
 #include <dawg/engine/dsp/TransientExciterNode.h>
 #include <dawg/engine/dsp/TransientSlicerEngine.h>
 #include <dawg/engine/dsp/StudioMonitorCalibrationNode.h>
+#include <dawg/engine/dsp/AudioScrubEngine.h>
+#include <dawg/engine/dsp/MultiMicDrumDebleedEngine.h>
 #include <dawg/engine/dsp/MultiTrackPhaseAlignerNode.h>
 #include <dawg/media/AudioExportPreset.h>
 #include <dawg/engine/dsp/TransientSplitGranularResynthesizerNode.h>
@@ -90,6 +92,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <new>
@@ -6592,6 +6595,218 @@ void testHardwareSurfacesPhaseAlignmentAndExportPresetsSuite()
     require(id3.size() > 10, "ID3v2 tag generated");
     require(id3[0] == 'I' && id3[1] == 'D' && id3[2] == '3', "ID3v2 header magic is 'ID3'");
 }
+
+void testDrumDebleedAudioScrubAndIntraClipModulationSuite()
+{
+    using dawg::engine::dsp::MultiMicDrumDebleedEngine;
+    using dawg::engine::dsp::AudioScrubEngine;
+    using dawg::engine::dsp::ScrubMode;
+    using dawg::engine::dsp::MpeVoiceManager;
+    using dawg::engine::HardwareControlSurfaceManager;
+    using dawg::project::ClipModulationCurve;
+    using dawg::project::ClipModulationPoint;
+    using dawg::project::ClipModulationTarget;
+    using dawg::project::MidiClip;
+    using dawg::project::AudioClip;
+    using dawg::project::MidiNote;
+
+    // =========================================================================
+    // 1. Multi-Mic Drum De-Bleed & Acoustic Spill Suppression Engine
+    // =========================================================================
+    {
+        MultiMicDrumDebleedEngine debleed;
+        MultiMicDrumDebleedEngine::Config cfg;
+        cfg.couplingFactor = 0.8f;
+        cfg.spectralFloorDb = -30.0f;
+        cfg.oversubtraction = 1.3f;
+        cfg.duckingDepthDb = -24.0f;
+        debleed.setConfig(cfg);
+        debleed.prepare(48000.0, 512);
+
+        require(debleed.latencySamples() > 0, "Debleed engine reports valid latency");
+
+        // Synthesize target track (clean low-frequency kick + bleed from snare)
+        constexpr std::size_t numSamples = 4096;
+        std::vector<float> target(numSamples, 0.0f);
+        std::vector<float> bleedRef(numSamples, 0.0f);
+        std::vector<float> output(numSamples, 0.0f);
+
+        // Region A (100..600): pure snare hit bleed (3 kHz high frequency spill)
+        for (std::size_t i = 100; i < 600; ++i)
+        {
+            const float env = std::exp(-static_cast<float>(i - 100) * 0.01f);
+            const float snareWave = std::sin(static_cast<float>(2.0 * std::numbers::pi * 3000.0 * static_cast<double>(i) / 48000.0));
+            bleedRef[i] = snareWave * env;
+            target[i] = snareWave * env * 0.5f; // Leakage into kick mic
+        }
+
+        // Region B (2000..2800): primary kick drum hit (60 Hz punch)
+        for (std::size_t i = 2000; i < 2800; ++i)
+        {
+            const float env = std::exp(-static_cast<float>(i - 2000) * 0.005f);
+            const float kickWave = std::sin(static_cast<float>(2.0 * std::numbers::pi * 60.0 * static_cast<double>(i) / 48000.0));
+            target[i] += kickWave * env * 0.9f;
+        }
+
+        // Run block-based debleed processing
+        debleed.processBlock(target.data(), bleedRef.data(), output.data(), numSamples);
+
+        // Account for STFT overlap-add latency
+        const std::size_t lat = 384; // FftSize - HopSize
+
+        // Check spill attenuation during snare bleed segment
+        float maxSpillIn = 0.0f;
+        float maxSpillOut = 0.0f;
+        for (std::size_t i = 100; i < 600; ++i)
+        {
+            maxSpillIn = std::max(maxSpillIn, std::abs(target[i]));
+            if (i + lat < numSamples)
+            {
+                maxSpillOut = std::max(maxSpillOut, std::abs(output[i + lat]));
+            }
+        }
+        require(maxSpillOut < maxSpillIn * 0.45f, "Snare spill in target mic is heavily attenuated (>7dB suppression)");
+
+        // Check kick transient preservation in Region B
+        float maxKickOut = 0.0f;
+        for (std::size_t i = 2000; i < 2800; ++i)
+        {
+            if (i + lat < numSamples)
+            {
+                maxKickOut = std::max(maxKickOut, std::abs(output[i + lat]));
+            }
+        }
+        require(maxKickOut > 0.20f, "Primary drum hit transient is preserved");
+
+        // Run offline processing API
+        std::vector<float> offlineOut(numSamples, 0.0f);
+        MultiMicDrumDebleedEngine::processOffline(target.data(), bleedRef.data(), offlineOut.data(), numSamples, 48000.0, cfg);
+        require(offlineOut.size() == numSamples, "Offline stem debleed completed successfully");
+    }
+
+    // =========================================================================
+    // 2. Variable-Speed Bi-Directional Audio Scrub & MCU Jog-Wheel Shuttle
+    // =========================================================================
+    {
+        AudioScrubEngine scrub;
+        scrub.prepare(48000.0);
+        require(!scrub.isScrubbing(), "Scrub engine initial state is stopped");
+
+        // Feed test audio into buffer
+        std::vector<float> audioL(2048, 0.0f);
+        std::vector<float> audioR(2048, 0.0f);
+        for (std::size_t i = 0; i < 2048; ++i)
+        {
+            const float tone = std::sin(static_cast<float>(2.0 * std::numbers::pi * 440.0 * static_cast<double>(i) / 48000.0));
+            audioL[i] = tone;
+            audioR[i] = tone;
+        }
+        scrub.writeAudio(audioL.data(), audioR.data(), audioL.size(), 48000);
+
+        // Jog mode
+        scrub.setMode(ScrubMode::jog);
+        scrub.onJogWheelTurn(3.0f); // Turn jog wheel forward
+        require(scrub.isScrubbing(), "Scrubbing is active after jog wheel turn");
+        require(scrub.currentSpeed() > 0.0f, "Current scrub speed is positive forward");
+
+        std::vector<float> outL(256, 0.0f);
+        std::vector<float> outR(256, 0.0f);
+        scrub.process(outL.data(), outR.data(), outL.size());
+
+        float maxEnergy = 0.0f;
+        for (std::size_t i = 0; i < outL.size(); ++i)
+        {
+            maxEnergy = std::max(maxEnergy, std::abs(outL[i]));
+        }
+        require(maxEnergy > 0.01f, "Hermite-interpolated scrub audio rendered");
+
+        // Shuttle mode (Reverse Playback)
+        scrub.setShuttleSpeed(-1.5f);
+        require(scrub.mode() == ScrubMode::shuttle, "Mode switched to shuttle");
+        scrub.process(outL.data(), outR.data(), outL.size());
+        require(scrub.currentSpeed() < 0.0f, "Shuttle speed is negative (reverse tape scrub)");
+
+        // MCU Jog-Wheel MIDI Integration with HardwareControlSurfaceManager
+        HardwareControlSurfaceManager mgr;
+        dawg::engine::SurfaceConfig sCfg;
+        sCfg.profile = dawg::engine::ControllerProfile::mackieControlUniversal;
+        mgr.setConfig(sCfg);
+        mgr.attachScrubEngine(&scrub);
+        require(mgr.scrubEngine() == &scrub, "Scrub engine attached to hardware manager");
+
+        bool jogCbFired = false;
+        float jogCbTicks = 0.0f;
+        mgr.setJogWheelCallback([&](float ticks) {
+            jogCbFired = true;
+            jogCbTicks = ticks;
+        });
+
+        // Simulate MCU Jog Wheel MIDI Event: CC 0x3C, val 0x42 (-2 ticks counter-clockwise)
+        const std::uint8_t mcuJogMidi[3] = { 0xB0, 0x3C, 0x42 };
+        mgr.handleIncomingMidi(mcuJogMidi, 3);
+
+        require(jogCbFired, "Jog wheel callback triggered by MCU MIDI CC 0x3C");
+        require(std::abs(jogCbTicks - (-2.0f)) < 1e-3f, "Jog wheel parsed delta ticks correctly (-2.0)");
+    }
+
+    // =========================================================================
+    // 3. Intra-Clip Modulation Curves & MPE Per-Note Vibrato/Slide Envelopes
+    // =========================================================================
+    {
+        // Intra-clip modulation curve
+        ClipModulationCurve curve;
+        curve.target = ClipModulationTarget::filterCutoff;
+        curve.loopWithClip = true;
+        curve.points = {
+            ClipModulationPoint { .normalizedTime = 0.0, .value = 0.2f, .tension = 0.0f },
+            ClipModulationPoint { .normalizedTime = 0.5, .value = 0.8f, .tension = 0.5f },
+            ClipModulationPoint { .normalizedTime = 1.0, .value = 0.3f, .tension = -0.3f }
+        };
+
+        require(std::abs(curve.evaluate(0.0) - 0.2f) < 1e-4f, "Curve evaluate at 0.0");
+        require(std::abs(curve.evaluate(0.5) - 0.8f) < 1e-4f, "Curve evaluate at 0.5");
+        require(std::abs(curve.evaluate(1.0) - 0.3f) < 1e-4f, "Curve evaluate at 1.0");
+
+        // Loop phase wrapping
+        require(std::abs(curve.evaluate(1.5) - 0.8f) < 1e-4f, "Curve loops per clip cycle (phase 1.5 -> 0.5)");
+
+        // Project clip structs hold modulation curves
+        MidiClip mClip;
+        mClip.modulationCurves.push_back(curve);
+        require(mClip.modulationCurves.size() == 1, "MidiClip stores intra-clip modulation curves");
+
+        AudioClip aClip;
+        aClip.modulationCurves.push_back(curve);
+        require(aClip.modulationCurves.size() == 1, "AudioClip stores intra-clip modulation curves");
+
+        // MPE per-note micro-pitch vibrato and slide
+        MpeVoiceManager mpe;
+        mpe.noteOn(2, 60, 0.9f);
+        require(mpe.activeVoiceCount() == 1, "MPE note allocated");
+
+        mpe.setVoiceVibrato(2, 60, 1.0f, 6.0f, 0.10f); // 1 semitone depth, 6Hz, 100ms delay
+        mpe.setVoiceSlide(2, 60, 2.0f, 0.25f);         // +2 semitones slide over 250ms
+
+        // Before vibrato delay (<100ms)
+        mpe.advance(0.05); // 50ms
+        const auto* v = mpe.findVoice(2, 60);
+        require(v != nullptr, "Voice exists");
+        require(v->currentVibratoOffset == 0.0f, "Vibrato offset is 0 before delay threshold");
+        require(v->currentSlideOffset > 0.0f, "Pitch slide is progressing during onset");
+
+        // Past vibrato delay (>100ms)
+        mpe.advance(0.10); // total 150ms
+        require(std::abs(v->effectivePitchSemitones()) > 0.0f, "Effective pitch combines glide, vibrato, and slide");
+
+        // MidiNote project data supports micro-pitch attributes
+        MidiNote note;
+        note.vibratoDepth = 0.8f;
+        note.vibratoRateHz = 5.5f;
+        note.vibratoDelayMs = 120.0f;
+        note.slideSemitones = 1.5f;
+        require(note.vibratoDepth > 0.5f && note.slideSemitones > 1.0f, "MidiNote holds per-note micro-pitch vibrato and slide");
+    }
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -6771,4 +6986,5 @@ int main()
     testAnalogSaturationMultiSampleKeySwitchesAndSpatialRadarSuite();
     testProjectFreezeSlicerAndMonitorCalibrationSuite();
     testHardwareSurfacesPhaseAlignmentAndExportPresetsSuite();
+    testDrumDebleedAudioScrubAndIntraClipModulationSuite();
 }

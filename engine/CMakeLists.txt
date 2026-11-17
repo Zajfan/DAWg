@@ -24,6 +24,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/AcousticDrumBleedCancellationNode.cpp
     src/dsp/AmbisonicsProcessorNode.cpp
     src/dsp/AnalogLadderRingModSynthNode.cpp
+    src/dsp/AudioScrubEngine.cpp
     src/dsp/AudioTranscriber.cpp
     src/dsp/AudioWarpEngine.cpp
     src/dsp/BinauralSpatialPannerNode.cpp
@@ -45,6 +46,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/MicrotonalTuningEngine.cpp
     src/dsp/ModulatorRack.cpp
     src/dsp/MpeVoiceManager.cpp
+    src/dsp/MultiMicDrumDebleedEngine.cpp
     src/dsp/MultiSampleInstrumentNode.cpp
     src/dsp/MultiTrackPhaseAlignerNode.cpp
     src/dsp/MultibandCompressorNode.cpp

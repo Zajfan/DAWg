@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -77,6 +79,86 @@ struct AudioAsset
     friend bool operator==(const AudioAsset&, const AudioAsset&) = default;
 };
 
+enum class ClipModulationTarget : std::uint8_t
+{
+    filterCutoff,
+    filterResonance,
+    pan,
+    gain,
+    pitchBend,
+    custom
+};
+
+struct ClipModulationPoint
+{
+    double normalizedTime {0.0}; // [0.0, 1.0] within clip loop/length
+    float value {0.5f};          // [0.0, 1.0] parameter value
+    float tension {0.0f};        // [-1.0, +1.0] Bezier tension
+
+    friend bool operator==(const ClipModulationPoint&, const ClipModulationPoint&) = default;
+};
+
+struct ClipModulationCurve
+{
+    ClipModulationTarget target {ClipModulationTarget::filterCutoff};
+    std::string customParameterId;
+    bool loopWithClip {true};
+    std::vector<ClipModulationPoint> points;
+
+    [[nodiscard]] float evaluate(double normalizedPhase) const noexcept
+    {
+        if (points.empty())
+            return 0.5f;
+        if (points.size() == 1)
+            return points.front().value;
+
+        double phase = normalizedPhase;
+        if (loopWithClip)
+        {
+            if (phase > 1.0 || phase < 0.0)
+            {
+                phase = std::fmod(phase, 1.0);
+                if (phase < 0.0)
+                    phase += 1.0;
+            }
+        }
+        else
+        {
+            phase = std::clamp(phase, 0.0, 1.0);
+        }
+
+        if (phase <= points.front().normalizedTime)
+            return points.front().value;
+        if (phase >= points.back().normalizedTime)
+            return points.back().value;
+
+        for (std::size_t i = 0; i < points.size() - 1; ++i)
+        {
+            const auto& p0 = points[i];
+            const auto& p1 = points[i + 1];
+            if (phase >= p0.normalizedTime && phase <= p1.normalizedTime)
+            {
+                const double span = p1.normalizedTime - p0.normalizedTime;
+                if (span <= 1e-7)
+                    return p1.value;
+                const double t = (phase - p0.normalizedTime) / span;
+                double shapedT = t;
+                if (std::abs(p0.tension) > 0.001f)
+                {
+                    if (p0.tension > 0.0f)
+                        shapedT = std::pow(t, 1.0 + static_cast<double>(p0.tension) * 3.0);
+                    else
+                        shapedT = 1.0 - std::pow(1.0 - t, 1.0 - static_cast<double>(p0.tension) * 3.0);
+                }
+                return static_cast<float>(static_cast<double>(p0.value) + (static_cast<double>(p1.value) - static_cast<double>(p0.value)) * shapedT);
+            }
+        }
+        return points.back().value;
+    }
+
+    friend bool operator==(const ClipModulationCurve&, const ClipModulationCurve&) = default;
+};
+
 struct AudioClip
 {
     ClipId id {};
@@ -90,6 +172,7 @@ struct AudioClip
     std::uint32_t fadeOutSamples {};
     bool warpingEnabled {false};
     std::vector<WarpMarker> warpMarkers {};
+    std::vector<ClipModulationCurve> modulationCurves {};
 
     friend bool operator==(const AudioClip&, const AudioClip&) = default;
 };
@@ -101,6 +184,10 @@ struct MidiNote
     std::uint8_t velocity {100};
     std::uint64_t startSample {0};
     std::uint64_t lengthSamples {24000};
+    float vibratoDepth {0.0f};       // 0.0 to 2.0 semitones
+    float vibratoRateHz {5.5f};      // 1.0 to 12.0 Hz
+    float vibratoDelayMs {150.0f};   // onset delay in milliseconds
+    float slideSemitones {0.0f};     // micro-pitch slide offset (-12.0 to +12.0 semitones)
 
     friend bool operator==(const MidiNote&, const MidiNote&) = default;
 };
@@ -112,6 +199,7 @@ struct MidiClip
     std::uint64_t startSample {0};
     std::uint64_t lengthSamples {96000};
     std::vector<MidiNote> notes;
+    std::vector<ClipModulationCurve> modulationCurves {};
 
     friend bool operator==(const MidiClip&, const MidiClip&) = default;
 };

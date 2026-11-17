@@ -15,6 +15,10 @@
 
 namespace dawg::engine {
 
+namespace dsp {
+class AudioScrubEngine;
+}
+
 struct MidiDeviceInfo
 {
     std::string identifier;
@@ -52,6 +56,7 @@ public:
     using VpotTurnedCallback = std::function<void(std::size_t channelIdx, float deltaTicks)>;
     using TransportCallback = std::function<void(McuTransportButton button, bool pressed)>;
     using PadCallback = std::function<void(std::size_t row, std::size_t col, float velocity, bool pressed)>;
+    using JogWheelCallback = std::function<void(float deltaTicks)>;
 
     HardwareControlSurfaceManager() noexcept;
     ~HardwareControlSurfaceManager();
@@ -72,6 +77,9 @@ public:
     void setVpotTurnedCallback(VpotTurnedCallback cb) noexcept { m_vpotCb = std::move(cb); }
     void setTransportCallback(TransportCallback cb) noexcept { m_transportCb = std::move(cb); }
     void setPadCallback(PadCallback cb) noexcept { m_padCb = std::move(cb); }
+    void setJogWheelCallback(JogWheelCallback cb) noexcept { m_jogWheelCb = std::move(cb); }
+    void attachScrubEngine(dsp::AudioScrubEngine* scrubEngine) noexcept { m_scrubEngine = scrubEngine; }
+    [[nodiscard]] dsp::AudioScrubEngine* scrubEngine() const noexcept { return m_scrubEngine; }
 
     // DAW State Updates for Hardware Feedback (Thread-safe)
     void updateChannelStrip(std::size_t channelIdx, const ChannelStripFeedback& state) noexcept;
@@ -109,6 +117,8 @@ private:
     VpotTurnedCallback m_vpotCb;
     TransportCallback m_transportCb;
     PadCallback m_padCb;
+    JogWheelCallback m_jogWheelCb;
+    dsp::AudioScrubEngine* m_scrubEngine {nullptr};
 
     std::atomic<bool> m_syncRunning {false};
     std::thread m_syncThread;

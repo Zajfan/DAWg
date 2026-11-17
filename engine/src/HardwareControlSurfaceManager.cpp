@@ -1,4 +1,5 @@
 #include <dawg/engine/HardwareControlSurfaceManager.h>
+#include <dawg/engine/dsp/AudioScrubEngine.h>
 
 #include <algorithm>
 #include <cctype>
@@ -278,6 +279,17 @@ void HardwareControlSurfaceManager::handleIncomingMidi(
                 const std::size_t row = hwEv.index / HardwareControlSurfaceEngine::GridCols;
                 const std::size_t col = hwEv.index % HardwareControlSurfaceEngine::GridCols;
                 m_padCb(row, col, hwEv.value, hwEv.type == HardwareControlSurfaceEngine::HardwareEvent::Type::padPress);
+            }
+            break;
+
+        case HardwareControlSurfaceEngine::HardwareEvent::Type::mcuJogWheel:
+            if (m_jogWheelCb)
+            {
+                m_jogWheelCb(hwEv.value);
+            }
+            if (m_scrubEngine != nullptr)
+            {
+                m_scrubEngine->onJogWheelTurn(hwEv.value);
             }
             break;
 
