@@ -19,6 +19,8 @@ struct SamplerPad
     std::vector<float> sampleR;
     float pitchSemi {0.0f};      // -24.0 to +24.0 semitones
     bool reverse {false};
+    bool granularScrub {false};  // Micro-grain looping & scrub texture mode
+    float grainSizeMs {40.0f};   // Grain duration (10ms to 200ms)
     float startNorm {0.0f};      // 0.0 to 1.0
     float endNorm {1.0f};        // 0.0 to 1.0
     int chokeGroup {0};          // 0 = none, 1..8 = choke group
@@ -87,6 +89,8 @@ private:
         float envLevel {0.0f};
         float lpPrevL {0.0f};
         float lpPrevR {0.0f};
+        double grainPos {0.0};
+        double grainLen {1920.0};
     };
 
     double m_sampleRate {48000.0};

@@ -290,6 +290,17 @@ struct SetTrackCompGroup
     std::uint32_t compGroupId {0};
 };
 
+struct FreezeTrack
+{
+    TrackId id {0};
+    std::string freezeAudioPath {};
+};
+
+struct UnfreezeTrack
+{
+    TrackId id {0};
+};
+
 using ProjectCommand = std::variant<
     AddAudioTrack,
     AddInstrumentTrack,
@@ -299,6 +310,8 @@ using ProjectCommand = std::variant<
     SetTrackParentFolder,
     SetFolderCollapsed,
     SetTrackCompGroup,
+    FreezeTrack,
+    UnfreezeTrack,
     RemoveTrack,
     RenameTrack,
     ReorderTracks,

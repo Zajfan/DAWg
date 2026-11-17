@@ -102,6 +102,9 @@ void DrumPadSamplerNode::triggerPad(std::size_t padIdx, float velocity) noexcept
     const double startSample = std::clamp(static_cast<double>(padData.startNorm), 0.0, 0.999) * len;
     const double endSample = std::clamp(static_cast<double>(padData.endNorm), 0.001, 1.0) * len;
 
+    voice.grainPos = 0.0;
+    voice.grainLen = std::max(64.0, (static_cast<double>(padData.grainSizeMs) * 0.001) * m_sampleRate);
+
     if (padData.reverse)
     {
         voice.readPos = std::max(startSample, endSample - 1.0);
@@ -317,7 +320,15 @@ void DrumPadSamplerNode::process(ProcessContext& context) noexcept
                 break;
 
             // Check boundary
-            if (! padData.reverse)
+            if (padData.granularScrub)
+            {
+                // In granular scrub mode, keep reading within the sample zone and loop grain
+                if (voice.readPos >= endPos)
+                    voice.readPos = startPos;
+                else if (voice.readPos < startPos)
+                    voice.readPos = endPos - 1.0;
+            }
+            else if (! padData.reverse)
             {
                 if (voice.readPos >= endPos)
                 {
@@ -346,7 +357,17 @@ void DrumPadSamplerNode::process(ProcessContext& context) noexcept
             voice.lpPrevL += lpAlpha * (rawL - voice.lpPrevL);
             voice.lpPrevR += lpAlpha * (rawR - voice.lpPrevR);
 
-            const float gain = voice.velocity * voice.envLevel * padData.gainLinear;
+            float grainGain = 1.0f;
+            if (padData.granularScrub && voice.grainLen > 1.0)
+            {
+                const float normPhase = static_cast<float>(voice.grainPos / voice.grainLen);
+                grainGain = 0.5f * (1.0f - std::cos(2.0f * 3.14159265f * normPhase));
+                voice.grainPos += voice.stepRate;
+                if (voice.grainPos >= voice.grainLen)
+                    voice.grainPos -= voice.grainLen;
+            }
+
+            const float gain = voice.velocity * voice.envLevel * padData.gainLinear * grainGain;
             if (context.audio.channelCount >= 1 && context.audio.channels[0] != nullptr)
                 context.audio.channels[0][s] += voice.lpPrevL * gain;
             if (context.audio.channelCount >= 2 && context.audio.channels[1] != nullptr)

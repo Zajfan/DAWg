@@ -40,6 +40,8 @@ public:
     [[nodiscard]] bool addTrackInsert(TrackId trackId, DspNodeDescriptor descriptor);
     [[nodiscard]] bool removeTrackInsert(TrackId trackId, std::uint32_t slotIndex);
     [[nodiscard]] bool setTrackInsertBypassed(TrackId trackId, std::uint32_t slotIndex, bool bypassed);
+    [[nodiscard]] bool freezeTrack(TrackId id, std::string freezeAudioPath);
+    [[nodiscard]] bool unfreezeTrack(TrackId id);
     MediaAssetId addAudioAsset(AudioAsset asset);
     ClipId addAudioClip(AudioClip clip);
     MidiClipId addMidiClip(MidiClip clip);

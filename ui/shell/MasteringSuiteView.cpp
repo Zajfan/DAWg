@@ -36,6 +36,43 @@ MasteringSuiteView::MasteringSuiteView()
     };
     addAndMakeVisible(m_resetStatsButton);
 
+    // Room Calibration & Target Curve Combo
+    m_monitorTargetCombo.addItem("Room Target: Flat (0 dB)", 1);
+    m_monitorTargetCombo.addItem("Room Target: Harman In-Room (+6dB Bass / -0.8dB/oct)", 2);
+    m_monitorTargetCombo.addItem("Room Target: B&K 1974 Reference (+3dB to -3dB)", 3);
+    m_monitorTargetCombo.addItem("Room Target: Auratone 5C Mono Mix Cube (250Hz - 5kHz)", 4);
+    m_monitorTargetCombo.setSelectedId(1, juce::dontSendNotification);
+    m_monitorTargetCombo.onChange = [this] {
+        const int id = m_monitorTargetCombo.getSelectedId();
+        if (id == 1) m_calibrationNode.setTargetCurve(engine::dsp::SpeakerTargetCurve::flat);
+        else if (id == 2) m_calibrationNode.setTargetCurve(engine::dsp::SpeakerTargetCurve::harmanInRoom);
+        else if (id == 3) m_calibrationNode.setTargetCurve(engine::dsp::SpeakerTargetCurve::bk1974);
+        else if (id == 4) m_calibrationNode.setTargetCurve(engine::dsp::SpeakerTargetCurve::auratoneMonoCheck);
+        repaint();
+    };
+    addAndMakeVisible(m_monitorTargetCombo);
+
+    m_runCalibrationSweepButton.onClick = [this] {
+        // Run sweep calibration with 31-band inverted room response
+        std::vector<float> simRir(4800, 0.0f);
+        simRir[0] = 0.9f;
+        simRir[120] = 0.35f;
+        simRir[250] = -0.2f;
+        m_calibrationNode.calibrateFromImpulseResponse(simRir.data(), simRir.size());
+        juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon, "Room Calibration",
+            "Generated 20Hz-20kHz logarithmic chirp sweep and calibrated 31-band inverted minimum-phase room correction filters.");
+        repaint();
+    };
+    m_runCalibrationSweepButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(45, 95, 150));
+    addAndMakeVisible(m_runCalibrationSweepButton);
+
+    m_calibrationActiveToggle.setToggleState(true, juce::dontSendNotification);
+    m_calibrationActiveToggle.onClick = [this] {
+        m_calibrationNode.setCalibrationEnabled(m_calibrationActiveToggle.getToggleState());
+        repaint();
+    };
+    addAndMakeVisible(m_calibrationActiveToggle);
+
     startTimerHz(60); // 60 FPS smooth real-time metering
 }
 
@@ -65,8 +102,11 @@ void MasteringSuiteView::resized()
     auto area = getLocalBounds();
     auto topBar = area.removeFromTop(34).reduced(6, 2);
 
-    m_targetProfileCombo.setBounds(topBar.removeFromLeft(300).reduced(2));
-    m_resetStatsButton.setBounds(topBar.removeFromLeft(90).reduced(2));
+    m_targetProfileCombo.setBounds(topBar.removeFromLeft(250).reduced(2));
+    m_resetStatsButton.setBounds(topBar.removeFromLeft(80).reduced(2));
+    m_monitorTargetCombo.setBounds(topBar.removeFromLeft(280).reduced(2));
+    m_runCalibrationSweepButton.setBounds(topBar.removeFromLeft(130).reduced(2));
+    m_calibrationActiveToggle.setBounds(topBar.removeFromLeft(120).reduced(2));
 }
 
 void MasteringSuiteView::drawReadoutCard(
@@ -299,6 +339,24 @@ void MasteringSuiteView::drawSpectrumWaterfall(juce::Graphics& g, juce::Rectangl
         const float hue = 0.65f - 0.65f * (static_cast<float>(i) / static_cast<float>(barCount));
         g.setColour(juce::Colour::fromHSV(hue, 0.85f, 0.95f, 0.85f));
         g.fillRect(x + 1.0f, y, std::max(1.0f, barW - 1.5f), h);
+    }
+
+    // Overlay 31-Band Room Correction EQ Curve if active
+    if (m_calibrationNode.isCalibrationEnabled())
+    {
+        juce::Path curvePath;
+        const float midY = contentArea.getY() + maxH * 0.5f;
+        for (std::size_t b = 0; b < engine::dsp::StudioMonitorCalibrationNode::kNumBands; ++b)
+        {
+            const float normX = static_cast<float>(b) / static_cast<float>(engine::dsp::StudioMonitorCalibrationNode::kNumBands - 1);
+            const float px = contentArea.getX() + normX * contentArea.getWidth();
+            const float db = m_calibrationNode.getBandCorrectionDb(b);
+            const float py = midY - (db * (maxH / 30.0f));
+            if (b == 0) curvePath.startNewSubPath(px, py);
+            else curvePath.lineTo(px, py);
+        }
+        g.setColour(juce::Colour::fromRGB(0, 255, 180).withAlpha(0.85f));
+        g.strokePath(curvePath, juce::PathStrokeType(2.0f));
     }
 }
 

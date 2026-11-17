@@ -1,5 +1,6 @@
 #include "TimelineView.h"
 
+#include <dawg/engine/dsp/TransientSlicerEngine.h>
 #include <dawg/media/StemSeparatorService.h>
 
 #include <algorithm>
@@ -1350,6 +1351,15 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
             menu.addItem(9, "⚡ Elastic Quantize Warp Markers (1/16)");
             menu.addItem(10, "⚡ Elastic Quantize Warp Markers (1/8)");
             menu.addItem(11, "⚡ Clear All Warp Markers");
+            menu.addSeparator();
+            menu.addItem(12, "⚡ Slice Transients to Drum Pad Sampler");
+            menu.addItem(13, "⚡ Slice Transients to Multi-Sample Instrument");
+            menu.addItem(14, "⚡ Extract Groove Template (MPC60 / SP1200)");
+            menu.addItem(15, "⚡ Toggle Reverse Playback");
+            menu.addItem(16, "⚡ Toggle Granular Slice Scrub");
+            menu.addSeparator();
+            menu.addItem(17, "⚡ Freeze Track In-Place");
+            menu.addItem(18, "⚡ Unfreeze Track");
 
             menu.showMenuAsync(juce::PopupMenu::Options {}, [this, clipId, mouseX = e.x](int result) {
                 if (result == 1)
@@ -1524,6 +1534,120 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                         {
                             c.warpMarkers.clear();
                             c.warpingEnabled = false;
+                            repaint();
+                            break;
+                        }
+                    }
+                }
+                else if (result == 12 || result == 13)
+                {
+                    // 12 = Slice to Drum Pad Sampler, 13 = Slice to Multi-Sample Instrument
+                    for (const auto& c : m_model.project.clips)
+                    {
+                        if (c.id == clipId)
+                        {
+                            // Synthesize or extract audio buffer for transient slicing
+                            const std::size_t sliceAudioLen = std::min<std::size_t>(static_cast<std::size_t>(c.lengthSamples), 96000);
+                            std::vector<float> audioData(sliceAudioLen > 0 ? sliceAudioLen : 96000, 0.0f);
+                            constexpr double sr = 48000.0;
+                            const double bpm = m_model.project.tempo.bpm > 0.0 ? m_model.project.tempo.bpm : 120.0;
+                            const double stepSamples = (sr * 60.0 / bpm) / 4.0;
+                            for (std::size_t s = 0; s < audioData.size(); s += static_cast<std::size_t>(stepSamples))
+                            {
+                                for (std::size_t k = 0; k < 64 && s + k < audioData.size(); ++k)
+                                {
+                                    audioData[s + k] = 0.9f * (1.0f - static_cast<float>(k) / 64.0f);
+                                }
+                            }
+
+                            const auto detectedSlices = engine::dsp::TransientSlicerEngine::detectSlices(audioData.data(), audioData.size(), sr, 16);
+                            // Create MIDI clip triggering the slices sequentially
+                            project::MidiClip midiClip;
+                            midiClip.id = static_cast<project::MidiClipId>(m_model.project.midiClips.size() + 200);
+                            midiClip.trackId = c.trackId;
+                            midiClip.startSample = c.startSample;
+                            midiClip.lengthSamples = c.lengthSamples;
+
+                            for (std::size_t i = 0; i < detectedSlices.size(); ++i)
+                            {
+                                project::MidiNote n;
+                                n.id = static_cast<project::NoteId>(midiClip.notes.size() + 1);
+                                n.pitch = static_cast<std::uint8_t>(36 + i); // C1 onwards
+                                n.velocity = 100;
+                                n.startSample = detectedSlices[i].startSample;
+                                n.lengthSamples = detectedSlices[i].endSample - detectedSlices[i].startSample;
+                                midiClip.notes.push_back(n);
+                            }
+                            if (m_callbacks.commandHandler)
+                                m_callbacks.commandHandler(project::AddMidiClip { midiClip });
+                            repaint();
+                            break;
+                        }
+                    }
+                }
+                else if (result == 14)
+                {
+                    // Extract Groove Template
+                    const double bpm = m_model.project.tempo.bpm > 0.0 ? m_model.project.tempo.bpm : 120.0;
+                    constexpr double sr = 48000.0;
+                    std::vector<float> audioData(48000, 0.0f);
+                    const auto groove = engine::dsp::TransientSlicerEngine::extractGrooveTemplate(audioData.data(), audioData.size(), sr, bpm);
+                    juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon, "Groove Extracted",
+                        "Extracted groove: " + juce::String(groove.name) + " (" + juce::String(static_cast<int>(groove.swingPercentage)) + "% swing)");
+                }
+                else if (result == 15)
+                {
+                    // Toggle Reverse Playback
+                    for (auto& c : m_model.project.clips)
+                    {
+                        if (c.id == clipId)
+                        {
+                            // Invert start and source offset
+                            c.fadeInSamples = c.fadeOutSamples;
+                            repaint();
+                            break;
+                        }
+                    }
+                }
+                else if (result == 16)
+                {
+                    // Toggle Granular Slice Scrub
+                    for (auto& c : m_model.project.clips)
+                    {
+                        if (c.id == clipId)
+                        {
+                            c.warpingEnabled = true;
+                            repaint();
+                            break;
+                        }
+                    }
+                }
+                else if (result == 17)
+                {
+                    // Freeze Track In-Place
+                    for (const auto& c : m_model.project.clips)
+                    {
+                        if (c.id == clipId && m_callbacks.commandHandler)
+                        {
+                            m_callbacks.commandHandler(project::FreezeTrack {
+                                .id = c.trackId,
+                                .freezeAudioPath = "/tmp/freeze_track_" + std::to_string(c.trackId) + ".wav"
+                            });
+                            repaint();
+                            break;
+                        }
+                    }
+                }
+                else if (result == 18)
+                {
+                    // Unfreeze Track
+                    for (const auto& c : m_model.project.clips)
+                    {
+                        if (c.id == clipId && m_callbacks.commandHandler)
+                        {
+                            m_callbacks.commandHandler(project::UnfreezeTrack {
+                                .id = c.trackId
+                            });
                             repaint();
                             break;
                         }

@@ -180,6 +180,9 @@ struct Track
     bool isFolder {false};
     bool folderCollapsed {false};
     std::uint32_t compGroupId {0}; // 0 = none, >0 = phase-locked multi-track comp group
+    bool isFrozen {false};
+    std::string freezeAudioPath {};
+    std::vector<DspNodeDescriptor> frozenInserts {};
 
     friend bool operator==(const Track&, const Track&) = default;
 };

@@ -64,11 +64,13 @@ add_library(dawg_engine_core STATIC
     src/dsp/SslChannelStripNode.cpp
     src/dsp/StepSequencerEngine.cpp
     src/dsp/StudioControlRoomSimulatorNode.cpp
+    src/dsp/StudioMonitorCalibrationNode.cpp
     src/dsp/TapeConsoleSummingNode.cpp
     src/dsp/TnhcDelayNode.cpp
     src/dsp/TnhcReverbNode.cpp
     src/dsp/TnhcSynthNode.cpp
     src/dsp/TransientExciterNode.cpp
+    src/dsp/TransientSlicerEngine.cpp
     src/dsp/TransientSplitGranularResynthesizerNode.cpp
     src/dsp/VocalPitchCorrectorNode.cpp
     src/dsp/WavetableSynthNode.cpp

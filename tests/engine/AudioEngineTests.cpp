@@ -66,6 +66,8 @@
 #include <dawg/engine/dsp/TnhcReverbNode.h>
 #include <dawg/engine/dsp/TnhcSynthNode.h>
 #include <dawg/engine/dsp/TransientExciterNode.h>
+#include <dawg/engine/dsp/TransientSlicerEngine.h>
+#include <dawg/engine/dsp/StudioMonitorCalibrationNode.h>
 #include <dawg/engine/dsp/TransientSplitGranularResynthesizerNode.h>
 #include <dawg/engine/dsp/VocalPitchCorrectorNode.h>
 #include <dawg/engine/dsp/WavetableSynthNode.h>
@@ -6324,6 +6326,138 @@ void testAnalogSaturationMultiSampleKeySwitchesAndSpatialRadarSuite()
     require(sampler.activeVoiceCount() == 1, "Staccato voice triggered");
     sampler.reset();
 }
+
+void testProjectFreezeSlicerAndMonitorCalibrationSuite()
+{
+    using dawg::engine::DrumPadSamplerNode;
+    using dawg::engine::dsp::TransientSlicerEngine;
+    using dawg::engine::dsp::MultiSampleInstrumentNode;
+    using dawg::engine::dsp::StudioMonitorCalibrationNode;
+    using dawg::engine::dsp::SpeakerTargetCurve;
+
+    // 1. Transient Slicer Engine & Dynamic Sampler Mapping
+    std::vector<float> percussiveLoop(16000, 0.0f);
+    // Create 4 distinct transient bursts separated by 3000 samples
+    for (std::size_t b = 0; b < 4; ++b)
+    {
+        const std::size_t base = b * 3500;
+        for (std::size_t i = 0; i < 200 && base + i < percussiveLoop.size(); ++i)
+        {
+            percussiveLoop[base + i] = 0.95f * (1.0f - static_cast<float>(i) / 200.0f) * std::sin(static_cast<float>(i) * 0.4f);
+        }
+    }
+
+    const auto slices = TransientSlicerEngine::detectSlices(percussiveLoop.data(), percussiveLoop.size(), 48000.0, 16);
+    require(slices.size() >= 3, "Transient detector detected at least 3 percussive slices");
+    require(slices[0].startSample == 0, "First slice starts at sample 0");
+
+    // Slice to DrumPadSamplerNode
+    DrumPadSamplerNode drumSampler;
+    require(drumSampler.prepare(48000.0, 128, 2), "DrumPadSampler prepared");
+    const auto padCount = TransientSlicerEngine::sliceToDrumPadSampler(
+        percussiveLoop.data(), percussiveLoop.data(), percussiveLoop.size(), 48000.0,
+        drumSampler, false, false);
+    require(padCount >= 3, "Mapped slices to DrumPadSampler pads");
+
+    drumSampler.pad(0).reverse = false;
+    drumSampler.pad(0).granularScrub = true;
+    drumSampler.pad(0).grainSizeMs = 10.0f; // 480 samples, fast Hann opening
+    drumSampler.triggerPad(0, 0.9f);
+    require(drumSampler.isPadActive(0), "Pad 0 triggered and active");
+
+    std::array<float, 128> drumL {};
+    std::array<float, 128> drumR {};
+    std::array<float*, 2> drumChs {drumL.data(), drumR.data()};
+    dawg::engine::ProcessContext drumCtx {
+        .audio = dawg::engine::AudioBufferView {drumChs.data(), 2, 128},
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+
+    {
+        ScopedAllocationGuard guard;
+        drumSampler.process(drumCtx);
+        require(g_allocationCount.load() == 0, "Granular pad playback has zero RT allocations");
+    }
+    float maxDrumPeak = 0.0f;
+    for (const float s : drumL)
+        maxDrumPeak = std::max(maxDrumPeak, std::abs(s));
+    require(maxDrumPeak > 0.001f, "Granular scrub voice rendered audio signal");
+
+    // Slice to MultiSampleInstrumentNode
+    MultiSampleInstrumentNode multiSampler;
+    require(multiSampler.prepare(48000.0, 128, 2), "MultiSample instrument prepared");
+    const auto zoneCount = TransientSlicerEngine::sliceToMultiSampleInstrument(
+        percussiveLoop.data(), percussiveLoop.data(), percussiveLoop.size(), 48000.0,
+        multiSampler, 36);
+    require(zoneCount >= 3, "Mapped slices to chromatic multi-sample key zones");
+    require(multiSampler.regionCount() == zoneCount, "MultiSample regions count matches slices");
+
+    // Factory Groove Templates
+    const auto mpc62 = TransientSlicerEngine::getFactoryMpc60Swing(62);
+    require(std::abs(mpc62.swingPercentage - 62.0f) < 1e-3f, "Factory MPC60 62% swing configured");
+    require(mpc62.stepOffsets.size() == 16, "16-step swing template generated");
+    require(mpc62.stepOffsets[1] > 0.1f, "Even 16th step has positive swing delay offset");
+
+    const auto sp1200_3 = TransientSlicerEngine::getFactorySp1200Swing(3);
+    require(sp1200_3.swingPercentage > 50.0f, "SP-1200 swing template verified");
+
+    // 2. Studio Monitor Calibration & Room Correction Node
+    StudioMonitorCalibrationNode calib;
+    require(calib.prepare(48000.0, 128, 2), "StudioMonitorCalibrationNode prepared");
+
+    // Test Chirp sweep generator
+    dawg::engine::dsp::CalibrationSweepConfig sweepCfg;
+    sweepCfg.durationSeconds = 0.5f; // Fast test sweep
+    const auto chirp = StudioMonitorCalibrationNode::generateLogChirpSweep(48000.0, sweepCfg);
+    require(chirp.size() == 24000, "Logarithmic chirp generated 24000 samples for 0.5s at 48kHz");
+    float maxChirp = 0.0f;
+    for (const float s : chirp)
+        maxChirp = std::max(maxChirp, std::abs(s));
+    require(maxChirp > 0.5f, "Chirp contains full amplitude oscillating sweep signal");
+
+    // Calibrate from simulated room impulse response
+    std::vector<float> testRir(2400, 0.0f);
+    testRir[0] = 1.0f;
+    testRir[50] = -0.3f; // Room reflection
+    testRir[120] = 0.15f;
+    require(calib.calibrateFromImpulseResponse(testRir.data(), testRir.size()), "Calibrated from impulse response");
+
+    // Test Speaker Target Curves
+    calib.setTargetCurve(SpeakerTargetCurve::harmanInRoom);
+    require(calib.targetCurve() == SpeakerTargetCurve::harmanInRoom, "Harman in-room target set");
+    require(calib.getTargetBandDb(0) > 3.0f, "Harman curve features low-end bass shelf boost");
+
+    calib.setTargetCurve(SpeakerTargetCurve::bk1974);
+    require(calib.targetCurve() == SpeakerTargetCurve::bk1974, "B&K 1974 target set");
+
+    calib.setTargetCurve(SpeakerTargetCurve::auratoneMonoCheck);
+    require(calib.targetCurve() == SpeakerTargetCurve::auratoneMonoCheck, "Auratone 5C mono check target set");
+
+    // Process audio through calibration node
+    std::array<float, 128> calL {};
+    std::array<float, 128> calR {};
+    std::fill(calL.begin(), calL.end(), 0.3f);
+    std::fill(calR.begin(), calR.end(), -0.3f);
+    std::array<float*, 2> calChs {calL.data(), calR.data()};
+    dawg::engine::ProcessContext calCtx {
+        .audio = dawg::engine::AudioBufferView {calChs.data(), 2, 128},
+        .midi = {},
+        .sampleRate = 48000.0,
+        .sidechain = {}
+    };
+
+    {
+        ScopedAllocationGuard guard;
+        calib.process(calCtx);
+        require(g_allocationCount.load() == 0, "Calibration node process has zero RT allocations");
+    }
+
+    // In Auratone mono mode, channels are summed to mono and bandpassed
+    require(std::abs(calL[10] - calR[10]) < 1e-4f, "Auratone mix check output is mono-correlated");
+    require(!std::isnan(calL[10]) && !std::isinf(calL[10]), "Output is finite");
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -6501,4 +6635,5 @@ int main()
     testMultiTrackRecordingEngineSuite();
     testSidechainDuckingWarpMarkersAndMarkovChordsSuite();
     testAnalogSaturationMultiSampleKeySwitchesAndSpatialRadarSuite();
+    testProjectFreezeSlicerAndMonitorCalibrationSuite();
 }

@@ -246,6 +246,10 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
                 parsedTrack.inserts.push_back(std::move(desc));
             }
         }
+        if (track.contains("isFrozen") && track.at("isFrozen").is_boolean())
+            parsedTrack.isFrozen = track.at("isFrozen").get<bool>();
+        if (track.contains("freezeAudioPath") && track.at("freezeAudioPath").is_string())
+            parsedTrack.freezeAudioPath = track.at("freezeAudioPath").get<std::string>();
         snapshot.tracks.push_back(std::move(parsedTrack));
     }
 
@@ -506,6 +510,9 @@ std::expected<void, ProjectFileError> saveProject(
                 trackJson["kind"] = kindStr;
                 trackJson["outputBusTrackId"] = track.outputBusTrackId;
                 trackJson["takeLanesExpanded"] = track.takeLanesExpanded;
+                trackJson["isFrozen"] = track.isFrozen;
+                if (! track.freezeAudioPath.empty())
+                    trackJson["freezeAudioPath"] = track.freezeAudioPath;
 
                 if (! track.sends.empty())
                 {

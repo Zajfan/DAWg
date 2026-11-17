@@ -562,6 +562,34 @@ bool Project::setTrackInsertBypassed(const TrackId trackId, const std::uint32_t 
     return true;
 }
 
+bool Project::freezeTrack(const TrackId id, std::string freezeAudioPath)
+{
+    const auto it = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                 [id](const Track& t) { return t.id == id; });
+    if (it == m_state.tracks.end() || it->isFrozen)
+        return false;
+
+    it->isFrozen = true;
+    it->freezeAudioPath = std::move(freezeAudioPath);
+    it->frozenInserts = std::move(it->inserts);
+    it->inserts.clear();
+    return true;
+}
+
+bool Project::unfreezeTrack(const TrackId id)
+{
+    const auto it = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                 [id](const Track& t) { return t.id == id; });
+    if (it == m_state.tracks.end() || ! it->isFrozen)
+        return false;
+
+    it->isFrozen = false;
+    it->freezeAudioPath.clear();
+    it->inserts = std::move(it->frozenInserts);
+    it->frozenInserts.clear();
+    return true;
+}
+
 MediaAssetId Project::addAudioAsset(AudioAsset asset)
 {
     if (! isValidAsset(asset))

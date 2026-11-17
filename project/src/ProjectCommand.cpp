@@ -25,6 +25,10 @@ bool Project::apply(const ProjectCommand& command)
             return setFolderCollapsed(operation.folderId, operation.collapsed);
         else if constexpr (std::is_same_v<Operation, SetTrackCompGroup>)
             return setTrackCompGroup(operation.trackId, operation.compGroupId);
+        else if constexpr (std::is_same_v<Operation, FreezeTrack>)
+            return freezeTrack(operation.id, operation.freezeAudioPath);
+        else if constexpr (std::is_same_v<Operation, UnfreezeTrack>)
+            return unfreezeTrack(operation.id);
         else if constexpr (std::is_same_v<Operation, AddTrackSend>)
             return addTrackSend(operation.trackId, operation.send);
         else if constexpr (std::is_same_v<Operation, RemoveTrackSend>)

@@ -85,11 +85,23 @@ public:
         double bpm,
         const std::string& musicalKey = "Cmaj");
 
+    static std::string expandNamingTokens(
+        const std::string& pattern,
+        const StemExportDescriptor& desc,
+        double bpm,
+        const std::string& musicalKey = "Cmaj");
+
     static float calculateLoudnessNormalizationGain(
         float measuredLufs,
         float targetLufs) noexcept;
 
     static std::string computeSimpleChecksum(const std::filesystem::path& filePath);
+
+    // 4. Consolidate & Archive: Gather all project audio assets into self-contained bundle
+    [[nodiscard]] std::expected<project::ProjectSnapshot, ProjectFileError> consolidateAndArchive(
+        const project::ProjectSnapshot& snapshot,
+        const std::filesystem::path& destinationFolder,
+        const std::filesystem::path& projectSourceRoot = "");
 
 private:
     std::string m_activeBranch {"main"};

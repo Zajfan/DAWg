@@ -289,6 +289,127 @@ std::string ProjectBundlerService::formatStemFilename(
     return ss.str();
 }
 
+std::string ProjectBundlerService::expandNamingTokens(
+    const std::string& pattern,
+    const StemExportDescriptor& desc,
+    double bpm,
+    const std::string& musicalKey)
+{
+    std::string result = pattern;
+    auto replaceAll = [&](const std::string& token, const std::string& val) {
+        std::size_t pos = 0;
+        while ((pos = result.find(token, pos)) != std::string::npos) {
+            result.replace(pos, token.length(), val);
+            pos += val.length();
+        }
+    };
+
+    std::ostringstream numStr;
+    numStr << std::setfill('0') << std::setw(2) << desc.trackIndex;
+    replaceAll("{TrackNum}", numStr.str());
+    replaceAll("{TrackName}", desc.trackName);
+
+    std::ostringstream bpmStr;
+    bpmStr << static_cast<int>(std::round(bpm)) << "BPM";
+    replaceAll("{BPM}", bpmStr.str());
+
+    replaceAll("{Key}", musicalKey);
+    replaceAll("{Type}", desc.preFx ? "Dry" : "Wet");
+
+    std::ostringstream lufsStr;
+    lufsStr << std::fixed << std::setprecision(1) << desc.targetLufs << "LUFS";
+    replaceAll("{LUFS}", lufsStr.str());
+
+    return result;
+}
+
+std::expected<project::ProjectSnapshot, ProjectFileError> ProjectBundlerService::consolidateAndArchive(
+    const project::ProjectSnapshot& snapshot,
+    const fs::path& destinationFolder,
+    const fs::path& projectSourceRoot)
+{
+    std::error_code ec;
+    const auto audioDir = destinationFolder / "Audio";
+    fs::create_directories(audioDir, ec);
+    if (ec) {
+        return std::unexpected(ProjectFileError {
+            ProjectFileError::Code::ioFailure,
+            "Failed to create bundle Audio directory: " + ec.message()
+        });
+    }
+
+    project::ProjectSnapshot consolidated = snapshot;
+    PackageManifest manifest;
+    manifest.packageFormatVersion = "1.0";
+    manifest.projectId = std::to_string(snapshot.id);
+    manifest.projectName = snapshot.name;
+    manifest.author = "Producer";
+
+    const auto now = std::chrono::system_clock::now();
+    const auto timeT = std::chrono::system_clock::to_time_t(now);
+    std::ostringstream timeStr;
+    timeStr << std::put_time(std::gmtime(&timeT), "%Y-%m-%dT%H:%M:%SZ");
+    manifest.timestampIso = timeStr.str();
+
+    for (auto& asset : consolidated.assets) {
+        fs::path sourceFile;
+        if (asset.pathKind == project::AudioAssetPathKind::absolute || fs::path(asset.path).is_absolute()) {
+            sourceFile = asset.path;
+        } else if (!projectSourceRoot.empty()) {
+            sourceFile = projectSourceRoot / asset.path;
+        } else {
+            sourceFile = asset.path;
+        }
+
+        const auto filename = fs::path(asset.path).filename();
+        const auto targetFile = audioDir / filename;
+
+        if (fs::exists(sourceFile) && sourceFile != targetFile) {
+            fs::copy_file(sourceFile, targetFile, fs::copy_options::overwrite_existing, ec);
+        }
+
+        asset.path = "Audio/" + filename.string();
+        asset.pathKind = project::AudioAssetPathKind::projectRelative;
+
+        AssetPackageEntry entry;
+        entry.relativePath = asset.path;
+        entry.fileSizeBytes = fs::exists(targetFile) ? fs::file_size(targetFile, ec) : 0;
+        entry.checksumHex = fs::exists(targetFile) ? computeSimpleChecksum(targetFile) : "00000000";
+        manifest.assets.push_back(std::move(entry));
+    }
+
+    // Save project.json
+    const auto projectJsonPath = destinationFolder / "project.json";
+    const auto saveRes = saveProject(consolidated, projectJsonPath);
+    if (!saveRes) {
+        return std::unexpected(saveRes.error());
+    }
+
+    // Save manifest.json
+    Json manifestJson;
+    manifestJson["packageFormatVersion"] = manifest.packageFormatVersion;
+    manifestJson["projectId"] = manifest.projectId;
+    manifestJson["projectName"] = manifest.projectName;
+    manifestJson["author"] = manifest.author;
+    manifestJson["timestampIso"] = manifest.timestampIso;
+    Json assetsArray = Json::array();
+    for (const auto& a : manifest.assets) {
+        assetsArray.push_back({
+            {"relativePath", a.relativePath},
+            {"fileSizeBytes", a.fileSizeBytes},
+            {"checksumHex", a.checksumHex}
+        });
+    }
+    manifestJson["assets"] = std::move(assetsArray);
+
+    std::ofstream manifestFile(destinationFolder / "manifest.json");
+    if (manifestFile.is_open()) {
+        manifestFile << manifestJson.dump(2);
+    }
+
+    return consolidated;
+}
+
 float ProjectBundlerService::calculateLoudnessNormalizationGain(
     float measuredLufs,
     float targetLufs) noexcept

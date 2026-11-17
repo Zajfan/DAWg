@@ -9,6 +9,7 @@ add_library(dawg_services_media STATIC
     src/MultiTrackDiskStreamer.cpp
     src/OfflineRenderService.cpp
     src/StemSeparatorService.cpp
+    src/TrackFreezeManager.cpp
     src/TransientDetector.cpp
     src/WaveformCache.cpp
 )
