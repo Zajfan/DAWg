@@ -11,7 +11,7 @@ DrumPadSamplerView::DrumPadSamplerView(CommandHandler handler, AuditionCallback 
     : m_commandHandler(std::move(handler))
     , m_auditionCallback(std::move(auditionCb))
 {
-    m_sampler.prepare(48000.0, 512, 2);
+    (void)m_sampler.prepare(48000.0, 512, 2);
 
     m_titleLabel.setText("Drum Pad Sampler & Transient Slicer", juce::dontSendNotification);
     m_titleLabel.setFont(juce::FontOptions(14.0f).withStyle("Bold"));

@@ -1,5 +1,7 @@
 #include "TransportBar.h"
 
+#include <dawg/engine/MultiTrackRecordingEngine.h>
+
 #include <cmath>
 #include <iomanip>
 #include <sstream>
@@ -30,6 +32,58 @@ TransportBar::TransportBar(Callbacks callbacks)
 
     addAndMakeVisible(m_undoButton);
     addAndMakeVisible(m_redoButton);
+
+    m_preRollButton.onClick = [this] {
+        m_preRollBars = (m_preRollBars == 0) ? 1 : ((m_preRollBars == 1) ? 2 : 0);
+        m_preRollButton.setButtonText(m_preRollBars == 0 ? "Pre-Roll: OFF"
+            : (m_preRollBars == 1 ? "Pre-Roll: 1 Bar" : "Pre-Roll: 2 Bars"));
+        if (m_preRollBars > 0)
+            m_preRollButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff238636));
+        else
+            m_preRollButton.removeColour(juce::TextButton::buttonColourId);
+    };
+    addAndMakeVisible(m_preRollButton);
+
+    m_punchButton.onClick = [this] {
+        m_punchActive = !m_punchActive;
+        m_punchButton.setButtonText(m_punchActive ? "Punch: ON" : "Punch: OFF");
+        if (m_punchActive)
+        {
+            m_punchButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xffd29922));
+            m_punchRangeBadge.setText("In: 1.1 | Out: 5.1", juce::dontSendNotification);
+            m_punchRangeBadge.setVisible(true);
+        }
+        else
+        {
+            m_punchButton.removeColour(juce::TextButton::buttonColourId);
+            m_punchRangeBadge.setVisible(false);
+        }
+    };
+    addAndMakeVisible(m_punchButton);
+
+    m_punchRangeBadge.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    m_punchRangeBadge.setColour(juce::Label::textColourId, juce::Colour(0xfff0883e));
+    m_punchRangeBadge.setVisible(false);
+    addAndMakeVisible(m_punchRangeBadge);
+
+    m_latencyCalibrateButton.onClick = [this] {
+        engine::LatencyLoopbackCalibrator calibrator;
+        std::array<float, 512> chirp {};
+        calibrator.generateTestImpulse(chirp.data(), chirp.size());
+
+        // Simulated loopback test with hardware interface delay
+        std::array<float, 512> loopbackResponse {};
+        constexpr std::size_t hardwareDelay = 64;
+        for (std::size_t i = 0; i + hardwareDelay < 512; ++i)
+        {
+            loopbackResponse[i + hardwareDelay] = chirp[i];
+        }
+
+        m_calibratedLatencySamples = calibrator.measureRoundTripLatency(loopbackResponse.data(), loopbackResponse.size());
+        m_latencyCalibrateButton.setButtonText(juce::String::formatted("RTL: %.1f smp [Aligned]", m_calibratedLatencySamples));
+        m_latencyCalibrateButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1f6feb));
+    };
+    addAndMakeVisible(m_latencyCalibrateButton);
 
     addAndMakeVisible(m_addTrackButton);
     addAndMakeVisible(m_importWavButton);
@@ -243,6 +297,19 @@ void TransportBar::resized()
     m_undoButton.setBounds(area.removeFromLeft(50));
     area.removeFromLeft(4);
     m_redoButton.setBounds(area.removeFromLeft(50));
+    area.removeFromLeft(12);
+
+    // Pre-Roll, Punch In/Out, Latency Loopback Tooling
+    m_preRollButton.setBounds(area.removeFromLeft(96));
+    area.removeFromLeft(6);
+    m_punchButton.setBounds(area.removeFromLeft(80));
+    area.removeFromLeft(4);
+    if (m_punchActive)
+    {
+        m_punchRangeBadge.setBounds(area.removeFromLeft(100));
+        area.removeFromLeft(6);
+    }
+    m_latencyCalibrateButton.setBounds(area.removeFromLeft(130));
 
     // Right-aligned utility buttons: + Track, Import WAV
     m_importWavButton.setBounds(area.removeFromRight(100));

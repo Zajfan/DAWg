@@ -55,6 +55,15 @@ private:
     juce::TextButton m_undoButton {"Undo"};
     juce::TextButton m_redoButton {"Redo"};
 
+    juce::TextButton m_preRollButton {"Pre-Roll: OFF"};
+    juce::TextButton m_punchButton {"Punch: OFF"};
+    juce::Label m_punchRangeBadge;
+    juce::TextButton m_latencyCalibrateButton {"Calibrate Latency"};
+
+    std::uint32_t m_preRollBars {0};
+    bool m_punchActive {false};
+    double m_calibratedLatencySamples {0.0};
+
     juce::TextButton m_addTrackButton {"+ Track"};
     juce::TextButton m_importWavButton {"Import WAV"};
     juce::Label m_positionLabel;

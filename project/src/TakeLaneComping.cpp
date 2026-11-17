@@ -262,6 +262,140 @@ void TakeCompManager::applyEqualPowerCrossfade(
 }
 
 // ============================================================================
+// PhaseLockedCompGroupManager Implementation
+// ============================================================================
+
+void PhaseLockedCompGroupManager::registerTrack(const TrackId trackId, const std::uint32_t compGroupId, TakeCompManager* const manager)
+{
+    if (trackId == 0 || compGroupId == 0 || manager == nullptr) {
+        return;
+    }
+
+    unregisterTrack(trackId);
+    m_entries.push_back(TrackEntry {
+        .trackId = trackId,
+        .compGroupId = compGroupId,
+        .manager = manager
+    });
+}
+
+void PhaseLockedCompGroupManager::unregisterTrack(const TrackId trackId) noexcept
+{
+    const auto it = std::remove_if(m_entries.begin(), m_entries.end(),
+        [trackId](const TrackEntry& e) { return e.trackId == trackId; });
+    m_entries.erase(it, m_entries.end());
+}
+
+void PhaseLockedCompGroupManager::clear() noexcept
+{
+    m_entries.clear();
+}
+
+std::vector<TrackId> PhaseLockedCompGroupManager::tracksInGroup(const std::uint32_t compGroupId) const
+{
+    std::vector<TrackId> result;
+    if (compGroupId == 0) {
+        return result;
+    }
+    for (const auto& entry : m_entries) {
+        if (entry.compGroupId == compGroupId) {
+            result.push_back(entry.trackId);
+        }
+    }
+    return result;
+}
+
+std::uint32_t PhaseLockedCompGroupManager::trackCompGroup(const TrackId trackId) const noexcept
+{
+    for (const auto& entry : m_entries) {
+        if (entry.trackId == trackId) {
+            return entry.compGroupId;
+        }
+    }
+    return 0;
+}
+
+TakeCompManager* PhaseLockedCompGroupManager::findManager(const TrackId trackId) const noexcept
+{
+    for (const auto& entry : m_entries) {
+        if (entry.trackId == trackId) {
+            return entry.manager;
+        }
+    }
+    return nullptr;
+}
+
+void PhaseLockedCompGroupManager::swipeCompSliceGroup(
+    const TrackId sourceTrackId,
+    const std::uint32_t sourceTakeId,
+    const std::uint64_t startSample,
+    const std::uint64_t endSample,
+    const std::uint32_t crossfadeSamples)
+{
+    const auto sourceIt = std::find_if(m_entries.begin(), m_entries.end(),
+        [sourceTrackId](const TrackEntry& e) { return e.trackId == sourceTrackId; });
+    if (sourceIt == m_entries.end() || sourceIt->manager == nullptr || sourceIt->compGroupId == 0) {
+        return;
+    }
+
+    const std::uint32_t targetGroupId = sourceIt->compGroupId;
+    const auto& srcTakes = sourceIt->manager->takeLanes();
+    std::size_t takeIndex = 0;
+    bool foundIndex = false;
+    for (std::size_t i = 0; i < srcTakes.size(); ++i) {
+        if (srcTakes[i].takeId == sourceTakeId) {
+            takeIndex = i;
+            foundIndex = true;
+            break;
+        }
+    }
+    if (!foundIndex) {
+        return;
+    }
+
+    for (const auto& entry : m_entries) {
+        if (entry.compGroupId == targetGroupId && entry.manager != nullptr) {
+            const auto& takes = entry.manager->takeLanes();
+            if (takes.empty()) {
+                continue;
+            }
+            const std::uint32_t targetTakeId = (takeIndex < takes.size())
+                ? takes[takeIndex].takeId
+                : takes.front().takeId;
+
+            entry.manager->selectCompSlice(targetTakeId, startSample, endSample, crossfadeSamples);
+        }
+    }
+}
+
+void PhaseLockedCompGroupManager::clearGroupCompSlices(const std::uint32_t compGroupId)
+{
+    if (compGroupId == 0) {
+        return;
+    }
+    for (const auto& entry : m_entries) {
+        if (entry.compGroupId == compGroupId && entry.manager != nullptr) {
+            entry.manager->clearCompSlices();
+        }
+    }
+}
+
+void PhaseLockedCompGroupManager::setGroupTakeSolo(const std::uint32_t compGroupId, const std::size_t takeIndex, const bool solo)
+{
+    if (compGroupId == 0) {
+        return;
+    }
+    for (const auto& entry : m_entries) {
+        if (entry.compGroupId == compGroupId && entry.manager != nullptr) {
+            const auto& takes = entry.manager->takeLanes();
+            if (takeIndex < takes.size()) {
+                entry.manager->setTakeAuditionSolo(takes[takeIndex].takeId, solo);
+            }
+        }
+    }
+}
+
+// ============================================================================
 // PitchBlobEditor Implementation
 // ============================================================================
 

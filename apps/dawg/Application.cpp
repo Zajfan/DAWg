@@ -1,6 +1,7 @@
 #include "Application.h"
 
 #include "ApplicationState.h"
+#include "AudioPoolDialog.h"
 #include "AudioSettingsDialog.h"
 #include "BounceDialog.h"
 #include "audio/JuceAudioDeviceBridge.h"
@@ -16,6 +17,7 @@
 #include <dawg/media/DiskStreamPool.h>
 #include <dawg/media/OfflineRenderService.h>
 #include <dawg/media/WaveformCache.h>
+#include <dawg/persistence/AudioPoolManager.h>
 #include <dawg/persistence/ProjectFile.h>
 
 #include <algorithm>
@@ -48,6 +50,7 @@ void Application::initialise(const juce::String&)
     m_renderService = std::make_unique<media::OfflineRenderService>(*m_assetWriterFactory, m_assetReaderFactory.get());
     m_engine->setRecordBuffer(&m_recordService->buffer());
     m_engine->setMasterLimiterEnabled(true);
+    m_audioPoolManager = std::make_unique<persistence::AudioPoolManager>();
     m_windowManager = std::make_unique<platform::juce::window::WindowManager>();
     restartAudio();
 
@@ -143,6 +146,7 @@ void Application::initialise(const juce::String&)
         .saveProjectAs = [this] { saveProject(true); },
         .exportBounce = [this] { promptExportBounce(false); },
         .exportStems = [this] { promptExportBounce(true); },
+        .showAudioPool = [this] { openAudioPool(); },
         .audioPreferences = [this] { openAudioPreferences(); },
         .showShortcuts = [this] { showKeyboardShortcuts(); },
         .showAbout = [this] { showAboutDialog(); }
@@ -751,6 +755,22 @@ void Application::openAudioPreferences()
 {
     if (m_audioBridge)
         ui::AudioSettingsWindow::open(m_audioBridge->deviceManager());
+}
+
+void Application::openAudioPool()
+{
+    if (m_audioPoolManager && m_controller)
+    {
+        const std::filesystem::path projectDir = m_currentProjectFilePath.empty()
+            ? std::filesystem::current_path()
+            : std::filesystem::path(m_currentProjectFilePath).parent_path();
+
+        m_audioPoolManager->scanProject(m_controller->snapshot(), projectDir);
+
+        ui::AudioPoolWindow::open(*m_audioPoolManager, [this] {
+            refreshMainComponent();
+        });
+    }
 }
 
 void Application::showKeyboardShortcuts()

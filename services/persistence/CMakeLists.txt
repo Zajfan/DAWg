@@ -8,6 +8,7 @@ FetchContent_Declare(nlohmann_json
 FetchContent_MakeAvailable(nlohmann_json)
 
 add_library(dawg_services_persistence STATIC
+    src/AudioPoolManager.cpp
     src/ProjectFile.cpp
     src/ProjectBundlerService.cpp
 )

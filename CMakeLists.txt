@@ -194,6 +194,7 @@ set(DAWG_OWN_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/PitchBlobCompingView.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/DspEditorDialog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/AudioSettingsDialog.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/AudioPoolDialog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/HardwareControlSurfaceDialog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/BounceDialog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/PluginBrowserPanel.cpp

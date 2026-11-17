@@ -986,6 +986,114 @@ void testArrangementTimelineAndBezierAutomationSuite()
     require(dropped->lengthSamples == 96000, "Dropped clip length matches");
     require(dropped->sourceOffset == 1000, "Dropped clip source offset matches");
 }
+
+void testFolderTracksAndPhaseLockedCompGroups()
+{
+    auto project = Project::create("Folder & Comp Test", 1);
+    const auto folderId = project.addFolderTrack("Drums Group");
+    require(folderId > 0, "Folder track added");
+
+    const auto kickId = project.addAudioTrack("Kick");
+    const auto snareId = project.addAudioTrack("Snare");
+    const auto ohId = project.addAudioTrack("Overheads");
+    require(kickId > 0 && snareId > 0 && ohId > 0, "Drum tracks created");
+
+    require(project.setTrackParentFolder(kickId, folderId), "Set Kick parent folder");
+    require(project.setTrackParentFolder(snareId, folderId), "Set Snare parent folder");
+    require(project.setTrackParentFolder(ohId, folderId), "Set Overheads parent folder");
+
+    require(project.setFolderCollapsed(folderId, true), "Collapsed drums folder");
+
+    auto snap = project.snapshot();
+    const auto findT = [&](TrackId id) -> const Track* {
+        for (const auto& t : snap.tracks) {
+            if (t.id == id) return &t;
+        }
+        return nullptr;
+    };
+
+    const auto* folderTrack = findT(folderId);
+    require(folderTrack != nullptr && folderTrack->isFolder && folderTrack->folderCollapsed, "Folder is collapsed");
+
+    const auto* kickTrack = findT(kickId);
+    require(kickTrack != nullptr && kickTrack->parentFolderId == folderId, "Kick parent is folder");
+
+    // 2. Comp Group Assignment
+    constexpr std::uint32_t kDrumsCompGroup = 101;
+    require(project.setTrackCompGroup(kickId, kDrumsCompGroup), "Kick assigned to drums comp group");
+    require(project.setTrackCompGroup(snareId, kDrumsCompGroup), "Snare assigned to drums comp group");
+    require(project.setTrackCompGroup(ohId, kDrumsCompGroup), "Overheads assigned to drums comp group");
+
+    snap = project.snapshot();
+    require(findT(kickId)->compGroupId == kDrumsCompGroup, "Kick compGroupId verified");
+    require(findT(snareId)->compGroupId == kDrumsCompGroup, "Snare compGroupId verified");
+    require(findT(ohId)->compGroupId == kDrumsCompGroup, "Overheads compGroupId verified");
+
+    // 3. Phase-Locked Comp Group Manager
+    TakeCompManager kickComp(kickId);
+    TakeCompManager snareComp(snareId);
+    TakeCompManager ohComp(ohId);
+
+    AudioClip baseClip {};
+    baseClip.startSample = 0;
+    baseClip.lengthSamples = 96000;
+
+    const auto kTake1 = kickComp.addTake(baseClip, "Kick Take 1");
+    const auto kTake2 = kickComp.addTake(baseClip, "Kick Take 2");
+    (void)kTake1;
+
+    const auto sTake1 = snareComp.addTake(baseClip, "Snare Take 1");
+    const auto sTake2 = snareComp.addTake(baseClip, "Snare Take 2");
+    (void)sTake1;
+
+    const auto oTake1 = ohComp.addTake(baseClip, "OH Take 1");
+    const auto oTake2 = ohComp.addTake(baseClip, "OH Take 2");
+    (void)oTake1;
+
+    PhaseLockedCompGroupManager groupMgr;
+    groupMgr.registerTrack(kickId, kDrumsCompGroup, &kickComp);
+    groupMgr.registerTrack(snareId, kDrumsCompGroup, &snareComp);
+    groupMgr.registerTrack(ohId, kDrumsCompGroup, &ohComp);
+
+    const auto groupTracks = groupMgr.tracksInGroup(kDrumsCompGroup);
+    require(groupTracks.size() == 3, "Group manager registered 3 drum tracks");
+
+    // Swipe comp slice on Kick Take 2 -> should propagate across Snare and Overheads on Take 2
+    groupMgr.swipeCompSliceGroup(kickId, kTake2, 20000, 40000, 192);
+
+    // Verify Kick comp slices
+    const auto& kickSlices = kickComp.compSlices();
+    require(!kickSlices.empty(), "Kick has comp slices");
+    const auto kickSlice2 = std::find_if(kickSlices.begin(), kickSlices.end(),
+        [kTake2](const CompSlice& s) { return s.takeId == kTake2 && s.startSample == 20000 && s.endSample == 40000; });
+    require(kickSlice2 != kickSlices.end(), "Kick has Take 2 slice [20000, 40000]");
+
+    // Verify Snare comp slices
+    const auto& snareSlices = snareComp.compSlices();
+    require(!snareSlices.empty(), "Snare has comp slices");
+    const auto snareSlice2 = std::find_if(snareSlices.begin(), snareSlices.end(),
+        [sTake2](const CompSlice& s) { return s.takeId == sTake2 && s.startSample == 20000 && s.endSample == 40000; });
+    require(snareSlice2 != snareSlices.end(), "Snare phase-locked comp slice matched Take 2 [20000, 40000]");
+
+    // Verify Overheads comp slices
+    const auto& ohSlices = ohComp.compSlices();
+    require(!ohSlices.empty(), "Overheads has comp slices");
+    const auto ohSlice2 = std::find_if(ohSlices.begin(), ohSlices.end(),
+        [oTake2](const CompSlice& s) { return s.takeId == oTake2 && s.startSample == 20000 && s.endSample == 40000; });
+    require(ohSlice2 != ohSlices.end(), "Overheads phase-locked comp slice matched Take 2 [20000, 40000]");
+
+    // Solo take index 1 across the whole group
+    groupMgr.setGroupTakeSolo(kDrumsCompGroup, 1, true);
+    require(kickComp.soloedTakeId() == kTake2, "Kick Take 2 soloed");
+    require(snareComp.soloedTakeId() == sTake2, "Snare Take 2 soloed");
+    require(ohComp.soloedTakeId() == oTake2, "Overheads Take 2 soloed");
+
+    // Clear comp slices across group
+    groupMgr.clearGroupCompSlices(kDrumsCompGroup);
+    require(kickComp.compSlices().empty(), "Kick slices cleared");
+    require(snareComp.compSlices().empty(), "Snare slices cleared");
+    require(ohComp.compSlices().empty(), "Overheads slices cleared");
+}
 }
 
 int main()
@@ -1008,5 +1116,6 @@ int main()
     testTakeLaneManagerAndEqualPowerCrossfades();
     testPitchBlobEditorAndGrooveQuantizer();
     testArrangementTimelineAndBezierAutomationSuite();
-    std::puts("PASS: 18 project behavior tests");
+    testFolderTracksAndPhaseLockedCompGroups();
+    std::puts("PASS: 19 project behavior tests");
 }

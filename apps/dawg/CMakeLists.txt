@@ -19,6 +19,8 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/DspEditorDialog.h
     ../../ui/shell/AudioSettingsDialog.cpp
     ../../ui/shell/AudioSettingsDialog.h
+    ../../ui/shell/AudioPoolDialog.cpp
+    ../../ui/shell/AudioPoolDialog.h
     ../../ui/shell/BounceDialog.cpp
     ../../ui/shell/BounceDialog.h
     ../../ui/shell/PluginBrowserPanel.cpp

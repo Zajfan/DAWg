@@ -267,11 +267,38 @@ struct PromoteTakeRegion
     std::uint64_t lengthSamples {0};
 };
 
+struct AddFolderTrack
+{
+    std::string name {"Folder"};
+};
+
+struct SetTrackParentFolder
+{
+    TrackId trackId {0};
+    TrackId folderId {0};
+};
+
+struct SetFolderCollapsed
+{
+    TrackId folderId {0};
+    bool collapsed {false};
+};
+
+struct SetTrackCompGroup
+{
+    TrackId trackId {0};
+    std::uint32_t compGroupId {0};
+};
+
 using ProjectCommand = std::variant<
     AddAudioTrack,
     AddInstrumentTrack,
     AddAuxReturnTrack,
     AddSubmixGroupTrack,
+    AddFolderTrack,
+    SetTrackParentFolder,
+    SetFolderCollapsed,
+    SetTrackCompGroup,
     RemoveTrack,
     RenameTrack,
     ReorderTracks,

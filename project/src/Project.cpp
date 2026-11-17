@@ -226,6 +226,86 @@ TrackId Project::addSubmixGroupTrack(std::string name)
     return id;
 }
 
+TrackId Project::addFolderTrack(std::string name)
+{
+    if (name.empty() || m_nextTrackId == 0)
+        return 0;
+
+    const auto id = m_nextTrackId;
+    m_state.tracks.push_back({
+        .id = id,
+        .name = std::move(name),
+        .muted = false,
+        .solo = false,
+        .gainLinear = 1.0f,
+        .pan = 0.0f,
+        .phaseInvert = false,
+        .recordArmed = false,
+        .kind = TrackKind::folder,
+        .inserts = {},
+        .sends = {},
+        .outputBusTrackId = 0,
+        .takes = {},
+        .takeLanesExpanded = false,
+        .parentFolderId = 0,
+        .isFolder = true,
+        .folderCollapsed = false,
+        .compGroupId = 0
+    });
+    ++m_nextTrackId;
+    return id;
+}
+
+bool Project::setTrackParentFolder(const TrackId trackId, const TrackId folderId)
+{
+    if (trackId == 0 || trackId == folderId)
+        return false;
+
+    const auto track = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                    [trackId](const Track& t) { return t.id == trackId; });
+    if (track == m_state.tracks.end())
+        return false;
+
+    if (folderId != 0)
+    {
+        const auto folder = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                         [folderId](const Track& t) { return t.id == folderId; });
+        if (folder == m_state.tracks.end() || (!folder->isFolder && folder->kind != TrackKind::folder))
+            return false;
+    }
+
+    track->parentFolderId = folderId;
+    return true;
+}
+
+bool Project::setFolderCollapsed(const TrackId folderId, const bool collapsed)
+{
+    if (folderId == 0)
+        return false;
+
+    const auto folder = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                     [folderId](const Track& t) { return t.id == folderId; });
+    if (folder == m_state.tracks.end() || (!folder->isFolder && folder->kind != TrackKind::folder))
+        return false;
+
+    folder->folderCollapsed = collapsed;
+    return true;
+}
+
+bool Project::setTrackCompGroup(const TrackId trackId, const std::uint32_t compGroupId)
+{
+    if (trackId == 0)
+        return false;
+
+    const auto track = std::find_if(m_state.tracks.begin(), m_state.tracks.end(),
+                                    [trackId](const Track& t) { return t.id == trackId; });
+    if (track == m_state.tracks.end())
+        return false;
+
+    track->compGroupId = compGroupId;
+    return true;
+}
+
 bool Project::addTrackSend(const TrackId trackId, TrackSend send)
 {
     if (trackId == 0 || send.targetTrackId == 0 || trackId == send.targetTrackId)

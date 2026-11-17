@@ -15,7 +15,7 @@ using MidiClipId = std::uint64_t;
 using AutomationLaneId = std::uint64_t;
 using AutomationPointId = std::uint64_t;
 
-enum class TrackKind : std::uint8_t { audio, instrument, auxReturn, submixGroup };
+enum class TrackKind : std::uint8_t { audio, instrument, auxReturn, submixGroup, folder };
 
 enum class AutomationTargetKind : std::uint8_t
 {
@@ -176,6 +176,10 @@ struct Track
     TrackId outputBusTrackId {0};
     std::vector<Take> takes {};
     bool takeLanesExpanded {false};
+    TrackId parentFolderId {0};
+    bool isFolder {false};
+    bool folderCollapsed {false};
+    std::uint32_t compGroupId {0}; // 0 = none, >0 = phase-locked multi-track comp group
 
     friend bool operator==(const Track&, const Track&) = default;
 };

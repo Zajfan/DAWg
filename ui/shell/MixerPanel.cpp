@@ -257,6 +257,33 @@ MasterStripComponent::MasterStripComponent(LimiterCallback limiterCb)
             m_limiterButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(40, 160, 220));
     };
     addAndMakeVisible(m_limiterButton);
+
+    m_cueLabel.setJustificationType(juce::Justification::centred);
+    m_cueLabel.setFont(juce::FontOptions(9.0f, juce::Font::bold));
+    m_cueLabel.setColour(juce::Label::textColourId, juce::Colour(0xff58a6ff));
+    addAndMakeVisible(m_cueLabel);
+
+    m_cueAFader.setSliderStyle(juce::Slider::LinearBar);
+    m_cueAFader.setRange(0.0, 1.2, 0.01);
+    m_cueAFader.setValue(1.0, juce::dontSendNotification);
+    m_cueAFader.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    m_cueAFader.setColour(juce::Slider::trackColourId, juce::Colour(0xff238636));
+    addAndMakeVisible(m_cueAFader);
+
+    m_cueALabel.setFont(juce::FontOptions(9.0f));
+    m_cueALabel.setColour(juce::Label::textColourId, juce::Colour(0xff8b949e));
+    addAndMakeVisible(m_cueALabel);
+
+    m_cueBFader.setSliderStyle(juce::Slider::LinearBar);
+    m_cueBFader.setRange(0.0, 1.2, 0.01);
+    m_cueBFader.setValue(0.8, juce::dontSendNotification);
+    m_cueBFader.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    m_cueBFader.setColour(juce::Slider::trackColourId, juce::Colour(0xff1f6feb));
+    addAndMakeVisible(m_cueBFader);
+
+    m_cueBLabel.setFont(juce::FontOptions(9.0f));
+    m_cueBLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8b949e));
+    addAndMakeVisible(m_cueBLabel);
 }
 
 void MasterStripComponent::updateMeter(const engine::MeterReading& meter, const bool limiterActive)
@@ -361,6 +388,17 @@ void MasterStripComponent::resized()
     m_nameLabel.setBounds(area.removeFromTop(18));
     area.removeFromTop(2);
     m_limiterButton.setBounds(area.removeFromTop(20).reduced(2, 0));
+    area.removeFromTop(6);
+
+    // Cue Mix Section at bottom of master strip
+    auto cueArea = area.removeFromBottom(62);
+    m_cueLabel.setBounds(cueArea.removeFromTop(14));
+    auto cueARow = cueArea.removeFromTop(22);
+    m_cueALabel.setBounds(cueARow.removeFromLeft(28));
+    m_cueAFader.setBounds(cueARow);
+    auto cueBRow = cueArea.removeFromTop(22);
+    m_cueBLabel.setBounds(cueBRow.removeFromLeft(28));
+    m_cueBFader.setBounds(cueBRow);
 }
 
 // ============================================================================

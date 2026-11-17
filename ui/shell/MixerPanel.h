@@ -66,6 +66,13 @@ private:
     LimiterCallback m_limiterCallback;
     juce::Label m_nameLabel {"Master", "MASTER"};
     juce::TextButton m_limiterButton {"LIMITER"};
+
+    juce::Label m_cueLabel {"Cue", "CUE MIX"};
+    juce::Slider m_cueAFader;
+    juce::Label m_cueALabel {"CueA", "Cue A"};
+    juce::Slider m_cueBFader;
+    juce::Label m_cueBLabel {"CueB", "Cue B"};
+
     engine::MeterReading m_meter {};
     float m_displayPeakL {0.0f};
     float m_displayPeakR {0.0f};

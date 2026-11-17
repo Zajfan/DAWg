@@ -59,6 +59,7 @@ public:
         ActionHandler saveProjectAs;
         ActionHandler exportBounce;
         ActionHandler exportStems;
+        ActionHandler showAudioPool;
         ActionHandler audioPreferences;
         ActionHandler showShortcuts;
         ActionHandler showAbout;

@@ -1,3 +1,4 @@
+#include <dawg/persistence/AudioPoolManager.h>
 #include <dawg/persistence/ProjectBundlerService.h>
 #include <dawg/persistence/ProjectFile.h>
 #include <dawg/project/Project.h>
@@ -453,6 +454,108 @@ void testProjectBundlerAndBranchingVersioning(const fs::path& root)
     const float normGain = ProjectBundlerService::calculateLoudnessNormalizationGain(-18.0f, -14.0f);
     require(std::abs(normGain - 1.58489f) < 0.01f, "Calculated +4 dB loudness normalization linear gain (~1.585)");
 }
+
+void testAudioPoolManagerAndMissingAssetRelinking(const fs::path& root)
+{
+    const fs::path projectDir = root / "PoolTestProject";
+    const fs::path audioDir = projectDir / "audio";
+    fs::create_directories(audioDir);
+
+    const fs::path leadFile = audioDir / "lead.wav";
+    const fs::path scratchFile = audioDir / "abandoned_scratch.wav";
+    writeDocument(leadFile, "RIFF_LEAD_DATA");
+    writeDocument(scratchFile, "RIFF_SCRATCH_DATA");
+
+    ProjectSnapshot snap {};
+    snap.id = 100;
+    snap.name = "Audio Pool Test";
+
+    // Asset 1: lead (exists, used in clip & take)
+    AudioAsset a1 {};
+    a1.id = 1;
+    a1.path = "audio/lead.wav";
+    a1.pathKind = AudioAssetPathKind::projectRelative;
+    a1.sampleRate = 48000;
+    a1.channelCount = 2;
+    a1.frameCount = 96000;
+    snap.assets.push_back(a1);
+
+    // Asset 2: vocals (missing, used in clip)
+    AudioAsset a2 {};
+    a2.id = 2;
+    a2.path = "audio/vocals.wav";
+    a2.pathKind = AudioAssetPathKind::projectRelative;
+    a2.sampleRate = 48000;
+    a2.channelCount = 1;
+    a2.frameCount = 48000;
+    snap.assets.push_back(a2);
+
+    // Asset 3: scratch (exists, unused)
+    AudioAsset a3 {};
+    a3.id = 3;
+    a3.path = "audio/abandoned_scratch.wav";
+    a3.pathKind = AudioAssetPathKind::projectRelative;
+    a3.sampleRate = 44100;
+    a3.channelCount = 1;
+    a3.frameCount = 22050;
+    snap.assets.push_back(a3);
+
+    // Clips
+    AudioClip c1 {};
+    c1.id = 10;
+    c1.assetId = 1;
+    snap.clips.push_back(c1);
+
+    AudioClip c2 {};
+    c2.id = 11;
+    c2.assetId = 2;
+    snap.clips.push_back(c2);
+
+    // Track with a take using Asset 1
+    Track t1 {};
+    t1.id = 1;
+    Take tk1 {};
+    tk1.id = 50;
+    tk1.assetId = 1;
+    t1.takes.push_back(tk1);
+    snap.tracks.push_back(t1);
+
+    // 1. Scan Project
+    AudioPoolManager pool;
+    pool.scanProject(snap, projectDir);
+
+    require(pool.totalAssetCount() == 3, "Pool catalogs all 3 assets");
+    require(pool.missingAssetCount() == 1, "Correctly identifies 1 missing asset (vocals.wav)");
+    require(pool.totalPoolBytes() > 0, "Calculated total pool byte size");
+
+    const auto& items = pool.poolItems();
+    require(items[0].assetId == 1 && !items[0].isMissing, "Asset 1 is found on disk");
+    require(items[0].arrangementUsageCount == 1, "Asset 1 arrangement usage count is 1");
+    require(items[0].takeUsageCount == 1, "Asset 1 take usage count is 1");
+    require(items[0].totalUsageCount == 2, "Asset 1 total usage count is 2");
+
+    require(items[1].assetId == 2 && items[1].isMissing, "Asset 2 flagged as missing");
+
+    // 2. Relink Missing Asset
+    const fs::path recoveryFolder = root / "RecoveredRecordings" / "SubFolder";
+    fs::create_directories(recoveryFolder);
+    const fs::path recoveredVocals = recoveryFolder / "vocals.wav";
+    writeDocument(recoveredVocals, "RIFF_VOCALS_DATA");
+
+    const auto relinkResults = pool.relinkMissingAssets(root / "RecoveredRecordings", true);
+    require(relinkResults.size() == 1, "Relinked missing asset");
+    require(relinkResults[0].assetId == 2 && relinkResults[0].relinked, "Asset 2 successfully relinked");
+    require(pool.missingAssetCount() == 0, "Zero missing assets remaining in pool");
+
+    // 3. Purge Unused Audio
+    const auto unused = pool.findUnusedAssets();
+    require(unused.size() == 1 && unused[0].assetId == 3, "Identified Asset 3 as unused");
+
+    const auto purged = pool.purgeUnusedAssets(true);
+    require(purged.size() == 1 && purged[0] == 3, "Purged Asset 3 from pool");
+    require(pool.totalAssetCount() == 2, "Pool item count reduced to 2");
+    require(!fs::exists(scratchFile), "Unused audio file deleted from disk to reclaim storage");
+}
 }
 
 int main()
@@ -467,5 +570,6 @@ int main()
     testReplacement(directory.root);
     testVersionThreeFivePillarRoundTrip(directory.root);
     testProjectBundlerAndBranchingVersioning(directory.root);
-    std::puts("PASS: 9 persistence behavior tests");
+    testAudioPoolManagerAndMissingAssetRelinking(directory.root);
+    std::puts("PASS: 10 persistence behavior tests");
 }

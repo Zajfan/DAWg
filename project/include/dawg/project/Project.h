@@ -26,6 +26,10 @@ public:
     TrackId addInstrumentTrack(std::string name);
     TrackId addAuxReturnTrack(std::string name);
     TrackId addSubmixGroupTrack(std::string name);
+    TrackId addFolderTrack(std::string name);
+    [[nodiscard]] bool setTrackParentFolder(TrackId trackId, TrackId folderId);
+    [[nodiscard]] bool setFolderCollapsed(TrackId folderId, bool collapsed);
+    [[nodiscard]] bool setTrackCompGroup(TrackId trackId, std::uint32_t compGroupId);
     [[nodiscard]] bool addTrackSend(TrackId trackId, TrackSend send);
     [[nodiscard]] bool removeTrackSend(TrackId trackId, TrackId targetTrackId);
     [[nodiscard]] bool setTrackSendLevel(TrackId trackId, TrackId targetTrackId, float levelLinear);

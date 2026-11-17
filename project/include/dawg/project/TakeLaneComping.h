@@ -104,6 +104,48 @@ private:
     std::vector<CompSlice> m_slices;
 };
 
+// Phase-Locked Comp Group Manager (Multi-Mic Drum & Instrument Tracking)
+// Coordinates multiple TakeCompManager instances sharing a compGroupId.
+// Swiping, slicing, take soloing, or clearing on any track in the group propagates
+// synchronously with sample-accurate alignment across all companion tracks in the group.
+class PhaseLockedCompGroupManager
+{
+public:
+    PhaseLockedCompGroupManager() = default;
+    ~PhaseLockedCompGroupManager() = default;
+
+    void registerTrack(TrackId trackId, std::uint32_t compGroupId, TakeCompManager* manager);
+    void unregisterTrack(TrackId trackId) noexcept;
+    void clear() noexcept;
+
+    [[nodiscard]] std::vector<TrackId> tracksInGroup(std::uint32_t compGroupId) const;
+    [[nodiscard]] std::uint32_t trackCompGroup(TrackId trackId) const noexcept;
+    [[nodiscard]] TakeCompManager* findManager(TrackId trackId) const noexcept;
+
+    // Phase-locked swipe comp slice propagation across all tracks in the group:
+    // Finds the take index of sourceTakeId on sourceTrackId, then selects the slice
+    // across all companion tracks in the same compGroupId at that matching take index.
+    void swipeCompSliceGroup(
+        TrackId sourceTrackId,
+        std::uint32_t sourceTakeId,
+        std::uint64_t startSample,
+        std::uint64_t endSample,
+        std::uint32_t crossfadeSamples = 192);
+
+    void clearGroupCompSlices(std::uint32_t compGroupId);
+    void setGroupTakeSolo(std::uint32_t compGroupId, std::size_t takeIndex, bool solo);
+
+private:
+    struct TrackEntry
+    {
+        TrackId trackId {0};
+        std::uint32_t compGroupId {0};
+        TakeCompManager* manager {nullptr};
+    };
+
+    std::vector<TrackEntry> m_entries;
+};
+
 // Melodyne-Style Pitch-Blob & Formant Canvas
 // Represents segmented musical vocal notes with pitch trajectory, drift, vibrato, and formant morphing.
 struct PitchBlob

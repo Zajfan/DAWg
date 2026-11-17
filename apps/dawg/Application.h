@@ -20,6 +20,9 @@ class DiskStreamPool;
 class OfflineRenderService;
 class WaveformCache;
 }
+namespace dawg::persistence {
+class AudioPoolManager;
+}
 namespace dawg::platform::juce {
 class JuceAudioDeviceBridge;
 class JuceWavAssetReaderFactory;
@@ -61,6 +64,7 @@ private:
     void saveProject(bool promptSaveAs = false);
     void promptExportBounce(bool stemsOnly = false);
     void openAudioPreferences();
+    void openAudioPool();
     void showKeyboardShortcuts();
     void showAboutDialog();
     [[nodiscard]] static project::Project createStudioStarterProject();
@@ -83,6 +87,7 @@ private:
     std::unique_ptr<media::AudioRecordService> m_recordService;
     std::unique_ptr<media::WaveformCache> m_waveformCache;
     std::unique_ptr<media::OfflineRenderService> m_renderService;
+    std::unique_ptr<persistence::AudioPoolManager> m_audioPoolManager;
     std::unique_ptr<platform::juce::window::WindowManager> m_windowManager;
     juce::Component::SafePointer<ui::MainComponent> m_mainComponent;
     std::unique_ptr<juce::FileChooser> m_fileChooser;

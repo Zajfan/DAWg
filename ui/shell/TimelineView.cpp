@@ -197,6 +197,14 @@ const project::AudioClip* TimelineView::findClipAt(juce::Point<int> pos, int& ou
     int currentY = tracksTopY();
     for (const auto& track : tracks)
     {
+        if (track.parentFolderId != 0)
+        {
+            const auto parentIt = std::find_if(tracks.begin(), tracks.end(),
+                [&](const auto& t) { return t.id == track.parentFolderId; });
+            if (parentIt != tracks.end() && parentIt->folderCollapsed)
+                continue;
+        }
+
         if (pos.y >= currentY && pos.y < currentY + m_trackLaneHeight)
         {
             outLaneY = currentY;
@@ -407,6 +415,14 @@ void TimelineView::drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bo
     for (std::size_t i = 0; i < tracks.size(); ++i)
     {
         const auto& track = tracks[i];
+        if (track.parentFolderId != 0)
+        {
+            const auto parentIt = std::find_if(tracks.begin(), tracks.end(),
+                [&](const auto& t) { return t.id == track.parentFolderId; });
+            if (parentIt != tracks.end() && parentIt->folderCollapsed)
+                continue;
+        }
+
         const juce::Rectangle<int> laneBounds {0, currentY, getWidth(), m_trackLaneHeight};
 
         const juce::Colour bg = (i % 2 == 0)
@@ -420,17 +436,41 @@ void TimelineView::drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bo
         g.setColour(juce::Colour::fromRGB(32, 34, 42));
         g.fillRect(headerBounds);
 
+        const bool isFolder = track.isFolder || track.kind == project::TrackKind::folder;
+        const bool isChild = (track.parentFolderId != 0);
+
+        if (isFolder)
+        {
+            // Folder expand/collapse button [v] or [>]
+            const juce::Rectangle<int> foldBtn {6, currentY + 8, 16, 16};
+            g.setColour(juce::Colour::fromRGB(45, 95, 140));
+            g.fillRoundedRectangle(foldBtn.toFloat(), 3.0f);
+            g.setColour(juce::Colours::white);
+            g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+            g.drawText(track.folderCollapsed ? ">" : "v", foldBtn, juce::Justification::centred);
+        }
+        else if (isChild)
+        {
+            // Visual indent branch for nested tracks
+            g.setColour(juce::Colour::fromRGB(70, 80, 100));
+            g.drawHorizontalLine(currentY + m_trackLaneHeight / 2, 8.0f, 18.0f);
+            g.drawVerticalLine(8, static_cast<float>(currentY), static_cast<float>(currentY + m_trackLaneHeight / 2));
+        }
+
+        const int armX = isFolder ? 26 : (isChild ? 22 : 8);
         if (track.recordArmed)
         {
             g.setColour(juce::Colour::fromRGB(220, 50, 50));
-            g.fillEllipse(static_cast<float>(headerBounds.getX() + 8),
+            g.fillEllipse(static_cast<float>(headerBounds.getX() + armX),
                           static_cast<float>(headerBounds.getY() + 10),
                           8.0f, 8.0f);
         }
 
+        const int nameX = (isFolder ? 28 : (isChild ? 24 : 10)) + (track.recordArmed ? 14 : 0);
         g.setColour(juce::Colour::fromRGB(220, 225, 235));
         g.setFont(juce::FontOptions(12.0f, juce::Font::bold));
-        g.drawText(track.name, headerBounds.removeFromLeft(headerBounds.getWidth() - 48).reduced(22, 6),
+        g.drawText(track.name, headerBounds.getX() + nameX, headerBounds.getY() + 6,
+                   headerBounds.getWidth() - nameX - 52, m_trackLaneHeight - 12,
                    juce::Justification::centredLeft);
 
         // Takes expand/collapse button
@@ -969,6 +1009,14 @@ void TimelineView::mouseMove(const juce::MouseEvent& e)
     int curY = tracksTopY();
     for (const auto& track : m_model.project.tracks)
     {
+        if (track.parentFolderId != 0)
+        {
+            const auto parentIt = std::find_if(m_model.project.tracks.begin(), m_model.project.tracks.end(),
+                [&](const auto& t) { return t.id == track.parentFolderId; });
+            if (parentIt != m_model.project.tracks.end() && parentIt->folderCollapsed)
+                continue;
+        }
+
         curY += m_trackLaneHeight + (track.takeLanesExpanded ? static_cast<int>(track.takes.size()) * 32 : 0);
         if (std::abs(e.y - curY) <= 4)
         {
@@ -1058,6 +1106,14 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
     int curTrackY = tracksTopY();
     for (const auto& track : m_model.project.tracks)
     {
+        if (track.parentFolderId != 0)
+        {
+            const auto parentIt = std::find_if(m_model.project.tracks.begin(), m_model.project.tracks.end(),
+                [&](const auto& t) { return t.id == track.parentFolderId; });
+            if (parentIt != m_model.project.tracks.end() && parentIt->folderCollapsed)
+                continue;
+        }
+
         curTrackY += m_trackLaneHeight + (track.takeLanesExpanded ? static_cast<int>(track.takes.size()) * 32 : 0);
         if (std::abs(e.y - curTrackY) <= 4)
         {
@@ -1085,14 +1141,30 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
         }
     }
 
-    // Header interaction: Takes toggle button
+    // Header interaction: Takes toggle button & Folder toggle button
     if (e.x < m_headerWidth)
     {
-        int ty = m_rulerHeight;
+        int ty = tracksTopY();
         for (const auto& track : m_model.project.tracks)
         {
+            if (track.parentFolderId != 0)
+            {
+                const auto parentIt = std::find_if(m_model.project.tracks.begin(), m_model.project.tracks.end(),
+                    [&](const auto& t) { return t.id == track.parentFolderId; });
+                if (parentIt != m_model.project.tracks.end() && parentIt->folderCollapsed)
+                    continue;
+            }
+
             if (e.y >= ty && e.y < ty + m_trackLaneHeight)
             {
+                const bool isFolder = track.isFolder || track.kind == project::TrackKind::folder;
+                if (isFolder && e.x >= 4 && e.x <= 26 && e.y >= ty + 4 && e.y <= ty + 28)
+                {
+                    if (m_callbacks.commandHandler)
+                        m_callbacks.commandHandler(project::SetFolderCollapsed {track.id, !track.folderCollapsed});
+                    return;
+                }
+
                 if (e.x >= m_headerWidth - 50 && e.y >= ty + m_trackLaneHeight - 22)
                 {
                     if (m_callbacks.commandHandler)
@@ -1107,9 +1179,17 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
 
     // Take lane interaction: swipe comping
     {
-        int ty = m_rulerHeight;
+        int ty = tracksTopY();
         for (const auto& track : m_model.project.tracks)
         {
+            if (track.parentFolderId != 0)
+            {
+                const auto parentIt = std::find_if(m_model.project.tracks.begin(), m_model.project.tracks.end(),
+                    [&](const auto& t) { return t.id == track.parentFolderId; });
+                if (parentIt != m_model.project.tracks.end() && parentIt->folderCollapsed)
+                    continue;
+            }
+
             if (track.takeLanesExpanded && ! track.takes.empty())
             {
                 for (std::size_t tkIdx = 0; tkIdx < track.takes.size(); ++tkIdx)
@@ -1625,12 +1705,47 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
         const auto sLen = sEnd - sStart;
         if (sLen > 0 && m_callbacks.commandHandler && m_compTrackId != 0 && m_compTakeId != 0)
         {
-            m_callbacks.commandHandler(project::PromoteTakeRegion {
-                m_compTrackId,
-                m_compTakeId,
-                static_cast<std::uint64_t>(std::max<std::int64_t>(0, sStart)),
-                static_cast<std::uint64_t>(sLen)
-            });
+            const auto srcTrackIt = std::find_if(m_model.project.tracks.begin(), m_model.project.tracks.end(),
+                [&](const auto& t) { return t.id == m_compTrackId; });
+
+            if (srcTrackIt != m_model.project.tracks.end() && srcTrackIt->compGroupId > 0)
+            {
+                std::size_t takeIndex = 0;
+                for (std::size_t ti = 0; ti < srcTrackIt->takes.size(); ++ti)
+                {
+                    if (srcTrackIt->takes[ti].id == m_compTakeId)
+                    {
+                        takeIndex = ti;
+                        break;
+                    }
+                }
+
+                for (const auto& companion : m_model.project.tracks)
+                {
+                    if (companion.compGroupId == srcTrackIt->compGroupId && !companion.takes.empty())
+                    {
+                        const std::uint32_t targetTakeId = (takeIndex < companion.takes.size())
+                            ? companion.takes[takeIndex].id
+                            : companion.takes.front().id;
+
+                        m_callbacks.commandHandler(project::PromoteTakeRegion {
+                            companion.id,
+                            targetTakeId,
+                            static_cast<std::uint64_t>(std::max<std::int64_t>(0, sStart)),
+                            static_cast<std::uint64_t>(sLen)
+                        });
+                    }
+                }
+            }
+            else
+            {
+                m_callbacks.commandHandler(project::PromoteTakeRegion {
+                    m_compTrackId,
+                    m_compTakeId,
+                    static_cast<std::uint64_t>(std::max<std::int64_t>(0, sStart)),
+                    static_cast<std::uint64_t>(sLen)
+                });
+            }
         }
         m_dragMode = DragMode::none;
         repaint();

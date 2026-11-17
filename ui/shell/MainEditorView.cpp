@@ -15,7 +15,8 @@ enum MenuId
     cmdSaveProjectAs = 4,
     cmdExportBounce = 5,
     cmdExportStems = 6,
-    cmdExit = 7,
+    cmdProjectAudioPool = 7,
+    cmdExit = 8,
 
     // Edit
     cmdUndo = 10,
@@ -27,9 +28,10 @@ enum MenuId
     // Track
     cmdAddAudioTrack = 20,
     cmdAddSynthTrack = 21,
-    cmdAddPlateReverb = 22,
-    cmdAddStereoDelay = 23,
-    cmdAddDrumBus = 24,
+    cmdAddFolderTrack = 22,
+    cmdAddPlateReverb = 23,
+    cmdAddStereoDelay = 24,
+    cmdAddDrumBus = 25,
 
     // View
     cmdToggleMixer = 30,
@@ -932,6 +934,8 @@ juce::PopupMenu MainEditorView::getMenuForIndex(int menuIndex, const juce::Strin
         menu.addItem(cmdExportBounce, "Export Master Bounce...  (Ctrl+B)", true, false);
         menu.addItem(cmdExportStems, "Export Multi-Track Stems...", true, false);
         menu.addSeparator();
+        menu.addItem(cmdProjectAudioPool, "Project Audio Pool & Relinker...", true, false);
+        menu.addSeparator();
         menu.addItem(cmdExit, "Exit  (Ctrl+Q)", true, false);
         break;
 
@@ -947,6 +951,7 @@ juce::PopupMenu MainEditorView::getMenuForIndex(int menuIndex, const juce::Strin
     case 2: // Track
         menu.addItem(cmdAddAudioTrack, "Add Audio Track  (Ctrl+T)", true, false);
         menu.addItem(cmdAddSynthTrack, "Add Synth Track  (Ctrl+Shift+T)", true, false);
+        menu.addItem(cmdAddFolderTrack, "Add Folder Track", true, false);
         menu.addSeparator();
         menu.addItem(cmdAddPlateReverb, "Add Plate Reverb Aux Return", true, false);
         menu.addItem(cmdAddStereoDelay, "Add Stereo Delay Aux Return", true, false);
@@ -1029,6 +1034,9 @@ void MainEditorView::menuItemSelected(int menuItemID, int)
     case cmdExportStems:
         if (m_menuCallbacks.exportStems) m_menuCallbacks.exportStems();
         break;
+    case cmdProjectAudioPool:
+        if (m_menuCallbacks.showAudioPool) m_menuCallbacks.showAudioPool();
+        break;
     case cmdExit:
         juce::JUCEApplication::getInstance()->systemRequestedQuit();
         break;
@@ -1052,6 +1060,10 @@ void MainEditorView::menuItemSelected(int menuItemID, int)
     case cmdAddSynthTrack:
         if (m_commandHandler)
             m_commandHandler(project::AddInstrumentTrack {"Synth Lead"});
+        break;
+    case cmdAddFolderTrack:
+        if (m_commandHandler)
+            m_commandHandler(project::AddFolderTrack {"Folder Track"});
         break;
     case cmdAddPlateReverb:
         if (m_commandHandler)

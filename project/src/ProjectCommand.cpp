@@ -17,6 +17,14 @@ bool Project::apply(const ProjectCommand& command)
             return addAuxReturnTrack(operation.name) != 0;
         else if constexpr (std::is_same_v<Operation, AddSubmixGroupTrack>)
             return addSubmixGroupTrack(operation.name) != 0;
+        else if constexpr (std::is_same_v<Operation, AddFolderTrack>)
+            return addFolderTrack(operation.name) != 0;
+        else if constexpr (std::is_same_v<Operation, SetTrackParentFolder>)
+            return setTrackParentFolder(operation.trackId, operation.folderId);
+        else if constexpr (std::is_same_v<Operation, SetFolderCollapsed>)
+            return setFolderCollapsed(operation.folderId, operation.collapsed);
+        else if constexpr (std::is_same_v<Operation, SetTrackCompGroup>)
+            return setTrackCompGroup(operation.trackId, operation.compGroupId);
         else if constexpr (std::is_same_v<Operation, AddTrackSend>)
             return addTrackSend(operation.trackId, operation.send);
         else if constexpr (std::is_same_v<Operation, RemoveTrackSend>)
