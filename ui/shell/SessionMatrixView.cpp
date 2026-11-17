@@ -90,10 +90,6 @@ void SessionMatrixView::timerCallback()
         }
     }
 
-    if (needsRepaint)
-        repaint();
-}
-
     if (needsRepaint || m_blinkState)
         repaint();
 }
@@ -330,7 +326,8 @@ void SessionMatrixView::drawGrid(juce::Graphics& g, juce::Rectangle<int>)
                 else if (slot.launchMode == engine::ClipLaunchMode::toggle) modeStr = "TOG";
                 else if (slot.launchMode == engine::ClipLaunchMode::repeat) modeStr = "RPT";
 
-                auto badgeBounds = bounds.removeFromRight(34).reduced(2, 4).removeFromTop(14);
+                auto slotRect = bounds;
+                auto badgeBounds = slotRect.removeFromRight(34).reduced(2, 4).removeFromTop(14);
                 g.setColour(juce::Colour::fromRGB(20, 24, 30).withAlpha(0.85f));
                 g.fillRoundedRectangle(badgeBounds.toFloat(), 2.5f);
                 g.setColour(juce::Colour::fromRGB(210, 225, 240));
@@ -340,7 +337,7 @@ void SessionMatrixView::drawGrid(juce::Graphics& g, juce::Rectangle<int>)
                 // Legato Badge
                 if (slot.isLegato)
                 {
-                    auto legBounds = bounds.removeFromRight(28).reduced(2, 4).removeFromTop(14);
+                    auto legBounds = slotRect.removeFromRight(28).reduced(2, 4).removeFromTop(14);
                     g.setColour(juce::Colour::fromRGB(40, 30, 60));
                     g.fillRoundedRectangle(legBounds.toFloat(), 2.5f);
                     g.setColour(juce::Colour::fromRGB(215, 180, 255));

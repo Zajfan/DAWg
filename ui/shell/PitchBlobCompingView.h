@@ -51,13 +51,13 @@ private:
     NoteModifiedCallback m_noteCallback;
 
     project::PitchBlobEditor m_pitchEditor;
-    project::TakeTrackCompManager m_compManager;
+    project::TakeCompManager m_compManager {1};
 
     // View Options
     bool m_showTakeLanes {true};
     bool m_snapToScale {true};
-    project::MusicalScaleType m_scaleType {project::MusicalScaleType::major};
-    std::uint8_t m_rootNote {60}; // Middle C
+    std::vector<int> m_scaleClasses {0, 2, 4, 5, 7, 9, 11}; // Major scale
+    int m_rootNote {60}; // Middle C
 
     // UI Buttons & Combos
     juce::ComboBox m_scaleCombo;
@@ -80,7 +80,7 @@ private:
 
     // Simulated waveform & pitch trajectory cache
     std::vector<float> m_mockWaveform;
-    std::vector<project::PitchTrajectoryPoint> m_mockTrajectory;
+    std::vector<std::pair<std::uint64_t, float>> m_mockPitchTrajectory;
 };
 
 } // namespace dawg::ui

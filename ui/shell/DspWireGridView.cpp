@@ -358,6 +358,10 @@ void DspWireGridView::paint(juce::Graphics& g)
         case engine::dsp::GridModuleType::lfo: headerCol = juce::Colour::fromRGB(180, 80, 220); break;
         case engine::dsp::GridModuleType::envelope: headerCol = juce::Colour::fromRGB(50, 200, 120); break;
         case engine::dsp::GridModuleType::delay: headerCol = juce::Colour::fromRGB(40, 210, 200); break;
+        case engine::dsp::GridModuleType::unitDelayFeedback: headerCol = juce::Colour::fromRGB(255, 60, 60); break;
+        case engine::dsp::GridModuleType::wavefolder: headerCol = juce::Colour::fromRGB(220, 160, 40); break;
+        case engine::dsp::GridModuleType::xyPad: headerCol = juce::Colour::fromRGB(70, 150, 255); break;
+        case engine::dsp::GridModuleType::sampleAndHold: headerCol = juce::Colour::fromRGB(150, 100, 240); break;
         case engine::dsp::GridModuleType::audioOut: headerCol = juce::Colour::fromRGB(250, 210, 50); break;
         }
 

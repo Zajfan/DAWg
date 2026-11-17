@@ -4,33 +4,27 @@
 
 namespace dawg::ui {
 
-namespace {
-
-const char* getNoteNameFromMidi(int midiNote) noexcept
-{
-    static const char* const s_notes[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-    return s_notes[std::clamp(midiNote, 0, 127) % 12];
-}
-
-} // namespace
-
 PitchBlobCompingView::PitchBlobCompingView()
 {
     m_scaleCombo.addItem("Scale: Major", 1);
     m_scaleCombo.addItem("Scale: Natural Minor", 2);
     m_scaleCombo.addItem("Scale: Dorian", 3);
-    m_scaleCombo.addItem("Scale: Mixolydian", 4);
-    m_scaleCombo.addItem("Scale: Pentatonic Minor", 5);
-    m_scaleCombo.addItem("Scale: Pentatonic Major", 6);
-    m_scaleCombo.addItem("Scale: Blues", 7);
-    m_scaleCombo.addItem("Scale: Chromatic", 8);
+    m_scaleCombo.addItem("Scale: Pentatonic Minor", 4);
+    m_scaleCombo.addItem("Scale: Blues", 5);
+    m_scaleCombo.addItem("Scale: Chromatic", 6);
     m_scaleCombo.setSelectedId(1, juce::dontSendNotification);
     m_scaleCombo.onChange = [this] {
         const int id = m_scaleCombo.getSelectedId();
-        m_scaleType = static_cast<project::MusicalScaleType>(id - 1);
+        if (id == 1) m_scaleClasses = {0, 2, 4, 5, 7, 9, 11};
+        else if (id == 2) m_scaleClasses = {0, 2, 3, 5, 7, 8, 10};
+        else if (id == 3) m_scaleClasses = {0, 2, 3, 5, 7, 9, 10};
+        else if (id == 4) m_scaleClasses = {0, 3, 5, 7, 10};
+        else if (id == 5) m_scaleClasses = {0, 3, 5, 6, 7, 10};
+        else m_scaleClasses = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+
         if (m_snapToScale)
         {
-            m_pitchEditor.quantizeScale(m_rootNote, m_scaleType);
+            m_pitchEditor.quantizeToScale(m_scaleClasses, 1.0f);
             repaint();
         }
     };
@@ -41,7 +35,7 @@ PitchBlobCompingView::PitchBlobCompingView()
         m_snapButton.setButtonText(m_snapToScale ? "Snap Scale [✓]" : "Snap Scale [ ]");
         if (m_snapToScale)
         {
-            m_pitchEditor.quantizeScale(m_rootNote, m_scaleType);
+            m_pitchEditor.quantizeToScale(m_scaleClasses, 1.0f);
             repaint();
         }
     };
@@ -56,7 +50,6 @@ PitchBlobCompingView::PitchBlobCompingView()
     addAndMakeVisible(m_toggleLanesButton);
 
     m_flattenCompButton.onClick = [this] {
-        m_compManager.flattenComp();
         repaint();
     };
     addAndMakeVisible(m_flattenCompButton);
@@ -64,10 +57,10 @@ PitchBlobCompingView::PitchBlobCompingView()
     m_formantSlider.setRange(-12.0, 12.0, 0.1);
     m_formantSlider.setValue(0.0);
     m_formantSlider.onValueChange = [this] {
-        if (m_selectedBlobIdx >= 0)
+        if (m_selectedBlobIdx >= 0 && static_cast<std::size_t>(m_selectedBlobIdx) < m_pitchEditor.blobs().size())
         {
-            m_pitchEditor.shiftFormant(static_cast<std::size_t>(m_selectedBlobIdx),
-                                       static_cast<float>(m_formantSlider.getValue()));
+            const auto blobId = m_pitchEditor.blobs()[static_cast<std::size_t>(m_selectedBlobIdx)].blobId;
+            m_pitchEditor.setBlobFormant(blobId, static_cast<float>(m_formantSlider.getValue()));
             m_formantLabel.setText("Formant: " + juce::String(m_formantSlider.getValue(), 1) + " st",
                                    juce::dontSendNotification);
             repaint();
@@ -78,34 +71,40 @@ PitchBlobCompingView::PitchBlobCompingView()
     m_formantLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(180, 190, 205));
     addAndMakeVisible(m_formantLabel);
 
-    // Seed realistic mock vocal pitch trajectory and segmented blobs
-    m_mockTrajectory.resize(200);
-    for (std::size_t i = 0; i < m_mockTrajectory.size(); ++i)
+    // Prepopulate realistic mock vocal pitch trajectory and segmented blobs
+    m_mockPitchTrajectory.resize(200);
+    for (std::size_t i = 0; i < m_mockPitchTrajectory.size(); ++i)
     {
         const double t = static_cast<double>(i) / 200.0;
-        float pitchHz = 220.0f; // A3
+        float midiPitch = 57.0f; // A3
 
-        if (t < 0.25) pitchHz = 220.0f + 2.0f * std::sin(t * 30.0);
-        else if (t < 0.5) pitchHz = 261.63f + 3.0f * std::sin(t * 25.0); // C4
-        else if (t < 0.75) pitchHz = 293.66f + 2.5f * std::sin(t * 28.0); // D4
-        else pitchHz = 329.63f + 4.0f * std::sin(t * 32.0); // E4
+        if (t < 0.25) midiPitch = 57.0f + 0.2f * std::sin(t * 30.0);
+        else if (t < 0.5) midiPitch = 60.0f + 0.3f * std::sin(t * 25.0); // C4
+        else if (t < 0.75) midiPitch = 62.0f + 0.2f * std::sin(t * 28.0); // D4
+        else midiPitch = 64.0f + 0.35f * std::sin(t * 32.0); // E4
 
-        m_mockTrajectory[i] = project::PitchTrajectoryPoint {
-            .samplePosition = static_cast<std::uint64_t>(i * 240),
-            .frequencyHz = pitchHz,
-            .confidence = 0.95f,
-            .isVoiced = true
-        };
+        m_mockPitchTrajectory[i] = { static_cast<std::uint64_t>(i * 240), midiPitch };
     }
 
-    m_pitchEditor.segmentSyllables(m_mockTrajectory);
+    // Seed mock segmented pitch blobs
+    auto& blobs = m_pitchEditor.blobsRef();
+    const float mockPitches[] = { 57.0f, 60.0f, 62.0f, 64.0f, 65.0f, 67.0f };
+    const char* words[] = { "I (A3)", "wan- (C4)", "-na (D4)", "know (E4)", "your (F4)", "love (G4)" };
 
-    // Label syllables
-    auto& blobs = m_pitchEditor.blobs();
-    const char* words[] = {"I", "wan-", "-na", "know", "your", "heart"};
-    for (std::size_t i = 0; i < blobs.size() && i < 6; ++i)
+    for (std::size_t i = 0; i < 6; ++i)
     {
-        blobs[i].syllableText = words[i];
+        project::PitchBlob b {};
+        b.blobId = static_cast<std::uint32_t>(i + 1);
+        b.startSample = static_cast<std::uint64_t>(i * 7500);
+        b.endSample = static_cast<std::uint64_t>((i + 1) * 7500 - 500);
+        b.detectedMidiPitch = mockPitches[i] + 0.15f;
+        b.targetMidiPitch = mockPitches[i];
+        b.fineTuneCents = 15.0f;
+        b.formantShiftSemitones = 0.0f;
+        b.vibratoDepthScale = 1.0f;
+        b.noteName = words[i];
+        b.isVoiced = true;
+        blobs.push_back(b);
     }
 
     startTimerHz(20);
@@ -118,7 +117,6 @@ PitchBlobCompingView::~PitchBlobCompingView()
 
 void PitchBlobCompingView::timerCallback()
 {
-    // Idle UI timer for playhead refresh or animation
 }
 
 void PitchBlobCompingView::setViewModel(const EditorViewModel& model)
@@ -159,10 +157,10 @@ float PitchBlobCompingView::yToMidiNote(float y, juce::Rectangle<int> canvasBoun
 int PitchBlobCompingView::findBlobAt(juce::Point<int> pos, juce::Rectangle<int> canvasBounds) const noexcept
 {
     const auto& blobs = m_pitchEditor.blobs();
-    if (blobs.empty() || m_mockTrajectory.empty())
+    if (blobs.empty() || m_mockPitchTrajectory.empty())
         return -1;
 
-    const std::uint64_t totalSamples = m_mockTrajectory.back().samplePosition;
+    const std::uint64_t totalSamples = m_mockPitchTrajectory.back().first;
     if (totalSamples == 0) return -1;
 
     for (std::size_t i = 0; i < blobs.size(); ++i)
@@ -173,7 +171,7 @@ int PitchBlobCompingView::findBlobAt(juce::Point<int> pos, juce::Rectangle<int> 
         const float xEnd = static_cast<float>(canvasBounds.getX()) +
             (static_cast<float>(b.endSample) / static_cast<float>(totalSamples)) * static_cast<float>(canvasBounds.getWidth());
 
-        const float y = midiNoteToY(static_cast<float>(b.targetMidiNote), canvasBounds);
+        const float y = midiNoteToY(b.targetMidiPitch, canvasBounds);
         const auto blobRect = juce::Rectangle<float>(xStart, y - 12.0f, std::max(20.0f, xEnd - xStart), 24.0f);
 
         if (blobRect.contains(pos.toFloat()))
@@ -195,7 +193,7 @@ void PitchBlobCompingView::mouseDown(const juce::MouseEvent& e)
         m_selectedBlobIdx = blobIdx;
         m_draggedBlobIdx = blobIdx;
         m_dragStartPos = e.getPosition();
-        m_dragStartPitch = static_cast<float>(m_pitchEditor.blobs()[static_cast<std::size_t>(blobIdx)].targetMidiNote);
+        m_dragStartPitch = m_pitchEditor.blobs()[static_cast<std::size_t>(blobIdx)].targetMidiPitch;
         m_formantSlider.setValue(m_pitchEditor.blobs()[static_cast<std::size_t>(blobIdx)].formantShiftSemitones,
                                  juce::dontSendNotification);
         repaint();
@@ -219,17 +217,18 @@ void PitchBlobCompingView::mouseDrag(const juce::MouseEvent& e)
 
     const float curPitch = yToMidiNote(static_cast<float>(e.getPosition().getY()), canvasBounds);
     const float pitchDelta = curPitch - yToMidiNote(static_cast<float>(m_dragStartPos.getY()), canvasBounds);
-    const int newTargetNote = std::clamp<int>(static_cast<int>(std::round(m_dragStartPitch + pitchDelta)), 24, 108);
+    const float newTargetPitch = std::clamp<float>(std::round(m_dragStartPitch + pitchDelta), 24.0f, 108.0f);
 
-    auto& blob = m_pitchEditor.blobs()[static_cast<std::size_t>(m_draggedBlobIdx)];
-    if (blob.targetMidiNote != static_cast<std::uint8_t>(newTargetNote))
+    auto& blob = m_pitchEditor.blobsRef()[static_cast<std::size_t>(m_draggedBlobIdx)];
+    if (std::abs(blob.targetMidiPitch - newTargetPitch) > 0.01f)
     {
-        blob.targetMidiNote = static_cast<std::uint8_t>(newTargetNote);
+        blob.targetMidiPitch = newTargetPitch;
+        blob.noteName = project::PitchBlobEditor::midiPitchToNoteName(newTargetPitch);
         if (m_noteCallback)
         {
             m_noteCallback(static_cast<std::size_t>(m_draggedBlobIdx),
-                           newTargetNote - static_cast<int>(m_dragStartPitch),
-                           blob.centsOffset);
+                           static_cast<int>(newTargetPitch - m_dragStartPitch),
+                           blob.fineTuneCents);
         }
         repaint();
     }
@@ -250,8 +249,7 @@ void PitchBlobCompingView::mouseDoubleClick(const juce::MouseEvent& e)
     const int blobIdx = findBlobAt(e.getPosition(), canvasBounds);
     if (blobIdx >= 0)
     {
-        // Double click: scale quantize this single blob
-        m_pitchEditor.quantizeScale(m_rootNote, m_scaleType);
+        m_pitchEditor.quantizeToScale(m_scaleClasses, 1.0f);
         repaint();
     }
 }
@@ -384,27 +382,20 @@ void PitchBlobCompingView::drawPitchBlobCanvas(juce::Graphics& g, juce::Rectangl
         g.drawHorizontalLine(static_cast<int>(y), static_cast<float>(bounds.getX()), static_cast<float>(bounds.getRight()));
     }
 
-    if (m_mockTrajectory.empty())
+    if (m_mockPitchTrajectory.empty())
         return;
 
-    const std::uint64_t totalSamples = m_mockTrajectory.back().samplePosition;
+    const std::uint64_t totalSamples = m_mockPitchTrajectory.back().first;
     if (totalSamples == 0) return;
 
     // Draw detected continuous pitch contour curve
     juce::Path pitchCurve;
     bool pathStarted = false;
-    for (const auto& pt : m_mockTrajectory)
+    for (const auto& pt : m_mockPitchTrajectory)
     {
-        if (!pt.isVoiced || pt.confidence < 0.2f)
-        {
-            pathStarted = false;
-            continue;
-        }
-
-        const float midiNote = 69.0f + 12.0f * std::log2(std::max(10.0f, pt.frequencyHz) / 440.0f);
         const float x = static_cast<float>(bounds.getX()) +
-            (static_cast<float>(pt.samplePosition) / static_cast<float>(totalSamples)) * static_cast<float>(bounds.getWidth());
-        const float y = midiNoteToY(midiNote, bounds);
+            (static_cast<float>(pt.first) / static_cast<float>(totalSamples)) * static_cast<float>(bounds.getWidth());
+        const float y = midiNoteToY(pt.second, bounds);
 
         if (!pathStarted)
         {
@@ -429,7 +420,7 @@ void PitchBlobCompingView::drawPitchBlobCanvas(juce::Graphics& g, juce::Rectangl
         const float xEnd = static_cast<float>(bounds.getX()) +
             (static_cast<float>(b.endSample) / static_cast<float>(totalSamples)) * static_cast<float>(bounds.getWidth());
 
-        const float y = midiNoteToY(static_cast<float>(b.targetMidiNote), bounds);
+        const float y = midiNoteToY(b.targetMidiPitch, bounds);
         const auto blobRect = juce::Rectangle<float>(xStart, y - 11.0f, std::max(22.0f, xEnd - xStart), 22.0f);
 
         const bool isSelected = (static_cast<int>(i) == m_selectedBlobIdx);
@@ -444,24 +435,17 @@ void PitchBlobCompingView::drawPitchBlobCanvas(juce::Graphics& g, juce::Rectangl
         // Syllable text & Note name
         g.setColour(juce::Colour::fromRGB(245, 250, 255));
         g.setFont(juce::FontOptions(10.0f).withStyle("Bold"));
-
-        std::string label = b.syllableText;
-        if (label.empty())
-            label = getNoteNameFromMidi(b.targetMidiNote);
-        else
-            label += " (" + std::string(getNoteNameFromMidi(b.targetMidiNote)) + ")";
-
-        g.drawText(label, blobRect.reduced(4, 2), juce::Justification::centred);
+        g.drawText(b.noteName, blobRect.reduced(4, 2), juce::Justification::centred);
 
         // Cents offset badge
-        if (std::abs(b.centsOffset) > 1.0f)
+        if (std::abs(b.fineTuneCents) > 1.0f)
         {
             const auto centsRect = juce::Rectangle<float>(blobRect.getX(), blobRect.getBottom() + 1.0f,
                                                           blobRect.getWidth(), 10.0f);
             g.setColour(juce::Colour::fromRGB(255, 200, 100));
             g.setFont(juce::FontOptions(8.0f));
-            const std::string centsStr = (b.centsOffset > 0.0f ? "+" : "") +
-                                         std::to_string(static_cast<int>(b.centsOffset)) + "c";
+            const std::string centsStr = (b.fineTuneCents > 0.0f ? "+" : "") +
+                                         std::to_string(static_cast<int>(b.fineTuneCents)) + "c";
             g.drawText(centsStr, centsRect, juce::Justification::centred);
         }
     }
