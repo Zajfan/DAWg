@@ -7,6 +7,7 @@ add_library(dawg_engine_core STATIC
     src/DspGraph.cpp
     src/GraphHandoff.cpp
     src/HardwareControlSurfaceEngine.cpp
+    src/HardwareControlSurfaceManager.cpp
     src/Metronome.cpp
     src/MidiClockGenerator.cpp
     src/MidiControllerManager.cpp

@@ -37,6 +37,8 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/ModulationRackView.h
     ../../ui/shell/GenericPluginEditorView.cpp
     ../../ui/shell/GenericPluginEditorView.h
+    ../../ui/shell/HardwareControlSurfaceDialog.cpp
+    ../../ui/shell/HardwareControlSurfaceDialog.h
     ../../ui/shell/PluginWindow.cpp
     ../../ui/shell/PluginWindow.h
     ../../ui/shell/SpatialRadarView.cpp

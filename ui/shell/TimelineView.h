@@ -91,6 +91,7 @@ private:
     void drawRuler(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawAutomationOverlay(juce::Graphics& g, const project::Track& track, int currentY, int laneWidth);
+    void drawRazorAndSlipOverlay(juce::Graphics& g);
     void drawPlayhead(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawLoopRegion(juce::Graphics& g, juce::Rectangle<int> bounds);
 

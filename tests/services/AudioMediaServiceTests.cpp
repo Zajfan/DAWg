@@ -5,6 +5,7 @@
 #include <dawg/media/AudioResampler.h>
 #include <dawg/media/AudioWarpService.h>
 #include <dawg/media/DiskStreamPool.h>
+#include <dawg/media/MultiTrackDiskStreamer.h>
 #include <dawg/media/OfflineRenderService.h>
 #include <dawg/media/StemSeparatorService.h>
 #include <dawg/media/TransientDetector.h>
@@ -622,6 +623,57 @@ void testStemSeparatorAndGrooveExtraction()
     require(grooveNotes[0].pitch == 36 || grooveNotes[0].pitch == 38 || grooveNotes[0].pitch == 42,
             "Extracted note maps to valid drum pitch");
 }
+
+void testMultiTrackDiskStreamerAndLiveOverview()
+{
+    MemoryAudioAssetWriterFactory factory;
+    MultiTrackDiskStreamer streamer(factory);
+
+    // Prepare Track 1 (mono) and Track 2 (stereo)
+    auto prep1 = streamer.prepareTrack(1, "audio/take_trk1.wav", 48000, 1, 48000, 1000);
+    require(prep1.has_value(), "Track 1 prepared for streaming");
+
+    auto prep2 = streamer.prepareTrack(2, "audio/take_trk2.wav", 48000, 2, 48000, 2000);
+    require(prep2.has_value(), "Track 2 prepared for streaming");
+
+    streamer.start();
+    require(streamer.isRecording(), "Disk streamer worker thread running");
+
+    // Write samples into track 1 buffer (512 samples)
+    auto* buf1 = streamer.getTrackBuffer(1);
+    require(buf1 != nullptr, "Got track 1 RecordRingBuffer");
+
+    std::array<float, 512> trk1Data {};
+    std::fill(trk1Data.begin(), trk1Data.end(), 0.5f);
+    trk1Data[100] = 0.9f;
+    trk1Data[200] = -0.8f;
+    const float* trk1Ch[1] = {trk1Data.data()};
+    const auto written1 = buf1->write(std::span<const float* const>(trk1Ch, 1), trk1Data.size());
+    require(written1 == 512, "Written 512 frames to track 1 ring buffer");
+
+    // Let worker thread drain or drain directly
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    streamer.drainAllOnce();
+
+    require(streamer.getTrackRecordedFrames(1) == 512, "Track 1 drained 512 frames to disk writer");
+
+    // Check live overview
+    const auto liveOverview1 = streamer.getLiveOverview(1);
+    require(liveOverview1.size() == 2, "Two 256-sample overview blocks computed live for Track 1");
+    require(std::abs(liveOverview1[0].maxVal - 0.9f) < 1e-4f, "Live overview block 0 captured max peak 0.9");
+    require(std::abs(liveOverview1[0].minVal - (-0.8f)) < 1e-4f, "Live overview block 0 captured min peak -0.8");
+
+    // Finalize all tracks
+    const auto takes = streamer.finalizeAll();
+    require(!streamer.isRecording(), "Streamer stopped");
+    require(takes.size() == 2, "Two takes finalized");
+
+    // Verify Take 1 metadata
+    require(takes[0].trackId == 1, "Take 0 trackId matches");
+    require(takes[0].asset.frameCount == 512, "Take 0 asset frame count is 512");
+    require(takes[0].clip.startSample == 1000, "Take 0 timeline start sample is 1000");
+    require(takes[0].overview.size() == 2, "Take 0 overview preserved");
+}
 } // namespace
 
 int main()
@@ -635,5 +687,6 @@ int main()
     testTransientDetectionOnPercussiveBursts();
     testAudioWarpServiceBeatMatching();
     testStemSeparatorAndGrooveExtraction();
-    std::puts("PASS: 9 media service, resampler, disk pool, record, waveform cache, offline render, transient detection, warp, and stem separation tests");
+    testMultiTrackDiskStreamerAndLiveOverview();
+    std::puts("PASS: 10 media service, resampler, disk pool, record, waveform cache, offline render, transient detection, warp, stem separation, and multitrack disk streamer tests");
 }

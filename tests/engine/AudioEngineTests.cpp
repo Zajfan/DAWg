@@ -44,6 +44,7 @@
 #include <dawg/engine/dsp/TnhcDelayNode.h>
 #include <dawg/engine/MultiTrackRecordingEngine.h>
 #include <dawg/engine/HardwareControlSurfaceEngine.h>
+#include <dawg/engine/HardwareControlSurfaceManager.h>
 #include <dawg/engine/dsp/AcousticDrumBleedCancellationNode.h>
 #include <dawg/engine/dsp/AmbisonicsProcessorNode.h>
 #include <dawg/engine/dsp/DynamicCabinetSimulatorNode.h>
@@ -4967,6 +4968,105 @@ void testHardwareControlSurfaceEngineSuite()
     require(parsed.index == 3, "HUI fader channel 3");
 }
 
+void testHardwareControlSurfaceManagerSuite()
+{
+    using dawg::engine::HardwareControlSurfaceManager;
+    using dawg::engine::ControllerProfile;
+    using dawg::engine::SurfaceConfig;
+    using dawg::engine::ChannelStripFeedback;
+    using dawg::engine::McuTransportButton;
+
+    // 1. Device Profile Auto-Detection
+    require(HardwareControlSurfaceManager::autoDetectProfile("Behringer X-Touch Universal") == ControllerProfile::mackieControlUniversal, "Auto-detected X-Touch as MCU");
+    require(HardwareControlSurfaceManager::autoDetectProfile("iCon QCon Pro G2") == ControllerProfile::mackieControlUniversal, "Auto-detected QCon as MCU");
+    require(HardwareControlSurfaceManager::autoDetectProfile("Mackie Control Surface") == ControllerProfile::mackieControlUniversal, "Auto-detected Mackie Control");
+    require(HardwareControlSurfaceManager::autoDetectProfile("Avid HUI") == ControllerProfile::hui, "Auto-detected HUI");
+    require(HardwareControlSurfaceManager::autoDetectProfile("Novation Launchpad Pro MK3") == ControllerProfile::launchpadPro, "Auto-detected Launchpad Pro");
+    require(HardwareControlSurfaceManager::autoDetectProfile("Ableton Push 2 User Port") == ControllerProfile::push2, "Auto-detected Push 2");
+    require(HardwareControlSurfaceManager::autoDetectProfile("Akai APC40 mkII") == ControllerProfile::apc40Mk2, "Auto-detected APC40");
+
+    // 2. Hardware Manager State Sync Loop
+    HardwareControlSurfaceManager manager;
+    SurfaceConfig cfg {};
+    cfg.profile = ControllerProfile::mackieControlUniversal;
+    cfg.enabled = true;
+    manager.setConfig(cfg);
+
+    std::vector<std::vector<std::uint8_t>> sentPackets;
+    manager.setMidiSendCallback([&sentPackets](const std::uint8_t* data, std::size_t size) {
+        sentPackets.emplace_back(data, data + size);
+    });
+
+    // Update track 0 state
+    ChannelStripFeedback trk0 {};
+    trk0.volume = 0.75f;
+    trk0.pan = 0.5f;
+    trk0.trackName = "Vocal";
+    manager.updateChannelStrip(0, trk0);
+
+    // Run sync cycle
+    manager.syncCycle();
+
+    require(!sentPackets.empty(), "Sync cycle transmitted outbound MIDI feedback");
+
+    // Check fader packet
+    bool foundFader = false;
+    for (const auto& pkt : sentPackets)
+    {
+        if (pkt.size() == 3 && pkt[0] == 0xE0) // Pitch bend channel 0
+        {
+            foundFader = true;
+            break;
+        }
+    }
+    require(foundFader, "Fader motorized feedback packet sent for track 0");
+
+    // Check scribble strip SysEx
+    bool foundScribble = false;
+    for (const auto& pkt : sentPackets)
+    {
+        if (pkt.size() >= 7 && pkt[0] == 0xF0 && pkt[1] == 0x00 && pkt[2] == 0x00 && pkt[3] == 0x66)
+        {
+            foundScribble = true;
+            break;
+        }
+    }
+    require(foundScribble, "Scribble strip LCD SysEx packet sent containing track name");
+
+    // 3. Inbound MIDI event routing
+    std::size_t movedFaderChannel = 999;
+    float movedFaderVal = -1.0f;
+    manager.setFaderMovedCallback([&](std::size_t ch, float val) {
+        movedFaderChannel = ch;
+        movedFaderVal = val;
+    });
+
+    // Simulated pitch bend for channel 1 fader (status 0xE1, MSB 0x40 -> midpoint ~0.5)
+    const std::uint8_t faderMidi[3] = {0xE1, 0x00, 0x40};
+    manager.handleIncomingMidi(faderMidi, 3);
+    require(movedFaderChannel == 1, "Inbound MCU fader routed to channel 1 callback");
+    require(std::abs(movedFaderVal - 0.5f) < 0.01f, "Fader value normalized correctly");
+
+    // Simulated Transport button (Play Note On 0x5E)
+    McuTransportButton transportBtn = McuTransportButton::stop;
+    bool transportActive = false;
+    manager.setTransportCallback([&](McuTransportButton btn, bool active) {
+        transportBtn = btn;
+        transportActive = active;
+    });
+
+    const std::uint8_t playMidi[3] = {0x90, 0x5E, 127};
+    manager.handleIncomingMidi(playMidi, 3);
+    require(transportBtn == McuTransportButton::play && transportActive, "Inbound Play button routed to transport callback");
+
+    // 4. Background Sync Thread Lifecycle
+    manager.startSyncLoop(std::chrono::milliseconds(10));
+    require(manager.isSyncing(), "Sync loop thread active");
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    manager.stopSyncLoop();
+    require(!manager.isSyncing(), "Sync loop thread safely terminated");
+}
+
 void testAcousticDrumBleedCancellationSuite()
 {
     using dawg::engine::dsp::AcousticDrumBleedCancellationNode;
@@ -6123,6 +6223,7 @@ int main()
     testLiveLooperSuite();
     testTransientSplitGranularResynthesizerSuite();
     testHardwareControlSurfaceEngineSuite();
+    testHardwareControlSurfaceManagerSuite();
     testAcousticDrumBleedCancellationSuite();
     testSpectralMorphCrossSynthSuite();
     testSpatialHeadTrackerBridgeSuite();

@@ -237,6 +237,7 @@ void TimelineView::paint(juce::Graphics& g)
     drawMinimap(g, minimapBounds);
     drawRuler(g, rulerBounds);
     drawTracksAndClips(g, tracksBounds);
+    drawRazorAndSlipOverlay(g);
     drawLoopRegion(g, getLocalBounds());
     drawPlayhead(g, getLocalBounds());
 }
@@ -816,6 +817,82 @@ void TimelineView::drawAutomationOverlay(juce::Graphics& g, const project::Track
     }
 }
 
+void TimelineView::drawRazorAndSlipOverlay(juce::Graphics& g)
+{
+    // 1. Razor / Slice Tool Overlay
+    if (m_razorMode && m_lastMousePos.x >= m_headerWidth && m_lastMousePos.y >= tracksTopY())
+    {
+        const auto snappedSample = snapSample(pixelToSample(m_lastMousePos.x));
+        const int cutX = m_headerWidth + sampleToPixel(snappedSample);
+
+        g.setColour(juce::Colour(0xffff3b30).withAlpha(0.85f));
+        g.drawVerticalLine(cutX, static_cast<float>(tracksTopY()), static_cast<float>(getHeight()));
+
+        // Draw Razor pill at cursor
+        const juce::Rectangle<int> razorPill {cutX - 35, std::max(tracksTopY() + 4, m_lastMousePos.y - 12), 70, 22};
+        g.setColour(juce::Colour(0xff220a0a));
+        g.fillRoundedRectangle(razorPill.toFloat(), 4.0f);
+        g.setColour(juce::Colour(0xffff453a));
+        g.drawRoundedRectangle(razorPill.toFloat(), 4.0f, 1.2f);
+
+        g.setColour(juce::Colours::white);
+        g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+        g.drawText("[✂ SLICE]", razorPill, juce::Justification::centred);
+    }
+
+    // 2. Slip Edit Mode Indicator
+    if (m_dragMode == DragMode::slipEdit && m_draggedClipId.has_value())
+    {
+        for (const auto& clip : m_model.project.clips)
+        {
+            if (clip.id == *m_draggedClipId)
+            {
+                int laneY = 0;
+                (void)findClipAt(m_lastMousePos, laneY);
+                const auto b = getClipBounds(clip, laneY);
+                if (b.getWidth() > 60)
+                {
+                    const juce::Rectangle<int> slipBadge {b.getCentreX() - 45, b.getY() + 4, 90, 18};
+                    g.setColour(juce::Colour(0xff1f242c));
+                    g.fillRoundedRectangle(slipBadge.toFloat(), 3.0f);
+                    g.setColour(juce::Colour(0xff58a6ff));
+                    g.drawRoundedRectangle(slipBadge.toFloat(), 3.0f, 1.0f);
+                    g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+                    g.drawText("< SLIP EDIT >", slipBadge, juce::Justification::centred);
+                }
+                break;
+            }
+        }
+    }
+
+    // 3. Automation Tension Drag HUD
+    if (m_dragMode == DragMode::dragTensionHandle)
+    {
+        for (const auto& lane : m_model.project.automationLanes)
+        {
+            if (lane.id == m_dragAutomationLaneId)
+            {
+                for (const auto& pt : lane.points)
+                {
+                    if (pt.id == m_dragAutomationPointId)
+                    {
+                        const juce::Rectangle<int> hud {m_lastMousePos.x + 12, m_lastMousePos.y - 20, 80, 20};
+                        g.setColour(juce::Colour(0xff161b22));
+                        g.fillRoundedRectangle(hud.toFloat(), 4.0f);
+                        g.setColour(juce::Colour(0xff58a6ff));
+                        g.drawRoundedRectangle(hud.toFloat(), 4.0f, 1.0f);
+                        g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+                        g.drawText(juce::String::formatted("Tension: %+.0f%%", pt.curveTension * 100.0f),
+                                   hud, juce::Justification::centred);
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+    }
+}
+
 void TimelineView::drawLoopRegion(juce::Graphics& g, juce::Rectangle<int> bounds)
 {
     if (! m_model.project.loop.enabled)
@@ -903,6 +980,7 @@ void TimelineView::mouseMove(const juce::MouseEvent& e)
     if (m_razorMode)
     {
         setMouseCursor(juce::MouseCursor::CrosshairCursor);
+        repaint();
         return;
     }
 
