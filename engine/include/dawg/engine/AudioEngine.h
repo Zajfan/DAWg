@@ -3,6 +3,7 @@
 #include <dawg/engine/AudioBufferView.h>
 #include <dawg/engine/ChannelStrip.h>
 #include <dawg/engine/CompiledGraph.h>
+#include <dawg/engine/DspPerformanceProfiler.h>
 #include <dawg/engine/EngineCommand.h>
 #include <dawg/engine/EngineConfig.h>
 #include <dawg/engine/GraphHandoff.h>
@@ -60,6 +61,8 @@ public:
     [[nodiscard]] TransportState transportState() const noexcept;
     [[nodiscard]] std::uint64_t underrunCount() const noexcept;
     [[nodiscard]] MeterReading meterReading() const noexcept;
+    [[nodiscard]] DspPerformanceSnapshot performanceSnapshot() const noexcept { return m_profiler.readSnapshot(); }
+    [[nodiscard]] DspPerformanceProfiler& profiler() noexcept { return m_profiler; }
 
     void setRecordBuffer(RecordRingBuffer* buffer) noexcept;
     void setRecording(bool recording) noexcept;
@@ -113,6 +116,7 @@ private:
     std::atomic<bool> m_masterLimiterEnabled {false};
     dsp::BrickwallLimiterNode m_masterLimiter;
     WorkStealingScheduler m_scheduler;
+    DspPerformanceProfiler m_profiler;
     double m_sampleRate {48000.0};
     bool m_prepared {};
 };

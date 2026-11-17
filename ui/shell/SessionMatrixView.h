@@ -2,6 +2,7 @@
 
 #include "EditorViewModel.h"
 
+#include <dawg/engine/DjCrossfaderEngine.h>
 #include <dawg/engine/SessionMatrixEngine.h>
 #include <dawg/project/ProjectCommand.h>
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -55,6 +56,9 @@ public:
     void stopClip(int trackIndex, int sceneIndex);
     void stopAllClips();
 
+    engine::DjCrossfaderEngine& crossfader() noexcept { return m_crossfaderEngine; }
+    [[nodiscard]] const engine::DjCrossfaderEngine& crossfader() const noexcept { return m_crossfaderEngine; }
+
 private:
     void timerCallback() override;
 
@@ -74,6 +78,14 @@ private:
 
     juce::ComboBox m_quantizeCombo;
     juce::TextButton m_stopAllButton {"Stop All Clips [■]"};
+
+    engine::DjCrossfaderEngine m_crossfaderEngine;
+    juce::Slider m_crossfaderSlider;
+    juce::ComboBox m_curveSelector;
+    juce::TextButton m_btnNudgeMinus {"-1% Nudge"};
+    juce::TextButton m_btnNudgePlus {"+1% Nudge"};
+    juce::TextButton m_btnSceneFollow {"Follow Actions: ON"};
+    bool m_sceneFollowEnabled {true};
 
     bool m_blinkState {false};
     int m_slotWidth {130};

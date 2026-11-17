@@ -57,6 +57,7 @@ private:
     // Header & Info
     juce::Label m_lblTrackName;
     juce::Label m_lblTrackKind;
+    juce::Label m_lblTrackDspLoad;
     juce::Colour m_trackColor {juce::Colour::fromRGB(45, 140, 240)};
 
     // Input & Monitoring

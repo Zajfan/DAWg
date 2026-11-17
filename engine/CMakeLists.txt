@@ -4,7 +4,9 @@ add_library(dawg_engine_core STATIC
     src/AudioEngine.cpp
     src/AutomationCurveEvaluator.cpp
     src/ConsoleRoutingMatrix.cpp
+    src/DjCrossfaderEngine.cpp
     src/DspGraph.cpp
+    src/DspPerformanceProfiler.cpp
     src/GraphHandoff.cpp
     src/HardwareControlSurfaceEngine.cpp
     src/HardwareControlSurfaceManager.cpp
@@ -16,6 +18,8 @@ add_library(dawg_engine_core STATIC
     src/RecordRingBuffer.cpp
     src/RenderSnapshotPublisher.cpp
     src/SessionMatrixEngine.cpp
+    src/SimdMath.cpp
+    src/SmpteTimecode.cpp
     src/TempoMap.cpp
     src/TransportCommandQueue.cpp
     src/WorkStealingScheduler.cpp
@@ -59,6 +63,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/SpatialHeadTrackerBridge.cpp
     src/dsp/SpatialSurroundPannerNode.cpp
     src/dsp/SpectralBalanceAssistant.cpp
+    src/SpectralRepairEngine.cpp
     src/dsp/SpectralMorphCrossSynthNode.cpp
     src/dsp/SpectralResonanceTamerNode.cpp
     src/dsp/SpectralSidechainNode.cpp

@@ -19,6 +19,59 @@ SessionMatrixView::SessionMatrixView(CommandHandler handler, AuditionCallback au
     m_stopAllButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(50, 24, 28));
     addAndMakeVisible(m_stopAllButton);
 
+    // DJ Crossfader & Beat-Matching Controls
+    m_crossfaderSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    m_crossfaderSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    m_crossfaderSlider.setRange(-1.0, 1.0, 0.01);
+    m_crossfaderSlider.setValue(0.0, juce::dontSendNotification);
+    m_crossfaderSlider.onValueChange = [this] {
+        m_crossfaderEngine.setPosition(static_cast<float>(m_crossfaderSlider.getValue()));
+        repaint();
+    };
+    addAndMakeVisible(m_crossfaderSlider);
+
+    m_curveSelector.addItem("Curve: Smooth Equal-Power", 1);
+    m_curveSelector.addItem("Curve: Linear Fade", 2);
+    m_curveSelector.addItem("Curve: Turntable Scratch Cut", 3);
+    m_curveSelector.setSelectedId(1, juce::dontSendNotification);
+    m_curveSelector.onChange = [this] {
+        switch (m_curveSelector.getSelectedId())
+        {
+        case 1: m_crossfaderEngine.setCurve(engine::CrossfaderCurve::smoothEqualPower); break;
+        case 2: m_crossfaderEngine.setCurve(engine::CrossfaderCurve::linear); break;
+        case 3: m_crossfaderEngine.setCurve(engine::CrossfaderCurve::scratchCut); break;
+        }
+    };
+    addAndMakeVisible(m_curveSelector);
+
+    m_btnNudgeMinus.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(45, 50, 65));
+    m_btnNudgeMinus.onClick = [this] {
+        if (m_commandHandler)
+        {
+            const double newBpm = engine::DjCrossfaderEngine::calculateTempoNudgeBpm(m_model.project.tempo.bpm, -1.0f);
+            m_commandHandler(project::SetProjectTempo { newBpm, m_model.project.tempo.timeSigNumerator, m_model.project.tempo.timeSigDenominator, m_model.project.tempo.metronomeEnabled });
+        }
+    };
+    addAndMakeVisible(m_btnNudgeMinus);
+
+    m_btnNudgePlus.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(45, 50, 65));
+    m_btnNudgePlus.onClick = [this] {
+        if (m_commandHandler)
+        {
+            const double newBpm = engine::DjCrossfaderEngine::calculateTempoNudgeBpm(m_model.project.tempo.bpm, 1.0f);
+            m_commandHandler(project::SetProjectTempo { newBpm, m_model.project.tempo.timeSigNumerator, m_model.project.tempo.timeSigDenominator, m_model.project.tempo.metronomeEnabled });
+        }
+    };
+    addAndMakeVisible(m_btnNudgePlus);
+
+    m_btnSceneFollow.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(35, 110, 80));
+    m_btnSceneFollow.onClick = [this] {
+        m_sceneFollowEnabled = ! m_sceneFollowEnabled;
+        m_btnSceneFollow.setButtonText(m_sceneFollowEnabled ? "Follow Actions: ON" : "Follow Actions: OFF");
+        m_btnSceneFollow.setColour(juce::TextButton::buttonColourId, m_sceneFollowEnabled ? juce::Colour::fromRGB(35, 110, 80) : juce::Colour::fromRGB(45, 48, 56));
+    };
+    addAndMakeVisible(m_btnSceneFollow);
+
     startTimerHz(15);
 }
 
@@ -410,6 +463,19 @@ void SessionMatrixView::resized()
     const int matrixWidth = static_cast<int>(m_trackSlots.size()) * (m_slotWidth + 4) + 8;
     m_quantizeCombo.setBounds(matrixWidth + 6, 4, 150, 24);
     m_stopAllButton.setBounds(matrixWidth + 162, 4, 130, 24);
+    m_btnSceneFollow.setBounds(matrixWidth + 298, 4, 140, 24);
+
+    // DJ Performance Bar at bottom
+    auto bottomBar = bounds.removeFromBottom(38).reduced(8, 4);
+    m_curveSelector.setBounds(bottomBar.removeFromLeft(190));
+    bottomBar.removeFromLeft(10);
+    m_btnNudgeMinus.setBounds(bottomBar.removeFromLeft(75));
+    bottomBar.removeFromLeft(4);
+    m_btnNudgePlus.setBounds(bottomBar.removeFromLeft(75));
+    bottomBar.removeFromLeft(16);
+
+    // Crossfader takes center space
+    m_crossfaderSlider.setBounds(bottomBar.removeFromLeft(std::min(300, bottomBar.getWidth())));
 }
 
 } // namespace dawg::ui

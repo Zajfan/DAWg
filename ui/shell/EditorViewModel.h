@@ -1,5 +1,6 @@
 #pragma once
 
+#include <dawg/engine/DspPerformanceProfiler.h>
 #include <dawg/engine/MeterTelemetry.h>
 #include <dawg/project/ProjectSnapshot.h>
 
@@ -26,6 +27,7 @@ struct EditorViewModel
     bool canRedo {};
     bool transportRecordArmed {};
     bool masterLimiterEnabled {};
+    engine::DspPerformanceSnapshot dspPerformance {};
 
     [[nodiscard]] std::size_t trackCount() const noexcept { return project.tracks.size(); }
 };

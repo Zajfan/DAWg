@@ -1,6 +1,7 @@
 #include "TransportBar.h"
 
 #include <dawg/engine/MultiTrackRecordingEngine.h>
+#include <dawg/engine/SmpteTimecode.h>
 
 #include <cmath>
 #include <iomanip>
@@ -116,6 +117,25 @@ TransportBar::TransportBar(Callbacks callbacks)
     m_positionLabel.setFont(juce::FontOptions(13.0f, juce::Font::bold));
     addAndMakeVisible(m_positionLabel);
 
+    m_smpteToggleButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(35, 40, 52));
+    m_smpteToggleButton.onClick = [this] {
+        m_showSmpteTimecode = ! m_showSmpteTimecode;
+        m_smpteToggleButton.setColour(juce::TextButton::buttonColourId,
+            m_showSmpteTimecode ? juce::Colour::fromRGB(45, 120, 210) : juce::Colour::fromRGB(35, 40, 52));
+        setViewModel(m_model);
+    };
+    addAndMakeVisible(m_smpteToggleButton);
+
+    m_lblCpuLoad.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    m_lblCpuLoad.setColour(juce::Label::textColourId, juce::Colour::fromRGB(140, 220, 160));
+    m_lblCpuLoad.setText("DSP: 0.0%", juce::dontSendNotification);
+    addAndMakeVisible(m_lblCpuLoad);
+
+    m_lblDropoutWarning.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    m_lblDropoutWarning.setColour(juce::Label::textColourId, juce::Colour::fromRGB(255, 60, 60));
+    m_lblDropoutWarning.setText("", juce::dontSendNotification);
+    addAndMakeVisible(m_lblDropoutWarning);
+
     // Callbacks wiring
     m_returnToStartButton.onClick = [this] {
         if (m_callbacks.returnToStart)
@@ -221,7 +241,36 @@ void TransportBar::setViewModel(const EditorViewModel& model)
        << std::setw(3) << millis
        << "  |  " << bar << "." << beat << "." << std::setw(3) << tick;
 
-    m_positionLabel.setText(ss.str(), juce::dontSendNotification);
+    if (m_showSmpteTimecode)
+    {
+        const auto curSample = static_cast<std::uint64_t>(std::max<std::int64_t>(0, m_model.playbackPosition));
+        const auto tcStr = engine::SmpteTimecodeEngine::formatSampleAsTimecode(curSample, sampleRate, engine::SmpteFrameRate::fps24, false);
+        m_positionLabel.setText("TC: " + juce::String(tcStr) + " [24fps]", juce::dontSendNotification);
+    }
+    else
+    {
+        m_positionLabel.setText(ss.str(), juce::dontSendNotification);
+    }
+
+    // CPU Performance & Drop-Out Warning
+    const float cpu = m_model.dspPerformance.currentCpuPercent;
+    m_lblCpuLoad.setText("DSP: " + juce::String(cpu, 1) + "%", juce::dontSendNotification);
+    if (cpu < 50.0f)
+        m_lblCpuLoad.setColour(juce::Label::textColourId, juce::Colour::fromRGB(140, 220, 160));
+    else if (cpu < 85.0f)
+        m_lblCpuLoad.setColour(juce::Label::textColourId, juce::Colour::fromRGB(255, 200, 60));
+    else
+        m_lblCpuLoad.setColour(juce::Label::textColourId, juce::Colour::fromRGB(255, 60, 60));
+
+    if (m_model.dspPerformance.isOverBudget || m_model.underrunCount > 0)
+    {
+        m_lblDropoutWarning.setText("! XRUN (" + juce::String(m_model.underrunCount) + ")", juce::dontSendNotification);
+    }
+    else
+    {
+        m_lblDropoutWarning.setText("", juce::dontSendNotification);
+    }
+
     m_timeSigButton.setButtonText(
         juce::String(static_cast<int>(m_model.project.tempo.timeSigNumerator)) + "/"
         + juce::String(static_cast<int>(m_model.project.tempo.timeSigDenominator)));
@@ -325,9 +374,11 @@ void TransportBar::resized()
     m_recordButton.setBounds(area.removeFromLeft(54));
     area.removeFromLeft(12);
 
-    // Position display
+    // Position display & SMPTE toggle
     m_positionLabel.setBounds(area.removeFromLeft(180));
-    area.removeFromLeft(12);
+    area.removeFromLeft(4);
+    m_smpteToggleButton.setBounds(area.removeFromLeft(48));
+    area.removeFromLeft(10);
 
     // BPM & Time sig
     m_bpmLabel.setBounds(area.removeFromLeft(36));
@@ -361,10 +412,14 @@ void TransportBar::resized()
     }
     m_latencyCalibrateButton.setBounds(area.removeFromLeft(130));
 
-    // Right-aligned utility buttons: + Track, Import WAV
+    // Right-aligned utility buttons: + Track, Import WAV, CPU load, and xrun badge
     m_importWavButton.setBounds(area.removeFromRight(100));
     area.removeFromRight(6);
     m_addTrackButton.setBounds(area.removeFromRight(80));
+    area.removeFromRight(10);
+    m_lblCpuLoad.setBounds(area.removeFromRight(70));
+    area.removeFromRight(4);
+    m_lblDropoutWarning.setBounds(area.removeFromRight(75));
 }
 
 } // namespace dawg::ui

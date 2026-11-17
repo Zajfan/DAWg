@@ -67,6 +67,10 @@ private:
     juce::TextButton m_addTrackButton {"+ Track"};
     juce::TextButton m_importWavButton {"Import WAV"};
     juce::Label m_positionLabel;
+    juce::TextButton m_smpteToggleButton {"SMPTE"};
+    bool m_showSmpteTimecode {false};
+    juce::Label m_lblCpuLoad;
+    juce::Label m_lblDropoutWarning;
 };
 
 } // namespace dawg::ui

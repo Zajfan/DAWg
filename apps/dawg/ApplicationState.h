@@ -120,7 +120,8 @@ public:
             .canUndo = m_controller.canUndo(),
             .canRedo = m_controller.canRedo(),
             .transportRecordArmed = m_transportRecordArmed,
-            .masterLimiterEnabled = m_engine.isMasterLimiterEnabled()
+            .masterLimiterEnabled = m_engine.isMasterLimiterEnabled(),
+            .dspPerformance = m_engine.performanceSnapshot()
         };
     }
 

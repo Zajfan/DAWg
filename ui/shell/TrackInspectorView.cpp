@@ -32,6 +32,12 @@ TrackInspectorView::TrackInspectorView(CommandHandler commandHandler, OpenDspEdi
     m_lblTrackKind.setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(m_lblTrackKind);
 
+    m_lblTrackDspLoad.setFont(juce::FontOptions {10.0f});
+    m_lblTrackDspLoad.setColour(juce::Label::textColourId, juce::Colour::fromRGB(120, 200, 160));
+    m_lblTrackDspLoad.setJustificationType(juce::Justification::centredLeft);
+    m_lblTrackDspLoad.setText("DSP: 0 µs", juce::dontSendNotification);
+    addAndMakeVisible(m_lblTrackDspLoad);
+
     // Input & Monitoring
     m_inputSelector.addItem("In: 1/2 Stereo", 1);
     m_inputSelector.addItem("In: 1 (L)", 2);
@@ -287,6 +293,19 @@ void TrackInspectorView::updateFromSelectedTrack()
     }
     m_lblTrackKind.setText(kindStr, juce::dontSendNotification);
 
+    float trackUs = 0.0f;
+    float trackPct = 0.0f;
+    for (std::size_t i = 0; i < m_model.dspPerformance.activeTrackCount; ++i)
+    {
+        if (m_model.dspPerformance.tracks[i].trackId == trk->id)
+        {
+            trackUs = m_model.dspPerformance.tracks[i].executionUs;
+            trackPct = m_model.dspPerformance.tracks[i].cpuPercent;
+            break;
+        }
+    }
+    m_lblTrackDspLoad.setText("DSP: " + juce::String(trackUs, 0) + " µs (" + juce::String(trackPct, 1) + "%)", juce::dontSendNotification);
+
     // Track color (hash or default)
     const auto colIdx = static_cast<juce::uint8>((trk->id * 47) % 256);
     m_trackColor = juce::Colour::fromHSV(static_cast<float>(colIdx) / 256.0f, 0.75f, 0.9f, 1.0f);
@@ -422,11 +441,13 @@ void TrackInspectorView::resized()
     const int w = getWidth();
     int y = 8;
 
-    // Header (Track Name & Kind)
+    // Header (Track Name & Kind & DSP Load)
     m_lblTrackName.setBounds(18, y, w - 24, 18);
     y += 18;
     m_lblTrackKind.setBounds(18, y, w - 24, 14);
-    y += 20;
+    y += 14;
+    m_lblTrackDspLoad.setBounds(18, y, w - 24, 14);
+    y += 18;
 
     // Input & Monitoring
     m_inputSelector.setBounds(8, y, w - 16, 20);

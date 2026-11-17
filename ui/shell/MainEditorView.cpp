@@ -1,6 +1,9 @@
 #include "MainEditorView.h"
 #include "DspEditorDialog.h"
 #include "PluginWindow.h"
+#include "SpectralRepairDialog.h"
+#include "VideoPlaybackWindow.h"
+#include <dawg/engine/SmpteTimecode.h>
 
 #include <utility>
 
@@ -79,6 +82,8 @@ enum MenuId
     cmdTemplateAcousticRock = 92,
     cmdTemplateMastering = 93,
     cmdConsolidateProject = 94,
+    cmdOpenVideoMonitor = 96,
+    cmdOpenSpectralRepair = 97,
 
     // Help
     cmdShortcuts = 50,
@@ -195,6 +200,15 @@ MainEditorView::MainEditorView(EditorViewModel model,
         else if (actionId == "action:reDockAll") reDockAllPanels();
         else if (actionId == "action:consolidate") { if (m_menuCallbacks.consolidateProject) m_menuCallbacks.consolidateProject(); }
         else if (actionId == "action:rescanPlugins") { if (m_menuCallbacks.rescanPlugins) m_menuCallbacks.rescanPlugins(); }
+        else if (actionId == "action:videoMonitor") VideoPlaybackWindow::open(m_model);
+        else if (actionId == "action:spectralRepair") SpectralRepairDialog::open(m_model);
+        else if (actionId == "action:cueSheet") {
+            std::vector<engine::CueSheetEntry> demoCues;
+            demoCues.push_back({1, "Opening Theme", "01:00:00:00", "01:01:30:00", "00:01:30:00", "Dm", 110.0, "Composer", "Main Title Sequence"});
+            demoCues.push_back({2, "Action Chase", "01:01:30:00", "01:03:45:12", "00:02:15:12", "Fm", 140.0, "Composer", "Rooftop Pursuit Scene"});
+            const auto report = engine::SmpteTimecodeEngine::generateCueSheetReportText(m_model.project.name.empty() ? "Film Score Project" : m_model.project.name, demoCues);
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon, "DAWg Production Cue Sheet", report);
+        }
         else if (actionId == "action:stepRecord") m_pianoRollView.toggleStepRecord();
         else if (actionId == "template:modernTrap") { if (m_menuCallbacks.newFromTemplate) m_menuCallbacks.newFromTemplate("modernTrap"); }
         else if (actionId == "template:synthwave") { if (m_menuCallbacks.newFromTemplate) m_menuCallbacks.newFromTemplate("synthwaveCyberpunk"); }
@@ -1330,6 +1344,7 @@ void MainEditorView::setViewModel(EditorViewModel model)
     m_spatialRadarView.setViewModel(m_model);
     m_wireGridView.setViewModel(m_model);
     m_masteringSuiteView.setViewModel(m_model);
+    VideoPlaybackWindow::updatePlayhead(m_model);
 }
 
 void MainEditorView::setSnapshot(project::ProjectSnapshot snapshot)
@@ -1347,6 +1362,7 @@ void MainEditorView::setSnapshot(project::ProjectSnapshot snapshot)
     m_spatialRadarView.setViewModel(m_model);
     m_wireGridView.setViewModel(m_model);
     m_masteringSuiteView.setViewModel(m_model);
+    VideoPlaybackWindow::updatePlayhead(m_model);
 }
 
 void MainEditorView::setWaveformCache(media::WaveformCache* cache)
@@ -1424,6 +1440,9 @@ juce::PopupMenu MainEditorView::getMenuForIndex(int menuIndex, const juce::Strin
         menu.addItem(cmdDetachChannelRack, "Detach Channel Rack to Window  (↗)", true, isPanelDetached(DetachablePanel::channelRack));
         menu.addItem(cmdReDockAll, "Re-Dock All Floating Panels  (↙)", true, false);
         menu.addItem(cmdToggleMaximizeDock, "Maximize Bottom Dock  (F11)", true, m_dockMaximized);
+        menu.addSeparator();
+        menu.addItem(cmdOpenVideoMonitor, "Video Picture Monitor & SMPTE Sync...", true, VideoPlaybackWindow::isOpen());
+        menu.addItem(cmdOpenSpectralRepair, "Spectral Audio Repair & De-Hum...", true, false);
         menu.addSeparator();
         menu.addItem(cmdZoomIn, "Zoom In  (Ctrl + =)", true, false);
         menu.addItem(cmdZoomOut, "Zoom Out  (Ctrl + -)", true, false);
@@ -1593,6 +1612,12 @@ void MainEditorView::menuItemSelected(int menuItemID, int)
         break;
     case cmdConsolidateProject:
         if (m_menuCallbacks.consolidateProject) m_menuCallbacks.consolidateProject();
+        break;
+    case cmdOpenVideoMonitor:
+        VideoPlaybackWindow::open(m_model);
+        break;
+    case cmdOpenSpectralRepair:
+        SpectralRepairDialog::open(m_model);
         break;
     case cmdTemplateModernTrap:
         if (m_menuCallbacks.newFromTemplate) m_menuCallbacks.newFromTemplate("modernTrap");

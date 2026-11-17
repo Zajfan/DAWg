@@ -85,6 +85,11 @@
 #include <dawg/engine/clap/ClapPluginNode.h>
 #include <dawg/engine/MidiControllerManager.h>
 #include <dawg/engine/WsolaTimeStretcher.h>
+#include <dawg/engine/SimdMath.h>
+#include <dawg/engine/DspPerformanceProfiler.h>
+#include <dawg/engine/SmpteTimecode.h>
+#include <dawg/engine/DjCrossfaderEngine.h>
+#include <dawg/engine/SpectralRepairEngine.h>
 
 #include <array>
 #include <atomic>
@@ -6807,6 +6812,230 @@ void testDrumDebleedAudioScrubAndIntraClipModulationSuite()
         require(note.vibratoDepth > 0.5f && note.slideSemitones > 1.0f, "MidiNote holds per-note micro-pitch vibrato and slide");
     }
 }
+
+void testRealtimeProfilingSimdDjCrossfaderSpectralRepairAndSmpteSuite()
+{
+    using namespace dawg::engine;
+
+    // =========================================================================
+    // 1. SIMD Vectorized Math Engine
+    // =========================================================================
+    {
+        constexpr std::size_t count = 64;
+        std::array<float, count> a {};
+        std::array<float, count> b {};
+        std::array<float, count> dest {};
+
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            a[i] = static_cast<float>(i) * 0.1f;
+            b[i] = 1.0f;
+            dest[i] = 2.0f;
+        }
+
+        // Test sumChannels (dest[i] += src[i])
+        SimdMath::sumChannels(dest.data(), a.data(), count);
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            require(std::abs(dest[i] - (2.0f + a[i])) < 1e-5f, "SIMD sumChannels correctness");
+        }
+
+        // Test applyGain
+        SimdMath::applyGain(dest.data(), 0.5f, count);
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            require(std::abs(dest[i] - (2.0f + a[i]) * 0.5f) < 1e-5f, "SIMD applyGain correctness");
+        }
+
+        // Test scaleAndAccumulate
+        std::array<float, count> acc {};
+        acc.fill(2.0f);
+        SimdMath::scaleAndAccumulate(acc.data(), a.data(), 3.0f, count);
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            require(std::abs(acc[i] - (2.0f + a[i] * 3.0f)) < 1e-5f, "SIMD scaleAndAccumulate correctness");
+        }
+
+        // Test applyPanStereo
+        std::array<float, count> left {};
+        std::array<float, count> right {};
+        left.fill(1.0f);
+        right.fill(1.0f);
+        // Center pan (0.0): equal power ~ 0.7071
+        SimdMath::applyPanStereo(left.data(), right.data(), 0.0f, count);
+        require(std::abs(left[0] - right[0]) < 1e-4f, "SIMD stereo pan center balanced");
+        require(left[0] > 0.7f && left[0] < 0.72f, "SIMD stereo pan center power");
+
+        // Hard left (-1.0): left ~ 1.0, right ~ 0.0
+        left.fill(1.0f);
+        right.fill(1.0f);
+        SimdMath::applyPanStereo(left.data(), right.data(), -1.0f, count);
+        require(std::abs(left[0] - 1.0f) < 1e-4f, "SIMD stereo pan hard left has full left");
+        require(std::abs(right[0]) < 1e-4f, "SIMD stereo pan hard left has zero right");
+
+        // Test processBiquad
+        std::array<float, count> filterBuf {};
+        filterBuf[0] = 1.0f; // impulse
+        const float coeffs[5] = { 0.2f, 0.4f, 0.2f, 0.1f, 0.05f };
+        float state[2] = { 0.0f, 0.0f };
+        SimdMath::processBiquad(filterBuf.data(), coeffs, state, 1);
+        require(std::abs(filterBuf[0] - 0.2f) < 1e-5f, "SIMD biquad first sample response");
+        require(std::abs(state[0]) > 0.0f, "SIMD biquad state updated");
+    }
+
+    // =========================================================================
+    // 2. Real-Time DSP Performance Profiler
+    // =========================================================================
+    {
+        DspPerformanceProfiler profiler;
+        profiler.startBlock(256, 48000.0);
+        profiler.recordTrackLoad(101, 150.0f);
+        profiler.recordTrackLoad(102, 250.0f);
+        profiler.recordSlotLoad(101, 0, 50.0f);
+        profiler.endBlock();
+
+        const auto snap = profiler.readSnapshot();
+        require(snap.blockBudgetUs > 5000.0f, "Block budget calculated for 256 @ 48kHz");
+        require(snap.activeTrackCount == 2, "2 active tracks recorded in snapshot");
+        require(snap.tracks[0].trackId == 101, "First track ID recorded");
+        require(std::abs(snap.tracks[0].executionUs - 150.0f) < 1e-3f, "First track execution time");
+        require(snap.tracks[1].trackId == 102, "Second track ID recorded");
+        require(std::abs(snap.tracks[1].executionUs - 250.0f) < 1e-3f, "Second track execution time");
+
+        profiler.reset();
+        const auto resetSnap = profiler.readSnapshot();
+        require(resetSnap.activeTrackCount == 0, "Tracks cleared on reset");
+    }
+
+    // =========================================================================
+    // 3. SMPTE Drop-Frame / Non-Drop Frame Engine & Cue Sheet Generator
+    // =========================================================================
+    {
+        // 24 fps standard cinema
+        const double sr = 48000.0;
+        const auto tc24 = SmpteTimecodeEngine::sampleToTimecode(48000 * 2, sr, SmpteFrameRate::fps24);
+        require(tc24.seconds == 2 && tc24.frames == 0, "2 seconds at 24fps");
+        require(SmpteTimecodeEngine::formatTimecode(tc24, false) == "00:00:02:00", "Formatted 24fps timecode");
+
+        // Round trip test
+        const std::uint64_t roundTripSamples = SmpteTimecodeEngine::timecodeToSample(tc24, sr);
+        require(std::abs(static_cast<std::int64_t>(roundTripSamples) - 48000 * 2) < 2000, "Round-trip timecode to samples");
+
+        // 29.97 drop frame formatting
+        const auto tc2997df = SmpteTimecodeEngine::sampleToTimecode(48000 * 60, sr, SmpteFrameRate::fps29_97_df);
+        const auto formattedDf = SmpteTimecodeEngine::formatTimecode(tc2997df, false);
+        require(formattedDf.find(';') != std::string::npos, "Drop frame timecode uses semicolon separator");
+
+        // Cue sheet generator
+        std::vector<CueSheetEntry> cues = {
+            { .cueNumber = 1, .cueName = "Scene 1 Intro", .startTimecode = "00:00:00:00", .endTimecode = "00:00:10:00", .durationTimecode = "00:00:10:00", .musicalKey = "D min", .bpm = 120.0, .composer = "DAWg Composer", .sceneDescription = "Dialogue begins" },
+            { .cueNumber = 2, .cueName = "Action Cue", .startTimecode = "00:00:10:00", .endTimecode = "00:00:35:00", .durationTimecode = "00:00:25:00", .musicalKey = "A min", .bpm = 140.0, .composer = "DAWg Composer", .sceneDescription = "Chase scene" }
+        };
+
+        const auto csv = SmpteTimecodeEngine::generateCueSheetReportCsv("Cyberpunk Chase Score", cues);
+        require(csv.find("Scene 1 Intro") != std::string::npos, "CSV contains marker name");
+        require(csv.find("Action Cue") != std::string::npos, "CSV contains second marker");
+
+        const auto txt = SmpteTimecodeEngine::generateCueSheetReportText("Cyberpunk Chase Score", cues);
+        require(txt.find("DAWg PRODUCTION CUE SHEET REPORT") != std::string::npos, "Text cue sheet contains title");
+    }
+
+    // =========================================================================
+    // 4. Live DJ Crossfader Engine
+    // =========================================================================
+    {
+        DjCrossfaderEngine dj;
+        dj.setCurve(CrossfaderCurve::smoothEqualPower);
+        dj.setPosition(0.0f); // Center
+        float gainA = 0.0f;
+        float gainB = 0.0f;
+        dj.getBusGains(gainA, gainB);
+        require(std::abs(gainA - gainB) < 1e-4f, "Equal power gains equal at center");
+        require(gainA > 0.70f && gainA < 0.72f, "Equal power gain ~ 0.707 at center");
+
+        dj.setPosition(-1.0f); // Full deck A
+        dj.getBusGains(gainA, gainB);
+        require(std::abs(gainA - 1.0f) < 1e-4f, "Full left gives gain 1.0 to Deck A");
+        require(std::abs(gainB - 0.0f) < 1e-4f, "Full left gives gain 0.0 to Deck B");
+
+        dj.setPosition(1.0f); // Full deck B
+        dj.getBusGains(gainA, gainB);
+        require(std::abs(gainA - 0.0f) < 1e-4f, "Full right gives gain 0.0 to Deck A");
+        require(std::abs(gainB - 1.0f) < 1e-4f, "Full right gives gain 1.0 to Deck B");
+
+        // Linear curve
+        dj.setCurve(CrossfaderCurve::linear);
+        dj.setPosition(0.0f);
+        dj.getBusGains(gainA, gainB);
+        require(std::abs(gainA - 0.5f) < 1e-4f, "Linear crossfader at center is 0.5");
+
+        // Scratch Cut curve
+        dj.setCurve(CrossfaderCurve::scratchCut);
+        dj.setPosition(0.0f);
+        dj.getBusGains(gainA, gainB);
+        require(std::abs(gainA - 1.0f) < 1e-4f, "Scratch cut at center is 1.0");
+
+        // Effective gain per track bus
+        dj.setPosition(0.0f);
+        dj.setCurve(CrossfaderCurve::scratchCut);
+        dj.setTrackAssignment(42, CrossfadeAssign::busA);
+        dj.setTrackAssignment(99, CrossfadeAssign::none);
+        require(std::abs(dj.computeTrackGain(42, 0.8f) - 0.8f) < 1e-4f, "Effective gain for busA");
+        require(std::abs(dj.computeTrackGain(99, 0.8f) - 0.8f) < 1e-4f, "Effective gain for unassigned track");
+
+        // Tempo nudge calculation
+        const double nudgedPlus = DjCrossfaderEngine::calculateTempoNudgeBpm(120.0, 1.0f); // +1%
+        require(std::abs(nudgedPlus - 121.2) < 1e-2, "+1% tempo nudge on 120 BPM");
+        const double nudgedMinus = DjCrossfaderEngine::calculateTempoNudgeBpm(120.0, -1.0f); // -1%
+        require(std::abs(nudgedMinus - 118.8) < 1e-2, "-1% tempo nudge on 120 BPM");
+    }
+
+    // =========================================================================
+    // 5. Spectral Repair Engine (De-Hum, Attenuation, Spectrogram)
+    // =========================================================================
+    {
+        constexpr std::size_t sampleRate = 48000;
+        constexpr std::size_t numSamples = 4096;
+        std::vector<float> audio(numSamples, 0.0f);
+
+        // Mix 50Hz hum and 1000Hz tone
+        for (std::size_t i = 0; i < numSamples; ++i)
+        {
+            const float t = static_cast<float>(i) / static_cast<float>(sampleRate);
+            audio[i] = 0.5f * std::sin(2.0f * 3.14159265f * 50.0f * t) +
+                       0.5f * std::sin(2.0f * 3.14159265f * 1000.0f * t);
+        }
+
+        // Measure initial energy
+        float initialEnergy = 0.0f;
+        for (float s : audio) initialEnergy += s * s;
+
+        // Apply 50Hz de-hum
+        SpectralRegion region {
+            .startTimeSec = 0.0,
+            .endTimeSec = static_cast<double>(numSamples) / static_cast<double>(sampleRate),
+            .lowFrequencyHz = 40.0,
+            .highFrequencyHz = 60.0,
+            .attenuationDb = -24.0f
+        };
+        const bool success = SpectralRepairEngine::repairAudio(
+            audio.data(), numSamples, static_cast<double>(sampleRate),
+            region, SpectralRepairMode::deHum50Hz);
+        require(success, "Spectral repair succeeded");
+
+        float repairedEnergy = 0.0f;
+        for (float s : audio) repairedEnergy += s * s;
+
+        // Hum removed => repaired energy should be noticeably lower than initial energy
+        require(repairedEnergy < initialEnergy, "De-hum reduced 50Hz hum energy");
+
+        // Compute 2D heatmap spectrogram
+        const auto spec = SpectralRepairEngine::computeSpectrogram(audio.data(), numSamples, static_cast<double>(sampleRate), 512, 256);
+        require(! spec.empty(), "Spectrogram generated frames");
+        require(spec[0].size() == 256, "Spectrogram has FFT size / 2 bins");
+        require(spec[0][0] >= 0.0f && spec[0][0] <= 1.0f, "Spectrogram magnitude is normalized");
+    }
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -6987,4 +7216,5 @@ int main()
     testProjectFreezeSlicerAndMonitorCalibrationSuite();
     testHardwareSurfacesPhaseAlignmentAndExportPresetsSuite();
     testDrumDebleedAudioScrubAndIntraClipModulationSuite();
+    testRealtimeProfilingSimdDjCrossfaderSpectralRepairAndSmpteSuite();
 }

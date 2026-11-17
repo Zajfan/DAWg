@@ -1,5 +1,6 @@
 #include <dawg/engine/AudioEngine.h>
 #include <dawg/engine/PlaybackRingBuffer.h>
+#include <dawg/engine/SimdMath.h>
 
 #include "TransportCommandQueue.h"
 
@@ -228,6 +229,8 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
     if (output.channels == nullptr || output.frameCount == 0)
         return;
 
+    m_profiler.startBlock(output.frameCount, m_sampleRate);
+
     for (std::size_t channel = 0; channel < output.channelCount; ++channel)
         if (output.channels[channel] != nullptr)
             std::fill_n(output.channels[channel], output.frameCount, 0.0f);
@@ -249,6 +252,7 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
             }
         }
         m_meterPublisher.publish({});
+        m_profiler.endBlock();
         return;
     }
 
@@ -313,6 +317,8 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
             {
                 if (! isTrackAudible(track, anyTrackSoloed))
                     continue;
+
+                const auto trackStartTime = std::chrono::steady_clock::now();
 
                 const float trackPolarity = track.phaseInvert ? -1.0f : 1.0f;
                 const float trackScale = track.gainLinear * trackPolarity;
@@ -398,6 +404,10 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
                     if (framesRead < overlapFrames)
                         ++m_transportState.underrunCount;
                 }
+
+                const auto trackEndTime = std::chrono::steady_clock::now();
+                const float trackUs = std::chrono::duration<float, std::micro>(trackEndTime - trackStartTime).count();
+                m_profiler.recordTrackLoad(track.trackId, trackUs);
             }
         };
 
@@ -467,6 +477,7 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
                 std::min<std::uint64_t>(
                     currentTimeline,
                     static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())));
+            m_profiler.endBlock();
             return;
         }
 
@@ -500,6 +511,7 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
     }
         m_transportState.samplePosition = saturatingAdvance(
             m_transportState.samplePosition, output.frameCount);
+        m_profiler.endBlock();
         return;
     }
 
@@ -614,6 +626,7 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
     }
     m_transportState.samplePosition = saturatingAdvance(
         m_transportState.samplePosition, output.frameCount);
+    m_profiler.endBlock();
 }
 
 bool AudioEngine::isPrepared() const noexcept
