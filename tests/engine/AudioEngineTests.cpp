@@ -90,6 +90,14 @@
 #include <dawg/engine/SmpteTimecode.h>
 #include <dawg/engine/DjCrossfaderEngine.h>
 #include <dawg/engine/SpectralRepairEngine.h>
+#include <dawg/engine/AutomationSubLaneEngine.h>
+#include <dawg/engine/MixSnapshotMorpher.h>
+#include <dawg/engine/dsp/ArpeggiatorEngine.h>
+#include <dawg/engine/dsp/ChordPadProgressionEngine.h>
+#include <dawg/engine/dsp/CvGateEurorackNode.h>
+#include <dawg/engine/dsp/CvPitchCalibrator.h>
+#include <dawg/engine/dsp/DrumSliceEngine.h>
+#include "../../ui/shell/WorkspaceLayoutManager.h"
 
 #include <array>
 #include <atomic>
@@ -7036,6 +7044,271 @@ void testRealtimeProfilingSimdDjCrossfaderSpectralRepairAndSmpteSuite()
         require(spec[0][0] >= 0.0f && spec[0][0] <= 1.0f, "Spectrogram magnitude is normalized");
     }
 }
+
+void testWorkspaceElasticWarpAutomationArpAndEurorackSuite()
+{
+    using namespace dawg::engine;
+    using namespace dawg::engine::dsp;
+    using namespace dawg::ui;
+
+    // =========================================================================
+    // 1. Workspace Presets & Dual-Screen Layout System (Option 1)
+    // =========================================================================
+    {
+        WorkspaceLayoutState state;
+        state.presetName = "Mixing Console";
+        state.dockMode = 0; // mixer
+        state.secondaryDockMode = 4;
+        state.isDualDockEnabled = true;
+        state.dockHeight = 380;
+        state.isDockMaximized = false;
+        state.isInspectorVisible = true;
+        state.inspectorWidth = 240;
+        state.centerViewMode = 0;
+        state.detachedMixer = true;
+
+        const auto json = WorkspaceLayoutManager::serializeToJson(state);
+        require(! json.empty(), "Serialized workspace JSON");
+        require(json.find("\"presetName\": \"Mixing Console\"") != std::string::npos, "JSON contains preset name");
+
+        const auto loaded = WorkspaceLayoutManager::deserializeFromJson(json);
+        require(loaded.presetName == "Mixing Console", "Deserialized preset name matches");
+        require(loaded.dockHeight == 380, "Deserialized dock height matches");
+        require(loaded.isDualDockEnabled, "Deserialized dual dock flag matches");
+        require(loaded.detachedMixer, "Deserialized detached mixer flag matches");
+
+        const auto arrangePreset = WorkspaceLayoutManager::getPresetArrange();
+        require(arrangePreset.presetName == "Arrange" && arrangePreset.dockHeight == 160, "Preset Arrange configuration");
+        const auto mixPreset = WorkspaceLayoutManager::getPresetMix();
+        require(mixPreset.presetName == "Mix" && mixPreset.dockHeight == 420, "Preset Mix configuration");
+        const auto editPreset = WorkspaceLayoutManager::getPresetEdit();
+        require(editPreset.presetName == "Edit" && editPreset.dockMode == 1, "Preset Edit configuration");
+        const auto modularPreset = WorkspaceLayoutManager::getPresetModular();
+        require(modularPreset.presetName == "Modular" && modularPreset.isDockMaximized, "Preset Modular configuration");
+        const auto masterPreset = WorkspaceLayoutManager::getPresetMaster();
+        require(masterPreset.presetName == "Master" && masterPreset.dockMode == 8, "Preset Master configuration");
+    }
+
+    // =========================================================================
+    // 2. Arrangement Timeline Elastic Audio Warping & Drum Slice Engine (Option 2)
+    // =========================================================================
+    {
+        constexpr std::size_t sr = 48000;
+        constexpr std::size_t numSamples = 48000; // 1 second @ 120 bpm = 2 beats
+        std::vector<float> audio(numSamples, 0.0f);
+
+        // Inject 4 distinct drum transients at samples 0, 12000, 24000, 36000
+        for (std::size_t t : { std::size_t(0), std::size_t(12000), std::size_t(24000), std::size_t(36000) })
+        {
+            for (std::size_t i = 0; i < 200 && (t + i) < numSamples; ++i)
+            {
+                audio[t + i] = 0.9f * (1.0f - static_cast<float>(i) / 200.0f);
+            }
+        }
+
+        const auto sliceRes = DrumSliceEngine::sliceLoopToDrumKit(
+            audio.data(), nullptr, numSamples, static_cast<double>(sr), 120.0, nullptr, 16);
+
+        require(sliceRes.sliceCount >= 2, "Transient detection found drum slices");
+        require(! sliceRes.generatedNotes.empty(), "Generated MIDI notes from slices");
+        require(sliceRes.generatedNotes[0].pitch == 36, "First drum slice mapped to C1 (MIDI 36)");
+
+        // Warp Marker management and quantization
+        std::vector<SlicedWarpMarker> markers;
+        const auto idx0 = DrumSliceEngine::addWarpMarker(markers, 12000, 120.0, static_cast<double>(sr));
+        require(idx0 == 0 && markers.size() == 1, "Warp marker added");
+        require(std::abs(markers[0].beatPosition - 0.5) < 1e-3, "Warp marker beat position @ 12000 samples is 0.5 beats");
+
+        // Add loose timing marker slightly off 16th grid (0.28 instead of 0.25)
+        markers[0].beatPosition = 0.28;
+        DrumSliceEngine::quantizeWarpMarkers(markers, 0.25, 1.0f);
+        require(std::abs(markers[0].beatPosition - 0.25) < 1e-4, "Warp marker quantized to 16th grid (0.25)");
+
+        const bool removed = DrumSliceEngine::removeWarpMarker(markers, 0);
+        require(removed && markers.empty(), "Warp marker removed");
+    }
+
+    // =========================================================================
+    // 3. Expandable Automation Sub-Lanes & Mix Snapshot Morpher (Option 3)
+    // =========================================================================
+    {
+        // Line ramp
+        const auto linePoints = AutomationSubLaneEngine::generateLine(0, 0.1f, 1000, 0.9f);
+        require(linePoints.size() == 2, "Line has 2 endpoints");
+        require(linePoints[0].value == 0.1f && linePoints[1].value == 0.9f, "Line endpoints match");
+
+        // Bezier tension curve
+        const auto bezierPoints = AutomationSubLaneEngine::generateBezier(0, 0.0f, 1000, 1.0f, 0.5f, 10);
+        require(bezierPoints.size() == 11, "Bezier generated 11 points for 10 steps");
+        require(bezierPoints[5].value > 0.0f && bezierPoints[5].value < 1.0f, "Bezier intermediate value");
+
+        // Sine LFO
+        const auto sinePoints = AutomationSubLaneEngine::generateSineLfo(0, 48000, 48000.0, 2.0, 0.2f, 0.8f, 16);
+        require(! sinePoints.empty(), "Sine LFO points generated");
+        for (const auto& p : sinePoints)
+        {
+            require(p.value >= 0.19f && p.value <= 0.81f, "Sine LFO bounds");
+        }
+
+        // Saw LFO
+        const auto sawPoints = AutomationSubLaneEngine::generateSawLfo(0, 48000, 48000.0, 4.0, 0.0f, 1.0f);
+        require(sawPoints.size() >= 8, "Saw LFO generated cycles");
+
+        // Pencil gesture point thinning
+        std::vector<SubLanePoint> noisyPoints;
+        for (std::size_t i = 0; i < 100; ++i)
+        {
+            noisyPoints.push_back(SubLanePoint {
+                .samplePosition = i * 10,
+                .value = 0.5f + (i % 2 == 0 ? 0.001f : -0.001f),
+                .tension = 0.0f
+            });
+        }
+        const auto thinned = AutomationSubLaneEngine::generatePencil(noisyPoints, 64, 0.01f);
+        require(thinned.size() < noisyPoints.size(), "Pencil thinning reduced redundant points");
+
+        // Mix Snapshot Morpher
+        MixSnapshot snapA;
+        snapA.name = "Verse Mix";
+        snapA.tracks = {
+            TrackMixState { .trackId = 1, .volume = 0.2f, .pan = -0.6f, .sendA = 0.1f, .sendB = 0.0f, .macroKnobs = {0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f} }
+        };
+
+        MixSnapshot snapB;
+        snapB.name = "Drop Mix";
+        snapB.tracks = {
+            TrackMixState { .trackId = 1, .volume = 0.9f, .pan = 0.4f, .sendA = 0.7f, .sendB = 0.5f, .macroKnobs = {0.9f, 0.8f, 0.7f, 0.6f, 0.5f, 0.4f, 0.3f, 0.2f} }
+        };
+
+        MixSnapshotMorpher morpher;
+        morpher.setSnapshotA(snapA);
+        morpher.setSnapshotB(snapB);
+
+        // Morph at 0.0 (100% A)
+        const auto morph0 = morpher.morph(0.0f);
+        require(std::abs(morph0[0].volume - 0.2f) < 1e-4f, "Morph 0.0 volume matches A");
+        require(std::abs(morph0[0].pan - -0.6f) < 1e-4f, "Morph 0.0 pan matches A");
+
+        // Morph at 1.0 (100% B)
+        const auto morph1 = morpher.morph(1.0f);
+        require(std::abs(morph1[0].volume - 0.9f) < 1e-4f, "Morph 1.0 volume matches B");
+        require(std::abs(morph1[0].pan - 0.4f) < 1e-4f, "Morph 1.0 pan matches B");
+
+        // Morph at 0.5 (50% midpoint)
+        const auto morphHalf = morpher.morph(0.5f);
+        require(std::abs(morphHalf[0].volume - 0.55f) < 1e-4f, "Morph 0.5 volume is exact average");
+        require(std::abs(morphHalf[0].pan - -0.1f) < 1e-4f, "Morph 0.5 pan is exact average");
+    }
+
+    // =========================================================================
+    // 4. Generative MIDI Suite & Chord Pad Progression Engine (Option 4)
+    // =========================================================================
+    {
+        // Arpeggiator
+        ArpeggiatorEngine arp;
+        arp.setPattern(ArpPattern::up);
+        arp.setOctaveRange(2);
+        arp.setGateLength(0.75f);
+        arp.setSwing(0.1f);
+        arp.setRatcheting(2);
+
+        const std::vector<std::uint8_t> cMajor = { 60, 64, 67 }; // C, E, G
+        const auto arpSteps = arp.generateSequence(cMajor, 8, 0.25);
+        require(arpSteps.size() == 8, "Arpeggiator generated 8 steps");
+        require(arpSteps[0].pitch == 60, "Step 0 is C4");
+        require(arpSteps[1].pitch == 64, "Step 1 is E4");
+        require(arpSteps[2].pitch == 67, "Step 2 is G4");
+        require(arpSteps[3].pitch == 72, "Step 3 octaves up to C5");
+        require(arpSteps[0].ratchetCount == 2, "Ratchet setting applied");
+
+        // Euclidean Rhythms (Bjorklund algorithm)
+        const auto euc = EuclideanRhythmEngine::generate(16, 5, 0);
+        require(euc.size() == 16, "Euclidean rhythm has 16 steps");
+        int pulseCount = 0;
+        for (bool b : euc) if (b) ++pulseCount;
+        require(pulseCount == 5, "Euclidean rhythm has exactly 5 pulses");
+
+        // Chord Pad Matrix (16 pads)
+        const auto chordPads = ChordPadProgressionEngine::generateProgressionMatrix(
+            0, ChordScale::major, ChordVoicing::rootPosition);
+        require(chordPads.size() == 16, "16 chord pads generated in matrix");
+        require(chordPads[0].chordName.find("7") != std::string::npos, "Pad 0 is a 7th chord");
+        require(chordPads[8].romanNumeral == "ii7", "Pad 8 starts cadence row (ii7)");
+        require(chordPads[9].romanNumeral == "V7", "Pad 9 is dominant V7");
+        require(chordPads[10].romanNumeral == "Imaj7", "Pad 10 is tonic Imaj7");
+
+        // Drop-2 voicing
+        const std::vector<std::uint8_t> root4Notes = { 60, 64, 67, 71 }; // C, E, G, B
+        const auto drop2Notes = ChordPadProgressionEngine::applyVoicing(root4Notes, ChordVoicing::drop2);
+        require(drop2Notes.size() == 4, "Drop 2 preserves 4 notes");
+        require(drop2Notes[0] == 55, "G dropped down one octave (67 - 12 = 55)");
+
+        // Strum emulation
+        const auto strum = ChordPadProgressionEngine::generateStrum(root4Notes, 30.0, false, 100);
+        require(strum.size() == 4, "Strum contains 4 notes");
+        require(strum[0].timeOffsetMs == 0.0, "First strum note starts at 0ms");
+        require(strum[3].timeOffsetMs > 0.0, "Last strum note offset by strum duration");
+    }
+
+    // =========================================================================
+    // 5. Hardware Eurorack CV/Gate & DC-Coupled Audio Interface Bridge (Option 5)
+    // =========================================================================
+    {
+        CvGateEurorackNode cvNode;
+        require(cvNode.prepare(48000.0, 256, 4), "CvGateEurorackNode prepared successfully");
+
+        std::array<float, 256> ch0 {};
+        std::array<float, 256> ch1 {};
+        std::array<float, 256> ch2 {};
+        std::array<float, 256> ch3 {};
+        std::array<float*, 4> channelPointers = { ch0.data(), ch1.data(), ch2.data(), ch3.data() };
+
+        ProcessContext ctx {
+            .audio = AudioBufferView {
+                .channels = channelPointers.data(),
+                .channelCount = 4,
+                .frameCount = 256
+            },
+            .midi = MidiBufferView {},
+            .sampleRate = 48000.0,
+            .sidechain = AudioBufferView {}
+        };
+
+        // Note On C5 (MIDI 72) -> 1.0V over 5.0V max = 0.2 normalized
+        cvNode.noteOn(72, 100);
+        cvNode.process(ctx);
+
+        require(std::abs(ch0[0] - 0.2f) < 1e-3f, "1V/Oct CV output for C5 (1.0V / 5.0V max = 0.2)");
+        require(ch1[0] == 1.0f, "Gate output active (1.0) on Note On");
+
+        // Note Off
+        cvNode.noteOff(72);
+        cvNode.process(ctx);
+        require(ch1[0] == 0.0f, "Gate output idle (0.0) on Note Off");
+
+        // Pitch Calibrator test
+        require(std::abs(CvPitchCalibrator::midiPitchToFrequency(69.0) - 440.0) < 1e-4, "A4 is 440 Hz");
+        require(std::abs(CvPitchCalibrator::frequencyToMidiPitch(440.0) - 69.0) < 1e-4, "440 Hz is MIDI 69");
+
+        // Synthesize 440 Hz test tone
+        std::array<float, 2048> synthTone {};
+        for (std::size_t i = 0; i < 2048; ++i)
+        {
+            synthTone[i] = std::sin(2.0f * 3.14159265f * 440.0f * (static_cast<float>(i) / 48000.0f));
+        }
+
+        const double detectedFreq = CvPitchCalibrator::detectFundamentalFrequency(synthTone.data(), 2048, 48000.0);
+        require(std::abs(detectedFreq - 440.0) < 5.0, "Pitch calibrator detected ~440 Hz fundamental");
+
+        const auto measurement = CvPitchCalibrator::calibrateNote(69, synthTone.data(), 2048, 48000.0);
+        require(measurement.targetMidiNote == 69, "Target note recorded");
+        require(std::abs(measurement.voltageCorrectionOffset) < 0.1f, "Calibration error minimal for clean 440Hz tone");
+
+        std::vector<CalibrationMeasurement> calList = { measurement };
+        CvPitchCalibrator::applyCalibrationCurve(cvNode, calList);
+        require(cvNode.getCalibrationOffset(69) == measurement.voltageCorrectionOffset, "Calibration curve applied to node");
+    }
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -7217,4 +7490,5 @@ int main()
     testHardwareSurfacesPhaseAlignmentAndExportPresetsSuite();
     testDrumDebleedAudioScrubAndIntraClipModulationSuite();
     testRealtimeProfilingSimdDjCrossfaderSpectralRepairAndSmpteSuite();
+    testWorkspaceElasticWarpAutomationArpAndEurorackSuite();
 }

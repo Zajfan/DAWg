@@ -3,6 +3,7 @@
 #include "PluginWindow.h"
 #include "SpectralRepairDialog.h"
 #include "VideoPlaybackWindow.h"
+#include "WorkspaceLayoutManager.h"
 #include <dawg/engine/SmpteTimecode.h>
 
 #include <utility>
@@ -1291,7 +1292,25 @@ void MainEditorView::applyWorkspacePreset(WorkspacePreset preset)
 
 void MainEditorView::saveCurrentWorkspace()
 {
-    // Saves window arrangement to project memory
+    WorkspaceLayoutState state;
+    state.presetName = "Custom User Preset";
+    state.dockMode = static_cast<std::uint8_t>(m_dockMode);
+    state.secondaryDockMode = static_cast<std::uint8_t>(m_secondaryDockMode);
+    state.isDualDockEnabled = m_dualDockEnabled;
+    state.dockHeight = m_dockHeight;
+    state.isDockMaximized = m_dockMaximized;
+    state.isInspectorVisible = m_inspectorVisible;
+    state.inspectorWidth = m_inspectorWidth;
+    state.centerViewMode = (m_centerViewMode == CenterViewMode::arrangement ? 0 : 1);
+    state.detachedMixer = isPanelDetached(DetachablePanel::mixer);
+    state.detachedPianoRoll = isPanelDetached(DetachablePanel::pianoRoll);
+    state.detachedModular = isPanelDetached(DetachablePanel::wireGrid);
+    state.detachedMastering = isPanelDetached(DetachablePanel::masteringSuite);
+
+    const auto prefDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory).getChildFile("DAWg");
+    if (! prefDir.exists()) prefDir.createDirectory();
+    const auto filePath = prefDir.getChildFile("custom_workspace.json").getFullPathName().toStdString();
+    WorkspaceLayoutManager::saveToFile(filePath, state);
 }
 
 void MainEditorView::setCanvasScale(float scaleFactor)
@@ -1685,7 +1704,7 @@ bool MainEditorView::keyPressed(const juce::KeyPress& key)
         if (key.getKeyCode() == '7') { applyWorkspacePreset(WorkspacePreset::livePerformanceRig); return true; }
     }
 
-    // Function key workspace presets
+    // Function key workspace presets (F1-F5 primary studio modes)
     if (key.getKeyCode() == juce::KeyPress::F1Key)
     {
         applyWorkspacePreset(WorkspacePreset::songArrangement);
@@ -1693,17 +1712,32 @@ bool MainEditorView::keyPressed(const juce::KeyPress& key)
     }
     if (key.getKeyCode() == juce::KeyPress::F2Key)
     {
-        applyWorkspacePreset(WorkspacePreset::dualScreenStudio);
+        applyWorkspacePreset(WorkspacePreset::mixingConsole);
         return true;
     }
     if (key.getKeyCode() == juce::KeyPress::F3Key)
     {
-        applyWorkspacePreset(WorkspacePreset::patternLabBeatmaker);
+        applyWorkspacePreset(WorkspacePreset::patternLabBeatmaker); // Edit / Piano Roll
         return true;
     }
     if (key.getKeyCode() == juce::KeyPress::F4Key)
     {
+        applyWorkspacePreset(WorkspacePreset::soundDesignModular);
+        return true;
+    }
+    if (key.getKeyCode() == juce::KeyPress::F5Key)
+    {
+        applyWorkspacePreset(WorkspacePreset::masteringSuite);
+        return true;
+    }
+    if (key.getKeyCode() == juce::KeyPress::F6Key)
+    {
         applyWorkspacePreset(WorkspacePreset::livePerformanceRig);
+        return true;
+    }
+    if (key.getKeyCode() == juce::KeyPress::F7Key)
+    {
+        applyWorkspacePreset(WorkspacePreset::dualScreenStudio);
         return true;
     }
     if (key.getKeyCode() == juce::KeyPress::F11Key)

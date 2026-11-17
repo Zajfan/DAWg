@@ -56,6 +56,8 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/SessionMatrixView.h
     ../../ui/shell/TrackInspectorView.cpp
     ../../ui/shell/TrackInspectorView.h
+    ../../ui/shell/WorkspaceLayoutManager.cpp
+    ../../ui/shell/WorkspaceLayoutManager.h
     ../../ui/shell/VideoPlaybackWindow.cpp
     ../../ui/shell/VideoPlaybackWindow.h
     ../../ui/shell/SpectralRepairDialog.cpp

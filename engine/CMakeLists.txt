@@ -3,6 +3,7 @@ find_package(Threads REQUIRED)
 add_library(dawg_engine_core STATIC
     src/AudioEngine.cpp
     src/AutomationCurveEvaluator.cpp
+    src/AutomationSubLaneEngine.cpp
     src/ConsoleRoutingMatrix.cpp
     src/DjCrossfaderEngine.cpp
     src/DspGraph.cpp
@@ -13,6 +14,7 @@ add_library(dawg_engine_core STATIC
     src/Metronome.cpp
     src/MidiClockGenerator.cpp
     src/MidiControllerManager.cpp
+    src/MixSnapshotMorpher.cpp
     src/MultiTrackRecordingEngine.cpp
     src/PlaybackRingBuffer.cpp
     src/RecordRingBuffer.cpp
@@ -28,14 +30,19 @@ add_library(dawg_engine_core STATIC
     src/dsp/AcousticDrumBleedCancellationNode.cpp
     src/dsp/AmbisonicsProcessorNode.cpp
     src/dsp/AnalogLadderRingModSynthNode.cpp
+    src/dsp/ArpeggiatorEngine.cpp
     src/dsp/AudioScrubEngine.cpp
     src/dsp/AudioTranscriber.cpp
     src/dsp/AudioWarpEngine.cpp
     src/dsp/BinauralSpatialPannerNode.cpp
     src/dsp/BrickwallLimiterNode.cpp
+    src/dsp/ChordPadProgressionEngine.cpp
     src/dsp/ConvolutionReverbNode.cpp
+    src/dsp/CvGateEurorackNode.cpp
+    src/dsp/CvPitchCalibrator.cpp
     src/dsp/DynamicsCompressorNode.cpp
     src/dsp/DrumPadSamplerNode.cpp
+    src/dsp/DrumSliceEngine.cpp
     src/dsp/DynamicCabinetSimulatorNode.cpp
     src/dsp/DspWireGrid.cpp
     src/dsp/DynamicLinearPhaseEQNode.cpp

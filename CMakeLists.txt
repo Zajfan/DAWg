@@ -26,8 +26,11 @@ if(DAWG_BUILD_TESTS)
     include(CTest)
     enable_testing()
 
-    add_executable(dawg_engine_core_tests tests/engine/AudioEngineTests.cpp)
-    target_include_directories(dawg_engine_core_tests PRIVATE platform/juce services/media/include)
+    add_executable(dawg_engine_core_tests
+        tests/engine/AudioEngineTests.cpp
+        ui/shell/WorkspaceLayoutManager.cpp
+    )
+    target_include_directories(dawg_engine_core_tests PRIVATE platform/juce services/media/include ui/shell)
     target_link_libraries(dawg_engine_core_tests PRIVATE dawg_engine_core dawg_services_media)
     target_compile_features(dawg_engine_core_tests PRIVATE cxx_std_20)
     target_compile_options(dawg_engine_core_tests PRIVATE
