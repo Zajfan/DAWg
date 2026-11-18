@@ -155,9 +155,20 @@ MainEditorView::MainEditorView(EditorViewModel model,
             case project::DspNodeType::tnhcSynth: kind = DspEditorKind::synth; break;
             case project::DspNodeType::tnhcReverb: kind = DspEditorKind::reverb; break;
             case project::DspNodeType::tnhcDelay: kind = DspEditorKind::delay; break;
+            case project::DspNodeType::resonanceSuppressor: kind = DspEditorKind::resonanceSuppressor; break;
+            case project::DspNodeType::multibandStereoImager: kind = DspEditorKind::multibandImager; break;
+            case project::DspNodeType::linearPhaseMasteringEq: kind = DspEditorKind::linearPhaseEq; break;
+            case project::DspNodeType::buchlaComplexSynth: kind = DspEditorKind::buchlaComplexSynth; break;
             case project::DspNodeType::brickwallLimiter:
             case project::DspNodeType::clapPlugin:
             case project::DspNodeType::drumPadSampler:
+            case project::DspNodeType::vectorSequencer:
+            case project::DspNodeType::physicalModelSynth:
+            case project::DspNodeType::granularCloud:
+            case project::DspNodeType::analogLadderSynth:
+            case project::DspNodeType::tubeTransformer:
+            case project::DspNodeType::analogDegrader:
+            case project::DspNodeType::rayTracingReverb:
                 return;
             }
             DspEditorWindow::open(kind, trk->name);
@@ -475,6 +486,28 @@ MainEditorView::MainEditorView(EditorViewModel model,
                 nodeType = project::DspNodeType::tnhcReverb;
             else if (plugin.id == "tnhc.stereo_delay")
                 nodeType = project::DspNodeType::tnhcDelay;
+            else if (plugin.id == "dawg.effect.dynamic_resonance")
+                nodeType = project::DspNodeType::resonanceSuppressor;
+            else if (plugin.id == "dawg.effect.multiband_imager")
+                nodeType = project::DspNodeType::multibandStereoImager;
+            else if (plugin.id == "dawg.effect.linear_phase_eq")
+                nodeType = project::DspNodeType::linearPhaseMasteringEq;
+            else if (plugin.id == "dawg.synth.buchla_complex")
+                nodeType = project::DspNodeType::buchlaComplexSynth;
+            else if (plugin.id == "dawg.synth.vector_sequencer")
+                nodeType = project::DspNodeType::vectorSequencer;
+            else if (plugin.id == "dawg.synth.physical_model")
+                nodeType = project::DspNodeType::physicalModelSynth;
+            else if (plugin.id == "dawg.synth.granular_cloud")
+                nodeType = project::DspNodeType::granularCloud;
+            else if (plugin.id == "dawg.synth.analog_ladder")
+                nodeType = project::DspNodeType::analogLadderSynth;
+            else if (plugin.id == "dawg.effect.vintage_tube")
+                nodeType = project::DspNodeType::tubeTransformer;
+            else if (plugin.id == "dawg.effect.analog_degrader")
+                nodeType = project::DspNodeType::analogDegrader;
+            else if (plugin.id == "dawg.effect.ray_tracing_reverb")
+                nodeType = project::DspNodeType::rayTracingReverb;
 
             m_commandHandler(project::AddTrackInsert {
                 targetTrack.id,

@@ -23,6 +23,10 @@ DspEditorComponent::DspEditorComponent(DspEditorKind kind, std::string title)
         case DspEditorKind::synth: m_title = "TNHC Polyphonic Subtractive Synth"; break;
         case DspEditorKind::reverb: m_title = "Studio Algorithmic Reverb"; break;
         case DspEditorKind::delay: m_title = "Tempo-Synced Stereo Delay"; break;
+        case DspEditorKind::resonanceSuppressor: m_title = "ResoTamer Dynamic Resonance Suppressor"; break;
+        case DspEditorKind::multibandImager: m_title = "StereoScope Mastering Multiband Imager"; break;
+        case DspEditorKind::linearPhaseEq: m_title = "MasterPhase Dynamic Linear-Phase EQ"; break;
+        case DspEditorKind::buchlaComplexSynth: m_title = "Complex 259 West-Coast Synthesizer"; break;
         }
     }
 
@@ -63,6 +67,62 @@ void DspEditorComponent::timerCallback()
         const float cycle = std::sin(m_simPhase * 2.0f);
         m_compGainReductionDb = (cycle > 0.3f) ? (cycle * 8.0f) : 0.0f;
     }
+    else if (m_kind == DspEditorKind::resonanceSuppressor)
+    {
+        // 128 FFT bins simulation with sharp resonances
+        for (std::size_t i = 0; i < m_resoFftBins.size(); ++i)
+        {
+            const float norm = static_cast<float>(i) / static_cast<float>(m_resoFftBins.size());
+            const float base = 0.6f * std::exp(-norm * 2.2f) + 0.05f;
+            // Offending resonances at bin 25 (~500Hz), bin 60 (~2.8kHz), bin 95 (~7kHz)
+            const float res1 = 0.45f * std::exp(-std::pow((norm - 0.2f) * 35.0f, 2.0f)) * (0.8f + 0.2f * std::sin(m_simPhase * 4.0f));
+            const float res2 = 0.55f * std::exp(-std::pow((norm - 0.48f) * 40.0f, 2.0f)) * (0.85f + 0.15f * std::cos(m_simPhase * 5.0f));
+            const float res3 = 0.35f * std::exp(-std::pow((norm - 0.75f) * 30.0f, 2.0f)) * (0.9f + 0.1f * std::sin(m_simPhase * 3.0f));
+            const float noise = (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX)) * 0.04f;
+
+            m_resoFftBins[i] = std::clamp(base + res1 + res2 + res3 + noise, 0.02f, 0.98f);
+            // ERB psychoacoustic masking threshold curve (smoother, dynamic tilt)
+            m_resoErbMask[i] = std::clamp(base * 1.15f + 0.08f + 0.03f * std::sin(m_simPhase + norm * 3.0f), 0.05f, 0.92f);
+        }
+    }
+    else if (m_kind == DspEditorKind::multibandImager)
+    {
+        m_imagerCorrelation = std::clamp(0.75f + 0.22f * std::sin(m_simPhase * 0.8f), -1.0f, 1.0f);
+        // Lissajous stereo orbital points
+        for (std::size_t i = 0; i < m_lissajousPoints.size(); ++i)
+        {
+            const float theta = m_simPhase * 2.5f + static_cast<float>(i) * (2.0f * static_cast<float>(std::numbers::pi) / static_cast<float>(m_lissajousPoints.size()));
+            const float spread = 0.65f + 0.35f * std::sin(m_simPhase * 1.2f + static_cast<float>(i));
+            const float l = std::sin(theta) * 0.7f;
+            const float r = std::cos(theta * 1.02f + 0.4f) * spread * 0.7f;
+            // Rotate 45 deg for M/S goniometer projection
+            const float x = (r - l) * 0.7071f;
+            const float y = (r + l) * 0.7071f;
+            m_lissajousPoints[i] = juce::Point<float>(x, y);
+        }
+    }
+    else if (m_kind == DspEditorKind::linearPhaseEq)
+    {
+        // Dynamic gain reduction modulation on bands 2 and 4
+        m_masterEqBands[1].dynReductionDb = -1.5f * std::max(0.0f, std::sin(m_simPhase * 3.5f));
+        m_masterEqBands[3].dynReductionDb = -2.8f * std::max(0.0f, std::sin(m_simPhase * 2.8f + 0.5f));
+    }
+    else if (m_kind == DspEditorKind::buchlaComplexSynth)
+    {
+        // Vactrol decay envelope
+        m_vactrolDecayEnvelope = std::exp(-std::fmod(m_simPhase * 0.7f, 1.0f) * 3.2f);
+        // Wavefolder oscilloscope trace: TzFM + diode folding
+        for (std::size_t i = 0; i < m_oscilloscopeTrace.size(); ++i)
+        {
+            const float t = static_cast<float>(i) / static_cast<float>(m_oscilloscopeTrace.size() - 1);
+            const float carrierPhase = t * 2.0f * static_cast<float>(std::numbers::pi);
+            const float modulator = std::sin(carrierPhase * 2.0f + m_simPhase);
+            const float raw = std::sin(carrierPhase + 1.8f * modulator) * m_wavefoldDrive + m_wavefoldSymmetry;
+            // Cascaded diode fold function: sin(pi * x)
+            const float folded = std::sin(raw * static_cast<float>(std::numbers::pi) * 0.5f);
+            m_oscilloscopeTrace[i] = juce::Point<float>(t, folded);
+        }
+    }
 
     repaint();
 }
@@ -93,6 +153,10 @@ void DspEditorComponent::paint(juce::Graphics& g)
     case DspEditorKind::synth: paintSynth(g, area.reduced(4)); break;
     case DspEditorKind::reverb: paintReverb(g, area.reduced(4)); break;
     case DspEditorKind::delay: paintDelay(g, area.reduced(4)); break;
+    case DspEditorKind::resonanceSuppressor: paintResonanceSuppressor(g, area.reduced(4)); break;
+    case DspEditorKind::multibandImager: paintMultibandImager(g, area.reduced(4)); break;
+    case DspEditorKind::linearPhaseEq: paintLinearPhaseEq(g, area.reduced(4)); break;
+    case DspEditorKind::buchlaComplexSynth: paintBuchlaComplexSynth(g, area.reduced(4)); break;
     }
 }
 
@@ -419,6 +483,417 @@ void DspEditorComponent::paintDelay(juce::Graphics& g, juce::Rectangle<int> boun
 }
 
 // ----------------------------------------------------------------------------
+// ResoTamer Dynamic Resonance Suppressor Visualizer
+// ----------------------------------------------------------------------------
+void DspEditorComponent::paintResonanceSuppressor(juce::Graphics& g, juce::Rectangle<int> bounds)
+{
+    g.setColour(juce::Colour::fromRGB(15, 17, 21));
+    g.fillRect(bounds);
+
+    const float w = static_cast<float>(bounds.getWidth());
+    const float h = static_cast<float>(bounds.getHeight());
+    const float scopeH = h - 30.0f;
+
+    // Grid lines for frequency (100Hz, 1kHz, 5kHz, 10kHz)
+    constexpr std::array<float, 4> freqs = {100.0f, 1000.0f, 5000.0f, 10000.0f};
+    g.setColour(juce::Colour::fromRGB(32, 36, 45));
+    for (float f : freqs)
+    {
+        const float normX = (std::log10(f) - std::log10(20.0f)) / (std::log10(20000.0f) - std::log10(20.0f));
+        const float x = bounds.getX() + normX * w;
+        g.drawVerticalLine(static_cast<int>(x), static_cast<float>(bounds.getY()), static_cast<float>(bounds.getY() + scopeH));
+    }
+
+    // Decibel grid
+    for (int db = -36; db <= 0; db += 12)
+    {
+        const float y = bounds.getY() + scopeH * (static_cast<float>(-db) / 48.0f);
+        g.setColour(juce::Colour::fromRGB(30, 34, 42));
+        g.drawHorizontalLine(static_cast<int>(y), static_cast<float>(bounds.getX()), static_cast<float>(bounds.getRight()));
+    }
+
+    // FFT Spectrum Fill
+    juce::Path spectrumPath;
+    spectrumPath.startNewSubPath(static_cast<float>(bounds.getX()), static_cast<float>(bounds.getY() + scopeH));
+    for (std::size_t i = 0; i < m_resoFftBins.size(); ++i)
+    {
+        const float x = bounds.getX() + (static_cast<float>(i) / static_cast<float>(m_resoFftBins.size() - 1)) * w;
+        const float y = bounds.getY() + scopeH * (1.0f - m_resoFftBins[i] * 0.85f);
+        spectrumPath.lineTo(x, y);
+    }
+    spectrumPath.lineTo(static_cast<float>(bounds.getRight()), static_cast<float>(bounds.getY() + scopeH));
+    spectrumPath.closeSubPath();
+
+    juce::ColourGradient grad(juce::Colour::fromRGBA(35, 210, 220, 60), static_cast<float>(bounds.getX()), bounds.getY() + scopeH * 0.3f,
+                              juce::Colour::fromRGBA(15, 60, 100, 15), static_cast<float>(bounds.getX()), bounds.getY() + scopeH, false);
+    g.setGradientFill(grad);
+    g.fillPath(spectrumPath);
+
+    // Spectrum Outline
+    g.setColour(juce::Colour::fromRGBA(40, 220, 235, 180));
+    juce::Path strokePath;
+    for (std::size_t i = 0; i < m_resoFftBins.size(); ++i)
+    {
+        const float x = bounds.getX() + (static_cast<float>(i) / static_cast<float>(m_resoFftBins.size() - 1)) * w;
+        const float y = bounds.getY() + scopeH * (1.0f - m_resoFftBins[i] * 0.85f);
+        if (i == 0) strokePath.startNewSubPath(x, y); else strokePath.lineTo(x, y);
+    }
+    g.strokePath(strokePath, juce::PathStrokeType(1.2f));
+
+    // Psychoacoustic ERB Masking Curve
+    juce::Path erbPath;
+    for (std::size_t i = 0; i < m_resoErbMask.size(); ++i)
+    {
+        const float x = bounds.getX() + (static_cast<float>(i) / static_cast<float>(m_resoErbMask.size() - 1)) * w;
+        const float y = bounds.getY() + scopeH * (1.0f - m_resoErbMask[i] * 0.85f);
+        if (i == 0) erbPath.startNewSubPath(x, y); else erbPath.lineTo(x, y);
+    }
+    g.setColour(juce::Colour::fromRGB(245, 190, 50));
+    g.strokePath(erbPath, juce::PathStrokeType(1.5f));
+
+    // Resonance Suppression Cut Markers
+    for (std::size_t i = 2; i < m_resoFftBins.size() - 2; ++i)
+    {
+        if (m_resoFftBins[i] > m_resoErbMask[i] + 0.08f)
+        {
+            const float x = bounds.getX() + (static_cast<float>(i) / static_cast<float>(m_resoFftBins.size() - 1)) * w;
+            const float peakY = bounds.getY() + scopeH * (1.0f - m_resoFftBins[i] * 0.85f);
+            const float targetY = bounds.getY() + scopeH * (1.0f - m_resoErbMask[i] * 0.85f);
+
+            // Downward attenuation arrow / notch line
+            g.setColour(juce::Colour::fromRGBA(255, 70, 70, 160));
+            g.drawLine(x, peakY, x, targetY, 2.0f);
+
+            // Halo node at peak
+            g.setColour(juce::Colour::fromRGB(255, 80, 80));
+            g.fillEllipse(x - 3.5f, peakY - 3.5f, 7.0f, 7.0f);
+        }
+    }
+
+    // Bottom Status Ribbon
+    auto ribbon = bounds.removeFromBottom(26);
+    g.setColour(juce::Colour::fromRGB(22, 25, 32));
+    g.fillRect(ribbon);
+    g.setColour(juce::Colour::fromRGB(210, 220, 235));
+    g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    g.drawText("ResoTamer: 1024-Band ERB Auditory Masking  |  Dynamic Attenuation: Active  |  Zero Comb Ringing",
+               ribbon.reduced(8, 2), juce::Justification::centredLeft);
+}
+
+// ----------------------------------------------------------------------------
+// StereoScope Mastering Multiband Imager Visualizer
+// ----------------------------------------------------------------------------
+void DspEditorComponent::paintMultibandImager(juce::Graphics& g, juce::Rectangle<int> bounds)
+{
+    g.setColour(juce::Colour::fromRGB(16, 18, 23));
+    g.fillRect(bounds);
+
+    auto workArea = bounds.reduced(6);
+    auto bottomArea = workArea.removeFromBottom(30);
+
+    // Left pane: Lissajous radar & goniometer
+    auto gonioBounds = workArea.removeFromLeft(180).reduced(4);
+    g.setColour(juce::Colour::fromRGB(22, 25, 32));
+    g.fillRoundedRectangle(gonioBounds.toFloat(), 4.0f);
+    g.setColour(juce::Colour::fromRGB(38, 42, 54));
+    g.drawRoundedRectangle(gonioBounds.toFloat(), 4.0f, 1.0f);
+
+    const float cx = static_cast<float>(gonioBounds.getCentreX());
+    const float cy = static_cast<float>(gonioBounds.getCentreY());
+    const float radius = static_cast<float>(std::min(gonioBounds.getWidth(), gonioBounds.getHeight())) * 0.42f;
+
+    // Target circles
+    g.setColour(juce::Colour::fromRGBA(50, 70, 90, 80));
+    g.drawEllipse(cx - radius * 0.5f, cy - radius * 0.5f, radius, radius, 1.0f);
+    g.drawEllipse(cx - radius, cy - radius, radius * 2.0f, radius * 2.0f, 1.0f);
+
+    // Crosshairs
+    g.drawLine(cx - radius, cy, cx + radius, cy, 1.0f);
+    g.drawLine(cx, cy - radius, cx, cy + radius, 1.0f);
+    g.drawLine(cx - radius * 0.707f, cy - radius * 0.707f, cx + radius * 0.707f, cy + radius * 0.707f, 1.0f);
+    g.drawLine(cx - radius * 0.707f, cy + radius * 0.707f, cx + radius * 0.707f, cy - radius * 0.707f, 1.0f);
+
+    // Lissajous scatter points
+    g.setColour(juce::Colour::fromRGBA(60, 240, 180, 200));
+    for (const auto& pt : m_lissajousPoints)
+    {
+        const float px = cx + pt.x * radius;
+        const float py = cy - pt.y * radius;
+        g.fillEllipse(px - 2.0f, py - 2.0f, 4.0f, 4.0f);
+    }
+
+    g.setColour(juce::Colour::fromRGB(150, 160, 180));
+    g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+    g.drawText("GONIOMETER", gonioBounds.removeFromTop(18), juce::Justification::centred);
+
+    // Right pane: 4-band stereo width controls
+    auto bandsArea = workArea.reduced(6, 2);
+    const int bandW = bandsArea.getWidth() / 4;
+    const std::array<const char*, 4> bandNames = {"SUB (<120Hz)", "LOW-MID", "HIGH-MID", "AIR (>6kHz)"};
+    const std::array<juce::Colour, 4> bandColours = {
+        juce::Colour::fromRGB(80, 160, 240),
+        juce::Colour::fromRGB(60, 210, 160),
+        juce::Colour::fromRGB(240, 180, 60),
+        juce::Colour::fromRGB(210, 110, 240)
+    };
+
+    for (int b = 0; b < 4; ++b)
+    {
+        auto bandRect = bandsArea.removeFromLeft(bandW).reduced(3);
+        g.setColour(juce::Colour::fromRGB(24, 27, 35));
+        g.fillRoundedRectangle(bandRect.toFloat(), 3.0f);
+
+        g.setColour(juce::Colour::fromRGB(180, 190, 210));
+        g.setFont(juce::FontOptions(10.0f));
+        g.drawText(bandNames[static_cast<std::size_t>(b)], bandRect.removeFromTop(16), juce::Justification::centred);
+
+        // Width meter bar
+        const float widthPct = m_imagerWidths[static_cast<std::size_t>(b)];
+        auto meterRect = bandRect.reduced(10, 8);
+        g.setColour(juce::Colour::fromRGB(35, 40, 50));
+        g.fillRoundedRectangle(meterRect.toFloat(), 2.0f);
+
+        const float filledH = meterRect.getHeight() * std::clamp(widthPct / 2.0f, 0.0f, 1.0f);
+        auto fillRect = meterRect.removeFromBottom(static_cast<int>(filledH));
+        g.setColour(bandColours[static_cast<std::size_t>(b)]);
+        g.fillRoundedRectangle(fillRect.toFloat(), 2.0f);
+
+        g.setColour(juce::Colour::fromRGB(230, 235, 245));
+        g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+        g.drawText(juce::String(static_cast<int>(widthPct * 100.0f)) + "%",
+                   bandRect.removeFromBottom(16), juce::Justification::centred);
+    }
+
+    // Bottom: Phase Correlation Bar
+    bottomArea.reduce(6, 4);
+    g.setColour(juce::Colour::fromRGB(22, 25, 32));
+    g.fillRoundedRectangle(bottomArea.toFloat(), 3.0f);
+
+    const float corrNorm = (m_imagerCorrelation + 1.0f) * 0.5f; // [0.0, 1.0]
+    const float markerX = bottomArea.getX() + corrNorm * static_cast<float>(bottomArea.getWidth());
+
+    // Gradient bar from Red (-1) through Amber (0) to Green (+1)
+    g.setColour(juce::Colour::fromRGB(220, 60, 60));
+    g.drawText("-1.0", bottomArea.removeFromLeft(30), juce::Justification::centredLeft);
+    g.setColour(juce::Colour::fromRGB(60, 220, 120));
+    g.drawText("+1.0", bottomArea.removeFromRight(30), juce::Justification::centredRight);
+
+    g.setColour(juce::Colour::fromRGB(220, 230, 245));
+    g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+    g.drawText("Phase Correlation: " + juce::String(m_imagerCorrelation, 2),
+               bottomArea, juce::Justification::centred);
+
+    // Indicator needle
+    g.setColour(juce::Colour::fromRGB(255, 255, 255));
+    g.drawLine(markerX, static_cast<float>(bottomArea.getY()),
+               markerX, static_cast<float>(bottomArea.getBottom()), 2.0f);
+}
+
+// ----------------------------------------------------------------------------
+// MasterPhase Dynamic Linear-Phase EQ Visualizer
+// ----------------------------------------------------------------------------
+void DspEditorComponent::paintLinearPhaseEq(juce::Graphics& g, juce::Rectangle<int> bounds)
+{
+    g.setColour(juce::Colour::fromRGB(14, 18, 26));
+    g.fillRect(bounds);
+
+    const float w = static_cast<float>(bounds.getWidth());
+    const float h = static_cast<float>(bounds.getHeight());
+    const float midY = bounds.getY() + (h - 26.0f) * 0.5f;
+
+    // Log frequency grid lines
+    constexpr std::array<float, 5> freqs = {20.0f, 100.0f, 1000.0f, 10000.0f, 20000.0f};
+    g.setColour(juce::Colour::fromRGB(28, 35, 50));
+    for (float f : freqs)
+    {
+        const float normX = (std::log10(f) - std::log10(20.0f)) / (std::log10(20000.0f) - std::log10(20.0f));
+        const float x = bounds.getX() + normX * w;
+        g.drawVerticalLine(static_cast<int>(x), static_cast<float>(bounds.getY()), static_cast<float>(bounds.getY() + h - 26.0f));
+    }
+
+    // Gain lines
+    for (int db = -12; db <= 12; db += 6)
+    {
+        const float y = midY - (static_cast<float>(db) / 18.0f) * ((h - 26.0f) * 0.45f);
+        g.setColour((db == 0) ? juce::Colour::fromRGB(65, 80, 110) : juce::Colour::fromRGB(25, 32, 45));
+        g.drawHorizontalLine(static_cast<int>(y), static_cast<float>(bounds.getX()), static_cast<float>(bounds.getRight()));
+    }
+
+    // Linear-Phase Combined Curve
+    juce::Path staticPath;
+    juce::Path dynPath;
+
+    for (int px = 0; px < bounds.getWidth(); ++px)
+    {
+        const float normX = static_cast<float>(px) / w;
+        const float freq = 20.0f * std::pow(1000.0f, normX);
+
+        float staticGainDb = 0.0f;
+        float dynGainDb = 0.0f;
+
+        for (const auto& band : m_masterEqBands)
+        {
+            const float octDiff = std::log2(freq / band.freqHz);
+            const float width = 1.0f / std::max(0.1f, band.q);
+            const float bell = std::exp(-0.5f * (octDiff * octDiff) / (width * width));
+            staticGainDb += band.gainDb * bell;
+            dynGainDb += (band.gainDb + band.dynReductionDb) * bell;
+        }
+
+        const float yStatic = midY - (staticGainDb / 18.0f) * ((h - 26.0f) * 0.45f);
+        const float yDyn = midY - (dynGainDb / 18.0f) * ((h - 26.0f) * 0.45f);
+
+        if (px == 0)
+        {
+            staticPath.startNewSubPath(bounds.getX() + static_cast<float>(px), yStatic);
+            dynPath.startNewSubPath(bounds.getX() + static_cast<float>(px), yDyn);
+        }
+        else
+        {
+            staticPath.lineTo(bounds.getX() + static_cast<float>(px), yStatic);
+            dynPath.lineTo(bounds.getX() + static_cast<float>(px), yDyn);
+        }
+    }
+
+    // Dynamic Reduction Ribbon Fill
+    juce::Path ribbonPath = staticPath;
+    ribbonPath.lineTo(static_cast<float>(bounds.getRight()), midY);
+    ribbonPath.lineTo(static_cast<float>(bounds.getX()), midY);
+    ribbonPath.closeSubPath();
+    g.setColour(juce::Colour::fromRGBA(50, 130, 240, 25));
+    g.fillPath(ribbonPath);
+
+    // Static Curve Stroke
+    g.setColour(juce::Colour::fromRGB(80, 160, 255));
+    g.strokePath(staticPath, juce::PathStrokeType(2.0f));
+
+    // Dynamic Ghost Curve
+    g.setColour(juce::Colour::fromRGBA(255, 160, 50, 180));
+    g.strokePath(dynPath, juce::PathStrokeType(1.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+    // Band node handles
+    for (std::size_t i = 0; i < m_masterEqBands.size(); ++i)
+    {
+        const auto& band = m_masterEqBands[i];
+        const float normX = (std::log10(band.freqHz) - std::log10(20.0f)) / (std::log10(20000.0f) - std::log10(20.0f));
+        const float x = bounds.getX() + normX * w;
+        const float y = midY - (band.gainDb / 18.0f) * ((h - 26.0f) * 0.45f);
+
+        // Dynamic reduction ring
+        if (band.dynReductionDb < -0.1f)
+        {
+            const float dynY = midY - ((band.gainDb + band.dynReductionDb) / 18.0f) * ((h - 26.0f) * 0.45f);
+            g.setColour(juce::Colour::fromRGBA(255, 140, 40, 120));
+            g.drawLine(x, y, x, dynY, 2.0f);
+            g.fillEllipse(x - 3.0f, dynY - 3.0f, 6.0f, 6.0f);
+        }
+
+        g.setColour(juce::Colour::fromRGB(120, 190, 255));
+        g.fillEllipse(x - 5.0f, y - 5.0f, 10.0f, 10.0f);
+        g.setColour(juce::Colour::fromRGB(255, 255, 255));
+        g.fillEllipse(x - 2.5f, y - 2.5f, 5.0f, 5.0f);
+    }
+
+    // Bottom Info Bar
+    auto bottom = bounds.removeFromBottom(24);
+    g.setColour(juce::Colour::fromRGB(20, 24, 34));
+    g.fillRect(bottom);
+    g.setColour(juce::Colour::fromRGB(190, 210, 240));
+    g.setFont(juce::FontOptions(10.5f, juce::Font::bold));
+    g.drawText("MasterPhase Linear EQ: 4096-Tap FIR  |  0 deg Phase Distortion  |  Dynamic Compression: Active",
+               bottom.reduced(8, 2), juce::Justification::centredLeft);
+}
+
+// ----------------------------------------------------------------------------
+// Complex 259 West-Coast Synthesizer Visualizer
+// ----------------------------------------------------------------------------
+void DspEditorComponent::paintBuchlaComplexSynth(juce::Graphics& g, juce::Rectangle<int> bounds)
+{
+    g.setColour(juce::Colour::fromRGB(18, 19, 22));
+    g.fillRect(bounds);
+
+    auto workArea = bounds.reduced(6);
+
+    // Left pane: CRT Oscilloscope Screen
+    auto scopeArea = workArea.removeFromLeft(240).reduced(4);
+    g.setColour(juce::Colour::fromRGB(10, 12, 14));
+    g.fillRoundedRectangle(scopeArea.toFloat(), 6.0f);
+    g.setColour(juce::Colour::fromRGB(45, 50, 40));
+    g.drawRoundedRectangle(scopeArea.toFloat(), 6.0f, 2.0f);
+
+    const float sw = static_cast<float>(scopeArea.getWidth());
+    const float sh = static_cast<float>(scopeArea.getHeight());
+    const float midScopeY = scopeArea.getY() + sh * 0.5f;
+
+    // Amber CRT Grid
+    g.setColour(juce::Colour::fromRGBA(220, 160, 30, 35));
+    for (int gx = 1; gx < 6; ++gx)
+        g.drawVerticalLine(scopeArea.getX() + gx * (scopeArea.getWidth() / 6),
+                           static_cast<float>(scopeArea.getY()), static_cast<float>(scopeArea.getBottom()));
+    for (int gy = 1; gy < 4; ++gy)
+        g.drawHorizontalLine(scopeArea.getY() + gy * (scopeArea.getHeight() / 4),
+                             static_cast<float>(scopeArea.getX()), static_cast<float>(scopeArea.getRight()));
+
+    // Wavefolder Oscilloscope Trace
+    juce::Path tracePath;
+    for (std::size_t i = 0; i < m_oscilloscopeTrace.size(); ++i)
+    {
+        const float x = scopeArea.getX() + m_oscilloscopeTrace[i].x * sw;
+        const float y = midScopeY - m_oscilloscopeTrace[i].y * (sh * 0.38f);
+        if (i == 0) tracePath.startNewSubPath(x, y); else tracePath.lineTo(x, y);
+    }
+    // Phosphor glow
+    g.setColour(juce::Colour::fromRGBA(255, 175, 40, 60));
+    g.strokePath(tracePath, juce::PathStrokeType(4.0f));
+    g.setColour(juce::Colour::fromRGB(255, 195, 60));
+    g.strokePath(tracePath, juce::PathStrokeType(1.6f));
+
+    // Vactrol LPG Opto-Decay Pulse Indicator
+    const float pulseRadius = 6.0f + m_vactrolDecayEnvelope * 10.0f;
+    const float pulseX = scopeArea.getRight() - 20.0f;
+    const float pulseY = scopeArea.getY() + 20.0f;
+    g.setColour(juce::Colour::fromRGBA(255, 80, 40, static_cast<juce::uint8>(m_vactrolDecayEnvelope * 220.0f)));
+    g.fillEllipse(pulseX - pulseRadius, pulseY - pulseRadius, pulseRadius * 2.0f, pulseRadius * 2.0f);
+    g.setColour(juce::Colour::fromRGB(255, 230, 200));
+    g.fillEllipse(pulseX - 3.0f, pulseY - 3.0f, 6.0f, 6.0f);
+
+    // Right pane: Buchla Modular Parameters & Patch Matrix
+    auto paramsArea = workArea.reduced(8, 4);
+    g.setColour(juce::Colour::fromRGB(235, 215, 170));
+    g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
+    g.drawText("BUCHLA 259 DUAL OSCILLATOR", paramsArea.removeFromTop(20), juce::Justification::left);
+
+    g.setFont(juce::FontOptions(11.0f));
+    g.setColour(juce::Colour::fromRGB(210, 200, 180));
+    g.drawText("Carrier Freq: 220.0 Hz (Triangle Core)", paramsArea.removeFromTop(18), juce::Justification::left);
+    g.drawText("Modulator Freq: 110.0 Hz (Square / Saw)", paramsArea.removeFromTop(18), juce::Justification::left);
+    g.drawText("Through-Zero FM (TzFM): 1.80 idx", paramsArea.removeFromTop(18), juce::Justification::left);
+    g.drawText("Wavefolder Drive: " + juce::String(m_wavefoldDrive, 1) + "x (Cascaded Diode)", paramsArea.removeFromTop(18), juce::Justification::left);
+    g.drawText("Fold Symmetry: " + juce::String(m_wavefoldSymmetry, 2) + " bias", paramsArea.removeFromTop(18), juce::Justification::left);
+    g.drawText("Vactrol LPG Decay: 180 ms (Slow Opto)", paramsArea.removeFromTop(18), juce::Justification::left);
+
+    // Patch Jacks visual indicator
+    paramsArea.removeFromTop(6);
+    auto jacksRow = paramsArea.removeFromTop(22);
+    const std::array<juce::Colour, 4> jackCols = {
+        juce::Colour::fromRGB(60, 140, 240),  // Blue
+        juce::Colour::fromRGB(230, 60, 60),   // Red
+        juce::Colour::fromRGB(240, 210, 40),  // Yellow
+        juce::Colour::fromRGB(60, 220, 120)   // Green
+    };
+    for (int j = 0; j < 4; ++j)
+    {
+        auto jack = jacksRow.removeFromLeft(36);
+        const float jx = static_cast<float>(jack.getCentreX());
+        const float jy = static_cast<float>(jack.getCentreY());
+        g.setColour(jackCols[static_cast<std::size_t>(j)]);
+        g.fillEllipse(jx - 7.0f, jy - 7.0f, 14.0f, 14.0f);
+        g.setColour(juce::Colour::fromRGB(15, 15, 18));
+        g.fillEllipse(jx - 3.5f, jy - 3.5f, 7.0f, 7.0f);
+    }
+}
+
+// ----------------------------------------------------------------------------
 // Mouse Interaction
 // ----------------------------------------------------------------------------
 void DspEditorComponent::mouseDown(const juce::MouseEvent& e)
@@ -461,6 +936,29 @@ void DspEditorComponent::mouseDown(const juce::MouseEvent& e)
             repaint();
         }
     }
+    else if (m_kind == DspEditorKind::linearPhaseEq)
+    {
+        auto area = getLocalBounds().reduced(8);
+        area.removeFromTop(32);
+        const float w = static_cast<float>(area.getWidth());
+        const float h = static_cast<float>(area.getHeight());
+        const float midY = area.getY() + (h - 26.0f) * 0.5f;
+
+        m_activeMasterEqBand = -1;
+        for (std::size_t i = 0; i < m_masterEqBands.size(); ++i)
+        {
+            const auto& band = m_masterEqBands[i];
+            const float normX = (std::log10(band.freqHz) - std::log10(20.0f)) / (std::log10(20000.0f) - std::log10(20.0f));
+            const float x = area.getX() + normX * w;
+            const float y = midY - (band.gainDb / 18.0f) * ((h - 26.0f) * 0.45f);
+
+            if (std::hypot(e.position.x - x, e.position.y - y) <= 15.0f)
+            {
+                m_activeMasterEqBand = static_cast<int>(i);
+                break;
+            }
+        }
+    }
 }
 
 void DspEditorComponent::mouseDrag(const juce::MouseEvent& e)
@@ -481,6 +979,22 @@ void DspEditorComponent::mouseDrag(const juce::MouseEvent& e)
         m_eqBands[bandIdx].gainDb = std::clamp(normY * 18.0f, -18.0f, 18.0f);
         repaint();
     }
+    else if (m_kind == DspEditorKind::linearPhaseEq && m_activeMasterEqBand >= 0 && m_activeMasterEqBand < static_cast<int>(m_masterEqBands.size()))
+    {
+        const auto bandIdx = static_cast<std::size_t>(m_activeMasterEqBand);
+        auto area = getLocalBounds().reduced(8);
+        area.removeFromTop(32);
+        const float w = static_cast<float>(area.getWidth());
+        const float h = static_cast<float>(area.getHeight());
+        const float midY = area.getY() + (h - 26.0f) * 0.5f;
+
+        const float normX = std::clamp((e.position.x - area.getX()) / w, 0.0f, 1.0f);
+        m_masterEqBands[bandIdx].freqHz = 20.0f * std::pow(1000.0f, normX);
+
+        const float normY = (midY - e.position.y) / ((h - 26.0f) * 0.45f);
+        m_masterEqBands[bandIdx].gainDb = std::clamp(normY * 18.0f, -18.0f, 18.0f);
+        repaint();
+    }
 }
 
 void DspEditorComponent::mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
@@ -489,6 +1003,12 @@ void DspEditorComponent::mouseWheelMove(const juce::MouseEvent&, const juce::Mou
     {
         const auto bandIdx = static_cast<std::size_t>(m_activeEqBand);
         m_eqBands[bandIdx].q = std::clamp(m_eqBands[bandIdx].q + wheel.deltaY * 0.5f, 0.1f, 10.0f);
+        repaint();
+    }
+    else if (m_kind == DspEditorKind::linearPhaseEq && m_activeMasterEqBand >= 0 && m_activeMasterEqBand < static_cast<int>(m_masterEqBands.size()))
+    {
+        const auto bandIdx = static_cast<std::size_t>(m_activeMasterEqBand);
+        m_masterEqBands[bandIdx].q = std::clamp(m_masterEqBands[bandIdx].q + wheel.deltaY * 0.5f, 0.1f, 10.0f);
         repaint();
     }
 }
@@ -525,6 +1045,10 @@ void DspEditorWindow::open(DspEditorKind kind, const std::string& trackName, std
     case DspEditorKind::synth: title = "TNHC Poly Synth — " + juce::String(trackName); break;
     case DspEditorKind::reverb: title = "Algorithmic Reverb — " + juce::String(trackName); break;
     case DspEditorKind::delay: title = "Stereo Delay — " + juce::String(trackName); break;
+    case DspEditorKind::resonanceSuppressor: title = "ResoTamer Dynamic Suppressor — " + juce::String(trackName); break;
+    case DspEditorKind::multibandImager: title = "StereoScope Mastering Imager — " + juce::String(trackName); break;
+    case DspEditorKind::linearPhaseEq: title = "MasterPhase Linear EQ — " + juce::String(trackName); break;
+    case DspEditorKind::buchlaComplexSynth: title = "Complex 259 West-Coast Synth — " + juce::String(trackName); break;
     }
 
     new DspEditorWindow(title, kind, std::move(onClose));

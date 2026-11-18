@@ -372,6 +372,10 @@ void TrackInspectorView::showAddDspMenu()
     menu.addItem(5, "TNHC Stereo Delay");
     menu.addItem(6, "Drum Pad Sampler");
     menu.addItem(7, "TNHC Poly Synth");
+    menu.addItem(8, "ResoTamer Suppressor");
+    menu.addItem(9, "StereoScope Imager");
+    menu.addItem(10, "MasterPhase Dynamic EQ");
+    menu.addItem(11, "Complex 259 Synth");
 
     menu.showMenuAsync(juce::PopupMenu::Options {}, [this, trkId = *m_selectedTrackId](int res) {
         if (res <= 0 || ! m_commandHandler) return;
@@ -383,6 +387,10 @@ void TrackInspectorView::showAddDspMenu()
         else if (res == 5) { type = project::DspNodeType::tnhcDelay; name = "Stereo Delay"; }
         else if (res == 6) { type = project::DspNodeType::drumPadSampler; name = "Drum Sampler"; }
         else if (res == 7) { type = project::DspNodeType::tnhcSynth; name = "TNHC Synth"; }
+        else if (res == 8) { type = project::DspNodeType::resonanceSuppressor; name = "ResoTamer Suppressor"; }
+        else if (res == 9) { type = project::DspNodeType::multibandStereoImager; name = "StereoScope Imager"; }
+        else if (res == 10) { type = project::DspNodeType::linearPhaseMasteringEq; name = "MasterPhase EQ"; }
+        else if (res == 11) { type = project::DspNodeType::buchlaComplexSynth; name = "Complex 259 Synth"; }
 
         const auto* trk = findTrackInModel(m_model, trkId);
         const auto slot = static_cast<std::uint32_t>(trk != nullptr ? trk->inserts.size() : 0);

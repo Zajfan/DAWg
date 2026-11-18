@@ -19,7 +19,11 @@ enum class DspEditorKind : std::uint8_t
     compressor,
     synth,
     reverb,
-    delay
+    delay,
+    resonanceSuppressor,
+    multibandImager,
+    linearPhaseEq,
+    buchlaComplexSynth
 };
 
 class DspEditorComponent final : public juce::Component, private juce::Timer
@@ -46,6 +50,10 @@ private:
     void paintSynth(juce::Graphics& g, juce::Rectangle<int> bounds);
     void paintReverb(juce::Graphics& g, juce::Rectangle<int> bounds);
     void paintDelay(juce::Graphics& g, juce::Rectangle<int> bounds);
+    void paintResonanceSuppressor(juce::Graphics& g, juce::Rectangle<int> bounds);
+    void paintMultibandImager(juce::Graphics& g, juce::Rectangle<int> bounds);
+    void paintLinearPhaseEq(juce::Graphics& g, juce::Rectangle<int> bounds);
+    void paintBuchlaComplexSynth(juce::Graphics& g, juce::Rectangle<int> bounds);
 
     DspEditorKind m_kind;
     std::string m_title;
@@ -108,6 +116,36 @@ private:
 
     // Spectrum simulation buffer for visualizer
     std::array<float, 64> m_spectrumMagnitudes {};
+
+    // Resonance Suppressor Visualizer State
+    std::array<float, 128> m_resoFftBins {};
+    std::array<float, 128> m_resoErbMask {};
+    float m_resoDepth {0.65f};
+    float m_resoSharpness {1.8f};
+
+    // Multiband Imager Visualizer State
+    std::array<float, 3> m_imagerCrossovers {{120.0f, 1500.0f, 6000.0f}};
+    std::array<float, 4> m_imagerWidths {{0.0f, 1.0f, 1.5f, 1.8f}};
+    float m_imagerCorrelation {0.85f};
+    std::array<juce::Point<float>, 32> m_lissajousPoints {};
+
+    // Linear-Phase Mastering EQ Visualizer State
+    struct MasterEqBand { float freqHz; float gainDb; float q; float dynReductionDb; };
+    std::array<MasterEqBand, 6> m_masterEqBands {{
+        {45.0f, 1.0f, 0.7f, 0.0f},
+        {120.0f, -0.5f, 1.0f, -1.2f},
+        {450.0f, 0.0f, 1.4f, 0.0f},
+        {2500.0f, -1.0f, 2.0f, -2.5f},
+        {6000.0f, 1.5f, 1.2f, 0.0f},
+        {14000.0f, 2.0f, 0.7f, 0.0f}
+    }};
+    int m_activeMasterEqBand {-1};
+
+    // Buchla Complex Synth Visualizer State
+    float m_wavefoldDrive {1.8f};
+    float m_wavefoldSymmetry {0.1f};
+    float m_vactrolDecayEnvelope {0.8f};
+    std::array<juce::Point<float>, 64> m_oscilloscopeTrace {};
 };
 
 class DspEditorWindow final : public juce::DocumentWindow

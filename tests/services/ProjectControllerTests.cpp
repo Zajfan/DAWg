@@ -2,6 +2,7 @@
 
 #include <dawg/commands/GraphCompiler.h>
 #include <dawg/commands/ProjectController.h>
+#include <dawg/commands/TrackMacroManager.h>
 #include <dawg/engine/PlaybackRingBuffer.h>
 #include <dawg/engine/RenderSnapshotPublisher.h>
 
@@ -310,6 +311,58 @@ void testUndoRedoJournal()
     require(! controller.canRedo(), "new dispatch cleared redo stack");
     require(controller.snapshot().tracks.size() == 2, "both tracks present in new branch");
 }
+
+void testTrackMacroManager()
+{
+    using namespace dawg::commands;
+    TrackMacroManager manager;
+
+    constexpr dawg::project::TrackId track1 = 101;
+
+    // Macro naming and value control
+    manager.setMacroName(track1, 0, "Timbre / Fold");
+    require(manager.getMacroName(track1, 0) == "Timbre / Fold", "macro name set correctly");
+
+    manager.setMacroValue(track1, 0, 0.75f);
+    require(manager.getMacroValue(track1, 0) == 0.75f, "macro value stored");
+
+    // Assign macro 1 -> slot 0 parameter 2
+    MacroTargetAssignment assign {
+        .trackId = track1,
+        .slotIndex = 0,
+        .parameterIndex = 2,
+        .targetParamName = "Cutoff",
+        .minVal = 200.0f,
+        .maxVal = 4000.0f,
+        .curve = 1.0f
+    };
+    manager.addTargetAssignment(track1, 0, assign);
+    require(manager.getAssignments(track1, 0).size() == 1, "assignment added");
+
+    // Modulation matrix setup
+    dawg::engine::dsp::MacroModulationMatrix modMatrix;
+    modMatrix.prepare(48000.0);
+
+    // Add modulation route (LFO1 -> slot 0 parameter 2)
+    PluginModulationRoute route {
+        .source = dawg::engine::dsp::ModSource::lfo1,
+        .trackId = track1,
+        .slotIndex = 0,
+        .parameterIndex = 2,
+        .depth = 100.0f
+    };
+    manager.addModulationRoute(route);
+    require(manager.getRoutesForParameter(track1, 0, 2).size() == 1, "route registered");
+
+    // Evaluate modulated parameter: 200 + 0.75 * (4000 - 200) = 3050.0
+    const float val = manager.calculateModulatedValue(track1, 0, 2, 1000.0f, modMatrix);
+    require(val >= 3000.0f && val <= 3100.0f, "macro mapped value calculated accurately");
+
+    // Modulation ring
+    const auto ring = manager.calculateModulationRing(track1, 0, 2, 1000.0f, modMatrix);
+    require(ring.baseValue == 1000.0f, "ring base value matches");
+    require(ring.currentValue >= 3000.0f, "ring current value matches modulated output");
+}
 }
 
 int main()
@@ -324,5 +377,6 @@ int main()
     testEngineBurstAndLifecycle();
     testGraphCompilerBuildsMultiTrackContiguousExecutionPlan();
     testUndoRedoJournal();
-    std::puts("PASS: 9 render publication, graph compiler, and controller behavior tests");
+    testTrackMacroManager();
+    std::puts("PASS: 10 render publication, graph compiler, and controller behavior tests");
 }

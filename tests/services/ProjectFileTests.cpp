@@ -556,6 +556,56 @@ void testAudioPoolManagerAndMissingAssetRelinking(const fs::path& root)
     require(pool.totalAssetCount() == 2, "Pool item count reduced to 2");
     require(!fs::exists(scratchFile), "Unused audio file deleted from disk to reclaim storage");
 }
+
+void testNativePluginRoundTrip(const fs::path& root)
+{
+    auto project = Project::create("Native Suite Test", 1);
+    const auto trackId = project.addAudioTrack("Master Bus");
+
+    auto snap = project.snapshot();
+    snap.formatVersion = 3;
+    const std::vector<DspNodeType> nativeTypes = {
+        DspNodeType::resonanceSuppressor,
+        DspNodeType::multibandStereoImager,
+        DspNodeType::linearPhaseMasteringEq,
+        DspNodeType::buchlaComplexSynth,
+        DspNodeType::vectorSequencer,
+        DspNodeType::physicalModelSynth,
+        DspNodeType::granularCloud,
+        DspNodeType::analogLadderSynth,
+        DspNodeType::tubeTransformer,
+        DspNodeType::analogDegrader,
+        DspNodeType::rayTracingReverb
+    };
+
+    uint32_t slot = 0;
+    for (auto type : nativeTypes)
+    {
+        snap.tracks[0].inserts.push_back(DspNodeDescriptor {
+            .slotIndex = slot++,
+            .type = type,
+            .bypassed = false,
+            .name = "Native Node",
+            .pluginId = "dawg.native",
+            .parameters = {0.5f, 1.0f, 2.5f},
+            .stateData = "native_state_payload"
+        });
+    }
+
+    const auto filePath = root / "native-plugins.dawg";
+    require(saveProject(snap, filePath).has_value(), "save native plugin project");
+
+    const auto loaded = loadProject(filePath);
+    require(loaded.has_value(), "load native plugin project");
+    require(loaded->tracks[0].inserts.size() == nativeTypes.size(), "all 11 native plugins restored");
+
+    for (std::size_t i = 0; i < nativeTypes.size(); ++i)
+    {
+        require(loaded->tracks[0].inserts[i].type == nativeTypes[i], "restored DspNodeType matches");
+        require(loaded->tracks[0].inserts[i].stateData == "native_state_payload", "restored stateData matches");
+    }
+    (void) trackId;
+}
 }
 
 int main()
@@ -571,5 +621,6 @@ int main()
     testVersionThreeFivePillarRoundTrip(directory.root);
     testProjectBundlerAndBranchingVersioning(directory.root);
     testAudioPoolManagerAndMissingAssetRelinking(directory.root);
-    std::puts("PASS: 10 persistence behavior tests");
+    testNativePluginRoundTrip(directory.root);
+    std::puts("PASS: 11 persistence behavior tests");
 }

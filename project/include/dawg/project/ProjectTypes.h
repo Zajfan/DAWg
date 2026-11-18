@@ -213,7 +213,18 @@ enum class DspNodeType : std::uint8_t
     clapPlugin,
     tnhcReverb,
     tnhcDelay,
-    drumPadSampler
+    drumPadSampler,
+    resonanceSuppressor,
+    multibandStereoImager,
+    linearPhaseMasteringEq,
+    buchlaComplexSynth,
+    vectorSequencer,
+    physicalModelSynth,
+    granularCloud,
+    analogLadderSynth,
+    tubeTransformer,
+    analogDegrader,
+    rayTracingReverb
 };
 
 struct DspNodeDescriptor

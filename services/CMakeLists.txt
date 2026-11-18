@@ -5,9 +5,11 @@ add_library(dawg_services_plugins STATIC
     plugins/src/PluginScanner.cpp
     plugins/src/ClapPluginLoader.cpp
     plugins/src/NativePluginCatalog.cpp
+    plugins/src/PluginPresetManager.cpp
+    plugins/src/ClapPluginExporter.cpp
 )
 target_include_directories(dawg_services_plugins PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/plugins/include)
-target_link_libraries(dawg_services_plugins PUBLIC dawg_engine_core ${CMAKE_DL_LIBS})
+target_link_libraries(dawg_services_plugins PUBLIC dawg_engine_core ${CMAKE_DL_LIBS} PRIVATE nlohmann_json::nlohmann_json)
 target_compile_features(dawg_services_plugins PUBLIC cxx_std_20)
 target_compile_options(dawg_services_plugins PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>
@@ -21,6 +23,7 @@ target_link_options(dawg_services_plugins PUBLIC
 add_library(dawg_services_commands STATIC
     commands/src/GraphCompiler.cpp
     commands/src/ProjectController.cpp
+    commands/src/TrackMacroManager.cpp
 )
 target_include_directories(dawg_services_commands PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/commands/include)
 target_link_libraries(dawg_services_commands PUBLIC dawg_project_model dawg_engine_core)

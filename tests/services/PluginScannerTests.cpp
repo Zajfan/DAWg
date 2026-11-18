@@ -1,6 +1,8 @@
 #include <dawg/plugins/ClapPluginLoader.h>
 #include <dawg/plugins/PluginScanner.h>
 #include <dawg/plugins/NativePluginCatalog.h>
+#include <dawg/plugins/PluginPresetManager.h>
+#include <dawg/plugins/ClapPluginExporter.h>
 
 #include <cassert>
 #include <filesystem>
@@ -236,11 +238,220 @@ void testClapPluginLoader()
     std::cout << "testClapPluginLoader: PASSED\n";
 }
 
+void testPluginPresetManager()
+{
+    const auto tempDir = std::filesystem::temp_directory_path() / "dawg_test_presets";
+    std::filesystem::remove_all(tempDir);
+    std::filesystem::create_directories(tempDir);
+
+    PluginPresetManager mgr(tempDir);
+
+    // Verify factory presets
+    const auto buchlaPresets = mgr.getPresetsForPlugin("dawg.synth.buchla_complex");
+    assert(buchlaPresets.size() >= 3);
+    const auto* p1 = mgr.findPreset("dawg.synth.buchla_complex", "factory_1");
+    assert(p1 != nullptr);
+    assert(p1->name == "West Coast Pluck");
+    assert(p1->isFactory);
+    assert(p1->rating == 5);
+    (void) p1;
+
+    // Save user preset
+    PluginPreset userPreset {
+        .presetId = "ambient_cloud",
+        .pluginId = "dawg.synth.buchla_complex",
+        .name = "My Ambient Cloud",
+        .author = "Alex Producer",
+        .category = "Atmosphere",
+        .tags = {"ambient", "reverb", "lush"},
+        .rating = 4,
+        .parameters = {220.0f, 110.0f, 0.5f, 0.8f, 0.0f, 350.0f, 1.0f},
+        .stateData = "custom_chunk_data",
+        .isFactory = false
+    };
+    assert(mgr.saveUserPreset(userPreset));
+
+    // Reload from disk
+    PluginPresetManager mgr2(tempDir);
+    const auto* loaded = mgr2.findPreset("dawg.synth.buchla_complex", "ambient_cloud");
+    assert(loaded != nullptr);
+    assert(loaded->name == "My Ambient Cloud");
+    assert(loaded->rating == 4);
+    assert(loaded->stateData == "custom_chunk_data");
+    assert(! loaded->isFactory);
+    (void) loaded;
+
+    // Search query
+    const auto searchRes = mgr2.searchPresets("dawg.synth.buchla_complex", "ambient");
+    assert(! searchRes.empty());
+    assert(searchRes[0].name == "My Ambient Cloud");
+
+    // Search with tag
+    const auto tagRes = mgr2.searchPresets("dawg.synth.buchla_complex", "", {"lush"});
+    assert(tagRes.size() == 1);
+
+    // Ratings & Tag manipulation
+    assert(mgr2.setPresetRating("dawg.synth.buchla_complex", "ambient_cloud", 5));
+    assert(mgr2.addPresetTag("dawg.synth.buchla_complex", "ambient_cloud", "favorite"));
+    assert(mgr2.removePresetTag("dawg.synth.buchla_complex", "ambient_cloud", "reverb"));
+
+    const auto* updated = mgr2.findPreset("dawg.synth.buchla_complex", "ambient_cloud");
+    assert(updated != nullptr);
+    assert(updated->rating == 5);
+    assert(std::find(updated->tags.begin(), updated->tags.end(), "favorite") != updated->tags.end());
+    assert(std::find(updated->tags.begin(), updated->tags.end(), "reverb") == updated->tags.end());
+    (void) updated;
+
+    // A/B comparison switching
+    auto& ab = mgr2.getOrAllocABState("track1_slot0");
+    ab.setSlotA({1.0f, 2.0f}, "stateA");
+    ab.setSlotB({3.0f, 4.0f}, "stateB");
+    assert(ab.activeSlot == ABStateSlot::ActiveSlot::slotA);
+    assert(ab.activeParams()[0] == 1.0f);
+    assert(ab.activeStateData() == "stateA");
+
+    ab.toggleSlot();
+    assert(ab.activeSlot == ABStateSlot::ActiveSlot::slotB);
+    assert(ab.activeParams()[0] == 3.0f);
+    assert(ab.activeStateData() == "stateB");
+
+    ab.copyBToA();
+    ab.toggleSlot();
+    assert(ab.activeSlot == ABStateSlot::ActiveSlot::slotA);
+    assert(ab.activeParams()[0] == 3.0f);
+
+    // Dependency packaging & relocation
+    const auto sampleFile1 = tempDir / "kick.wav";
+    const auto sampleFile2 = tempDir / "snare.wav";
+    {
+        std::ofstream(sampleFile1) << "dummy wave 1";
+        std::ofstream(sampleFile2) << "dummy wave 2";
+    }
+
+    std::vector<ProjectDependencyItem> deps = {
+        {sampleFile1.string(), "samples/kick.wav", "sample", 12, true},
+        {sampleFile2.string(), "samples/snare.wav", "sample", 12, true},
+        {"/nonexistent/missing.wav", "samples/missing.wav", "sample", 0, false}
+    };
+
+    const auto bundleTarget = tempDir / "ProjectBundle";
+    const auto rep = PluginPresetManager::packageProjectDependencies(deps, bundleTarget);
+    assert(! rep.success); // Has 1 missing file
+    assert(rep.filesCollected == 2);
+    assert(rep.missingFiles.size() == 1);
+    assert(std::filesystem::exists(bundleTarget / "samples" / "kick.wav"));
+    assert(std::filesystem::exists(bundleTarget / "samples" / "snare.wav"));
+
+    std::filesystem::remove_all(tempDir);
+    std::cout << "testPluginPresetManager: PASSED\n";
+}
+
+void testClapPluginExporter()
+{
+    const auto* entry = ClapPluginExporter::getClapEntry();
+    assert(entry != nullptr);
+    assert(entry->clap_version.major == 1 && entry->clap_version.minor == 2);
+    assert(entry->init(nullptr));
+
+    const auto* factoryVoid = entry->get_factory(CLAP_PLUGIN_FACTORY_ID);
+    assert(factoryVoid != nullptr);
+    const auto* factory = static_cast<const clap_plugin_factory*>(factoryVoid);
+    assert(factory->get_plugin_count(factory) == 4);
+
+    const auto& exportedList = ClapPluginExporter::getExportedPlugins();
+    assert(exportedList.size() == 4);
+    (void) exportedList;
+
+    for (uint32_t i = 0; i < 4; ++i)
+    {
+        const auto* desc = factory->get_plugin_descriptor(factory, i);
+        assert(desc != nullptr);
+        assert(desc->id != nullptr);
+        assert(desc->name != nullptr);
+
+        const auto* plugin = factory->create_plugin(factory, nullptr, desc->id);
+        assert(plugin != nullptr);
+        assert(plugin->init(plugin));
+        assert(plugin->activate(plugin, 48000.0, 32, 256));
+        assert(plugin->start_processing(plugin));
+
+        // Test parameters extension
+        const auto* extVoid = plugin->get_extension(plugin, CLAP_EXT_PARAMS);
+        assert(extVoid != nullptr);
+        const auto* extParams = static_cast<const clap_plugin_params*>(extVoid);
+        assert(extParams->count(plugin) > 0);
+
+        clap_param_info info {};
+        assert(extParams->get_info(plugin, 0, &info));
+        assert(info.id == 0);
+        (void) info;
+        (void) extParams;
+
+        double val = 0.0;
+        assert(extParams->get_value(plugin, 0, &val));
+        (void) val;
+
+        // Test process with stereo buffers
+        std::array<float, 64> inL {}, inR {}, outL {}, outR {};
+        inL.fill(0.1f);
+        inR.fill(0.1f);
+
+        float* inChannels[2] = {inL.data(), inR.data()};
+        float* outChannels[2] = {outL.data(), outR.data()};
+
+        clap_audio_buffer inBuf {
+            .data32 = inChannels,
+            .data64 = nullptr,
+            .channel_count = 2,
+            .latency = 0,
+            .constant_mask = 0
+        };
+        clap_audio_buffer outBuf {
+            .data32 = outChannels,
+            .data64 = nullptr,
+            .channel_count = 2,
+            .latency = 0,
+            .constant_mask = 0
+        };
+        clap_process proc {
+            .steady_time = 0,
+            .frames_count = 64,
+            .transport = nullptr,
+            .audio_inputs = &inBuf,
+            .audio_outputs = &outBuf,
+            .audio_inputs_count = 1,
+            .audio_outputs_count = 1,
+            .in_events = nullptr,
+            .out_events = nullptr
+        };
+
+        const auto status = plugin->process(plugin, &proc);
+        assert(status == CLAP_PROCESS_CONTINUE);
+        (void) status;
+
+        plugin->reset(plugin);
+        plugin->stop_processing(plugin);
+        plugin->deactivate(plugin);
+        plugin->destroy(plugin);
+    }
+
+    // Test CLAP bundle exporter
+    const auto exportDir = std::filesystem::temp_directory_path() / "dawg_test_clap_export";
+    std::filesystem::remove_all(exportDir);
+    assert(ClapPluginExporter::exportClapBundle("dawg.export.resotamer", exportDir));
+    assert(std::filesystem::exists(exportDir / "ResoTamer_Dynamic_Resonance_Suppressor.clap" / "Contents" / "Resources" / "manifest.json"));
+    std::filesystem::remove_all(exportDir);
+
+    std::cout << "testClapPluginExporter: PASSED\n";
+}
+
 int main()
 {
     testBuiltInPlugins();
     testDirectoryScanning();
     testClapPluginLoader();
+    testPluginPresetManager();
+    testClapPluginExporter();
     std::cout << "All PluginScanner tests PASSED!\n";
     return 0;
 }

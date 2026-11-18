@@ -235,6 +235,17 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
                 else if (typeStr == "tnhcReverb") desc.type = project::DspNodeType::tnhcReverb;
                 else if (typeStr == "tnhcDelay") desc.type = project::DspNodeType::tnhcDelay;
                 else if (typeStr == "drumPadSampler") desc.type = project::DspNodeType::drumPadSampler;
+                else if (typeStr == "resonanceSuppressor") desc.type = project::DspNodeType::resonanceSuppressor;
+                else if (typeStr == "multibandStereoImager") desc.type = project::DspNodeType::multibandStereoImager;
+                else if (typeStr == "linearPhaseMasteringEq") desc.type = project::DspNodeType::linearPhaseMasteringEq;
+                else if (typeStr == "buchlaComplexSynth") desc.type = project::DspNodeType::buchlaComplexSynth;
+                else if (typeStr == "vectorSequencer") desc.type = project::DspNodeType::vectorSequencer;
+                else if (typeStr == "physicalModelSynth") desc.type = project::DspNodeType::physicalModelSynth;
+                else if (typeStr == "granularCloud") desc.type = project::DspNodeType::granularCloud;
+                else if (typeStr == "analogLadderSynth") desc.type = project::DspNodeType::analogLadderSynth;
+                else if (typeStr == "tubeTransformer") desc.type = project::DspNodeType::tubeTransformer;
+                else if (typeStr == "analogDegrader") desc.type = project::DspNodeType::analogDegrader;
+                else if (typeStr == "rayTracingReverb") desc.type = project::DspNodeType::rayTracingReverb;
                 desc.bypassed = ins.at("bypassed").get<bool>();
                 desc.name = ins.at("name").get<std::string>();
                 if (ins.contains("pluginId")) desc.pluginId = ins.at("pluginId").get<std::string>();
@@ -575,6 +586,17 @@ std::expected<void, ProjectFileError> saveProject(
                         case project::DspNodeType::tnhcReverb: typeStr = "tnhcReverb"; break;
                         case project::DspNodeType::tnhcDelay: typeStr = "tnhcDelay"; break;
                         case project::DspNodeType::drumPadSampler: typeStr = "drumPadSampler"; break;
+                        case project::DspNodeType::resonanceSuppressor: typeStr = "resonanceSuppressor"; break;
+                        case project::DspNodeType::multibandStereoImager: typeStr = "multibandStereoImager"; break;
+                        case project::DspNodeType::linearPhaseMasteringEq: typeStr = "linearPhaseMasteringEq"; break;
+                        case project::DspNodeType::buchlaComplexSynth: typeStr = "buchlaComplexSynth"; break;
+                        case project::DspNodeType::vectorSequencer: typeStr = "vectorSequencer"; break;
+                        case project::DspNodeType::physicalModelSynth: typeStr = "physicalModelSynth"; break;
+                        case project::DspNodeType::granularCloud: typeStr = "granularCloud"; break;
+                        case project::DspNodeType::analogLadderSynth: typeStr = "analogLadderSynth"; break;
+                        case project::DspNodeType::tubeTransformer: typeStr = "tubeTransformer"; break;
+                        case project::DspNodeType::analogDegrader: typeStr = "analogDegrader"; break;
+                        case project::DspNodeType::rayTracingReverb: typeStr = "rayTracingReverb"; break;
                         }
                         Json insJson = {
                             {"slotIndex", ins.slotIndex},
