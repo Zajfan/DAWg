@@ -18,6 +18,10 @@ enum class CvOutputMode : std::uint8_t
     gateHighLow,
     triggerPulse,
     clock24PPQN,
+    dinSync24Clock,
+    dinSync48Clock,
+    dinSyncRunStop,
+    velocityVoltage,
     lfoModulation
 };
 
@@ -70,8 +74,14 @@ public:
     void noteOff(std::uint8_t note) noexcept;
     void setPitchBend(float semitones) noexcept; // -12.0 .. +12.0
 
-    // Clock sync
+    // Clock sync & DIN Sync transport
     void tickClock() noexcept;
+    void setTransportRunning(bool running) noexcept;
+    [[nodiscard]] bool isTransportRunning() const noexcept;
+    void setTempoBpm(double bpm) noexcept;
+    [[nodiscard]] double tempoBpm() const noexcept;
+    void setClockPllJitterFilter(bool enabled) noexcept;
+    [[nodiscard]] bool clockPllJitterFilter() const noexcept;
 
     // Calibration table: maps MIDI note [0..127] to calibrated voltage multiplier
     void setCalibrationOffset(std::uint8_t note, float voltageOffset) noexcept;
@@ -83,14 +93,21 @@ private:
 
     // Pitch & Portamento state
     std::atomic<std::uint8_t> m_currentNote {60}; // Middle C
+    std::atomic<std::uint8_t> m_currentVelocity {100};
     std::atomic<bool> m_gateActive {false};
     std::atomic<float> m_pitchBendSemitones {0.0f};
     float m_targetPitchVoltage {0.0f};
     float m_currentPitchVoltage {0.0f};
 
-    // Trigger & Clock state
+    // Trigger & Clock & DIN Sync state
+    std::atomic<bool> m_transportRunning {false};
+    std::atomic<double> m_tempoBpm {120.0};
+    std::atomic<bool> m_clockPllEnabled {true};
     std::uint32_t m_triggerCountdownSamples {0};
     std::uint32_t m_clockPulseSamples {0};
+    double m_dinSyncPhase24 {0.0};
+    double m_dinSyncPhase48 {0.0};
+    double m_pllSmoothedInterval {1000.0};
 
     // LFO phase
     double m_lfoPhase {0.0};

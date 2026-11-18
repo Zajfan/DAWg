@@ -102,6 +102,11 @@
 #include <dawg/engine/dsp/VocalHarmonyEngine.h>
 #include <dawg/engine/dsp/StompboxPedalboardNode.h>
 #include <dawg/engine/GenerativePerformanceEngine.h>
+#include <dawg/engine/OscSurfaceProtocolEngine.h>
+#include <dawg/engine/AbletonLinkSessionEngine.h>
+#include <dawg/engine/LanMulticastAudioStreamer.h>
+#include <dawg/engine/DynamicConductorEngine.h>
+#include <dawg/engine/dsp/LiveDspScriptSandboxNode.h>
 #include "../../ui/shell/WorkspaceLayoutManager.h"
 
 #include <array>
@@ -7637,6 +7642,320 @@ void testSpatialTapeVocalGuitarAndFollowGrooveSuite()
         require(reApplied.size() == 4, "Profile applied successfully");
     }
 }
+
+void testControlSurfacesModularLinkConductorAndDspSandboxSuite()
+{
+    using namespace dawg::engine;
+    using namespace dawg::engine::dsp;
+
+    // =========================================================================
+    // 1. Hardware Control Surface Integration (Mackie MCU & OSC & Scribble LCD)
+    // =========================================================================
+    {
+        // OSC encoding & decoding
+        const auto volPacket = OscSurfaceProtocolEngine::buildTrackVolume(0, 0.85f);
+        require(! volPacket.empty(), "OSC track volume packet generated");
+
+        const auto parsedList = OscSurfaceProtocolEngine::parsePacket(volPacket);
+        require(parsedList.size() == 1, "Parsed exactly 1 OSC message");
+        require(parsedList[0].type == OscMessageType::trackVolume, "Parsed type is trackVolume");
+        require(parsedList[0].trackIndex == 0, "Track index is 0");
+        require(std::abs(parsedList[0].floatValue - 0.85f) < 1e-4f, "Volume value decoded accurately");
+
+        const auto panPacket = OscSurfaceProtocolEngine::buildTrackPan(2, -0.4f);
+        const auto parsedPan = OscSurfaceProtocolEngine::parsePacket(panPacket);
+        require(parsedPan.size() == 1, "Parsed pan packet");
+        require(parsedPan[0].type == OscMessageType::trackPan, "Parsed type is trackPan");
+        require(parsedPan[0].trackIndex == 2, "Track index is 2");
+
+        // OSC bundle packing
+        const auto playPacket = OscSurfaceProtocolEngine::buildTransportPlay(true);
+        std::array<std::vector<std::uint8_t>, 3> bundleItems = { volPacket, panPacket, playPacket };
+        const auto bundleBytes = OscSurfaceProtocolEngine::encodeBundle(bundleItems);
+        require(! bundleBytes.empty(), "OSC bundle encoded");
+
+        const auto bundleParsed = OscSurfaceProtocolEngine::parsePacket(bundleBytes);
+        require(bundleParsed.size() == 3, "Parsed all 3 messages from OSC bundle");
+
+        // Mackie MCU LCD 2-Line Scribble Strip Formatter
+        std::array<TrackScribbleData, 8> strips {};
+        for (std::size_t i = 0; i < 8; ++i)
+        {
+            strips[i].trackName = "Vocal" + std::to_string(i + 1);
+            strips[i].paramValue = "-6.0dB";
+            strips[i].peakMeter0to1 = 0.5f;
+        }
+
+        const auto [line1, line2] = OscSurfaceProtocolEngine::formatMcuScribbleLines(strips, false);
+        require(line1.size() == 56, "MCU Line 1 is exactly 56 characters");
+        require(line2.size() == 56, "MCU Line 2 is exactly 56 characters");
+
+        const auto sysexLine1 = OscSurfaceProtocolEngine::generateMcuDisplaySysEx(0, line1);
+        require(sysexLine1.front() == 0xF0 && sysexLine1.back() == 0xF7, "Valid SysEx delimiters");
+        require(sysexLine1[6] == 0x00, "Line 1 offset is 0x00");
+
+        const auto sysexLine2 = OscSurfaceProtocolEngine::generateMcuDisplaySysEx(1, line2);
+        require(sysexLine2[6] == 0x38, "Line 2 offset is 0x38 (56)");
+    }
+
+    // =========================================================================
+    // 2. Eurorack Modular Hybrid Bridge & DC-Coupled CV/Gate Engine
+    // =========================================================================
+    {
+        CvGateEurorackNode cvNode;
+        require(cvNode.prepare(48000.0, 256, 4), "CvGateEurorackNode prepared");
+
+        // Channel configuration:
+        // Ch 0: 1V/Oct Pitch
+        // Ch 1: DIN Sync Run/Stop Gate
+        // Ch 2: DIN Sync 24 PPQN Clock
+        // Ch 3: Velocity Voltage
+        CvChannelConfig cfg0; cfg0.mode = CvOutputMode::pitch1VPerOct;
+        CvChannelConfig cfg1; cfg1.mode = CvOutputMode::dinSyncRunStop;
+        CvChannelConfig cfg2; cfg2.mode = CvOutputMode::dinSync24Clock;
+        CvChannelConfig cfg3; cfg3.mode = CvOutputMode::velocityVoltage;
+        cvNode.setChannelConfig(0, cfg0);
+        cvNode.setChannelConfig(1, cfg1);
+        cvNode.setChannelConfig(2, cfg2);
+        cvNode.setChannelConfig(3, cfg3);
+
+        cvNode.setTransportRunning(true);
+        cvNode.setTempoBpm(120.0);
+        cvNode.setClockPllJitterFilter(true);
+        require(cvNode.isTransportRunning(), "Transport is running");
+        require(cvNode.tempoBpm() == 120.0, "Tempo is 120 BPM");
+
+        cvNode.noteOn(60, 100); // Middle C, velocity 100
+
+        std::array<float, 256> ch0 {};
+        std::array<float, 256> ch1 {};
+        std::array<float, 256> ch2 {};
+        std::array<float, 256> ch3 {};
+        std::array<float*, 4> chPtrs = { ch0.data(), ch1.data(), ch2.data(), ch3.data() };
+
+        ProcessContext ctx {
+            .audio = AudioBufferView {
+                .channels = chPtrs.data(),
+                .channelCount = 4,
+                .frameCount = 256
+            },
+            .sidechain = AudioBufferView {}
+        };
+
+        cvNode.process(ctx);
+
+        // Ch 0: Middle C = 0.0V
+        require(std::abs(ch0[100]) < 0.01f, "Middle C outputs 0.0V");
+        // Ch 1: Run/Stop is HIGH (1.0f)
+        require(ch1[100] == 1.0f, "DIN Sync Run line is HIGH (5V)");
+        // Ch 2: DIN Sync 24 Clock has non-zero pulses
+        float maxClock = 0.0f;
+        for (float s : ch2) maxClock = std::max(maxClock, s);
+        require(maxClock == 1.0f, "DIN Sync clock generates 1.0V pulses");
+        // Ch 3: Velocity = 100 / 127
+        const float expectedVel = 100.0f / 127.0f;
+        require(std::abs(ch3[100] - expectedVel) < 0.01f, "Velocity voltage outputs scaled level");
+
+        // Stop transport
+        cvNode.setTransportRunning(false);
+        cvNode.process(ctx);
+        require(ch1[100] == 0.0f, "DIN Sync Run line drops to LOW (0V)");
+    }
+
+    // =========================================================================
+    // 3. Ableton Link v3 Integration & LAN Peer-to-Peer Jamming
+    // =========================================================================
+    {
+        // Link Session Engine
+        AbletonLinkSessionEngine link(0xDA560001ULL);
+        link.setEnabled(true);
+        link.setTempo(128.0);
+        link.setQuantum(4.0);
+        link.setStartStopSyncEnabled(true);
+        link.requestPlay();
+
+        require(link.isEnabled(), "Link enabled");
+        require(link.isPlaying(), "Link playing");
+        require(link.tempo() == 128.0, "Link tempo 128 BPM");
+
+        // Advance audio clock by 48000 samples (1 second at 48kHz)
+        link.advanceAudioClock(48000, 48000.0);
+
+        const auto snap = link.captureSnapshot();
+        require(snap.isPlaying, "Snapshot reports playing");
+        require(snap.beatTime > 2.0, "Beat time advanced past 2 beats");
+        require(snap.phase >= 0.0 && snap.phase < 4.0, "Phase is within quantum [0, 4)");
+
+        // Packet encoding & inbound peer update
+        AbletonLinkSessionEngine::LinkPacket pkt {
+            .type = AbletonLinkSessionEngine::PacketType::stateUpdate,
+            .senderId = 0xBEEF0002ULL,
+            .tempoBpm = 132.0,
+            .beatTime = 16.0,
+            .sessionMicros = 2000000,
+            .isPlaying = true
+        };
+
+        const auto pktBytes = link.encodePacket(pkt);
+        require(! pktBytes.empty(), "Link packet encoded");
+
+        link.processInboundPacket(pktBytes, "192.168.1.105", 20808);
+        require(link.peerCount() == 1, "Peer tracked after inbound packet");
+        require(link.tempo() == 132.0, "Tempo adapted to peer consensus");
+
+        // LAN Multicast Audio Streamer
+        LanMulticastAudioStreamer streamer(0x7777);
+        std::array<float, 128> leftIn {};
+        std::array<float, 128> rightIn {};
+        for (std::size_t i = 0; i < 128; ++i)
+        {
+            leftIn[i] = std::sin(static_cast<float>(i) * 0.1f);
+            rightIn[i] = std::cos(static_cast<float>(i) * 0.1f);
+        }
+
+        std::array<std::uint8_t, 1024> datagramBuffer {};
+        const auto packetBytes = streamer.packetizeAudio(leftIn.data(), rightIn.data(), 128, datagramBuffer);
+        require(packetBytes > 0, "RTP audio datagram packetized");
+
+        std::array<float, 128> leftOut {};
+        std::array<float, 128> rightOut {};
+        std::size_t decodedFrames = 0;
+        const bool ok = streamer.depacketizeAudio(
+            std::span<const std::uint8_t>(datagramBuffer.data(), packetBytes),
+            leftOut.data(),
+            rightOut.data(),
+            128,
+            decodedFrames);
+
+        require(ok && decodedFrames == 128, "Depacketized all 128 frames");
+        require(std::abs(leftOut[50] - leftIn[50]) < 1e-4f, "24-bit PCM reconstructed left channel accurately");
+        require(std::abs(rightOut[50] - rightIn[50]) < 1e-4f, "24-bit PCM reconstructed right channel accurately");
+
+        // Stage View JSON Telemetry
+        StageViewTelemetry stage {
+            .sectionName = "Chorus 1",
+            .currentBar = 17,
+            .currentBeat = 3,
+            .tempoBpm = 132.0,
+            .songTimeSeconds = 34.5,
+            .clickAccent = "high",
+            .nextCue = "Solo in 2 bars",
+            .isPlaying = true
+        };
+        const auto json = LanMulticastAudioStreamer::formatStageViewJson(stage);
+        require(json.find("\"section\": \"Chorus 1\"") != std::string::npos, "JSON contains section");
+        require(json.find("\"bar\": 17") != std::string::npos, "JSON contains bar");
+        require(json.find("\"clickAccent\": \"high\"") != std::string::npos, "JSON contains clickAccent");
+    }
+
+    // =========================================================================
+    // 4. Dynamic Tempo Mapping, Metric Modulation & Film Conductor Track
+    // =========================================================================
+    {
+        DynamicConductorEngine conductor;
+        conductor.clearTempoNodes();
+
+        conductor.addTempoNode(ConductorTempoNode {
+            .tick = 0,
+            .bpm = 100.0,
+            .curveType = TempoCurveType::linear
+        });
+        conductor.addTempoNode(ConductorTempoNode {
+            .tick = 1920, // 2 quarter notes later
+            .bpm = 140.0,
+            .curveType = TempoCurveType::linear
+        });
+
+        require(conductor.tempoNodeCount() == 2, "2 tempo nodes added");
+        require(conductor.bpmAtTick(0) == 100.0, "Start BPM is 100");
+        require(conductor.bpmAtTick(960) == 120.0, "Midpoint BPM is 120");
+        require(conductor.bpmAtTick(1920) == 140.0, "End BPM is 140");
+
+        // Average BPM over 1920 ticks (2 quarters) is 120 BPM => Duration = 2 * 60 / 120 = 1.0 sec
+        const double sec1920 = conductor.tickToSeconds(1920.0);
+        require(std::abs(sec1920 - 1.0) < 0.05, "1920 ticks at 120 avg BPM equals 1.0 second");
+
+        const double revTick = conductor.secondsToTick(sec1920);
+        require(std::abs(revTick - 1920.0) < 1.0, "Seconds to tick numerical inversion matches");
+
+        // Complex meter: 7/8 with groupings {2, 2, 3}
+        ComplexMeterNode meter78 {
+            .bar = 1,
+            .numerator = 7,
+            .denominator = 8,
+            .groupings = {2, 2, 3}
+        };
+        conductor.clearMeterNodes();
+        conductor.addMeterNode(meter78);
+
+        require(DynamicConductorEngine::evaluateClickAccent(meter78, 0) == MeterClickAccent::high, "Subdivision 0 is Primary High Accent");
+        require(DynamicConductorEngine::evaluateClickAccent(meter78, 1) == MeterClickAccent::low, "Subdivision 1 is Low Accent");
+        require(DynamicConductorEngine::evaluateClickAccent(meter78, 2) == MeterClickAccent::mid, "Subdivision 2 is Secondary Mid Accent");
+        require(DynamicConductorEngine::evaluateClickAccent(meter78, 3) == MeterClickAccent::low, "Subdivision 3 is Low Accent");
+        require(DynamicConductorEngine::evaluateClickAccent(meter78, 4) == MeterClickAccent::mid, "Subdivision 4 is Secondary Mid Accent");
+
+        // Film scoring hit-point fitting
+        const auto fitConst = DynamicConductorEngine::fitConstantTempo(0.0, 4.0, 8.0);
+        require(fitConst.succeeded && std::abs(fitConst.targetBpm - 120.0) < 1e-4, "Fit constant tempo calculates 120 BPM");
+
+        const auto fitRamp = DynamicConductorEngine::fitAccelerandoRamp(0.0, 4.0, 100.0, 8.0);
+        require(fitRamp.succeeded && std::abs(fitRamp.targetBpm - 140.0) < 1e-4, "Fit accelerando ramp calculates 140 BPM");
+    }
+
+    // =========================================================================
+    // 5. In-DAW Live DSP Scripting & Faust / Micro-DSP Node Sandbox
+    // =========================================================================
+    {
+        LiveDspScriptSandboxNode scriptNode;
+        require(scriptNode.prepare(48000.0, 128, 2), "LiveDspScriptSandboxNode prepared");
+
+        // Compile script with parameter declaration and saturator:
+        const std::string script =
+            "param drive 2.0 0.1 10.0\n"
+            "out0 = tanh(in0 * drive)\n"
+            "out1 = tanh(in1 * drive)\n";
+
+        const auto compResult = scriptNode.compileScript(script);
+        require(compResult.success, "DSP script compiled successfully");
+        require(scriptNode.parameterCount() == 1, "Script parameter 'drive' detected");
+        require(scriptNode.parameterInfo(0).name == "drive", "Parameter name is drive");
+        require(scriptNode.parameterInfo(0).defaultValue == 2.0f, "Default value is 2.0");
+
+        // Process audio with 0.8f input amplitude
+        std::array<float, 128> inL {};
+        std::array<float, 128> inR {};
+        inL.fill(0.8f);
+        inR.fill(-0.8f);
+        std::array<float*, 2> channels = { inL.data(), inR.data() };
+
+        ProcessContext ctx {
+            .audio = AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 128
+            },
+            .sidechain = AudioBufferView {}
+        };
+
+        // Run a couple blocks to allow parameter smoothing to settle
+        scriptNode.process(ctx);
+        inL.fill(0.8f);
+        inR.fill(-0.8f);
+        scriptNode.process(ctx);
+
+        const float expectedSat = std::tanh(0.8f * 2.0f);
+        require(std::abs(inL[100] - expectedSat) < 0.05f, "Script output saturated according to tanh(in0 * drive)");
+
+        // Lock-free hot reload to direct pass-through while playing:
+        const auto reloadResult = scriptNode.compileScript("out0 = in0\nout1 = in1\n");
+        require(reloadResult.success, "Hot reload compiled without stopping audio");
+
+        inL.fill(0.42f);
+        inR.fill(0.77f);
+        scriptNode.process(ctx);
+        require(std::abs(inL[50] - 0.42f) < 1e-4f, "Pass-through active seamlessly after hot reload");
+    }
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -7820,4 +8139,5 @@ int main()
     testRealtimeProfilingSimdDjCrossfaderSpectralRepairAndSmpteSuite();
     testWorkspaceElasticWarpAutomationArpAndEurorackSuite();
     testSpatialTapeVocalGuitarAndFollowGrooveSuite();
+    testControlSurfacesModularLinkConductorAndDspSandboxSuite();
 }

@@ -4,19 +4,23 @@ add_library(dawg_engine_core STATIC
     src/AudioEngine.cpp
     src/AutomationCurveEvaluator.cpp
     src/AutomationSubLaneEngine.cpp
+    src/AbletonLinkSessionEngine.cpp
     src/ConsoleRoutingMatrix.cpp
     src/DjCrossfaderEngine.cpp
+    src/DynamicConductorEngine.cpp
     src/DspGraph.cpp
     src/DspPerformanceProfiler.cpp
     src/GenerativePerformanceEngine.cpp
     src/GraphHandoff.cpp
     src/HardwareControlSurfaceEngine.cpp
     src/HardwareControlSurfaceManager.cpp
+    src/LanMulticastAudioStreamer.cpp
     src/Metronome.cpp
     src/MidiClockGenerator.cpp
     src/MidiControllerManager.cpp
     src/MixSnapshotMorpher.cpp
     src/MultiTrackRecordingEngine.cpp
+    src/OscSurfaceProtocolEngine.cpp
     src/PlaybackRingBuffer.cpp
     src/RecordRingBuffer.cpp
     src/RenderSnapshotPublisher.cpp
@@ -50,6 +54,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/GranularCloudNode.cpp
     src/dsp/HarmonicAssistant.cpp
     src/dsp/HarmonizerVocoderNode.cpp
+    src/dsp/LiveDspScriptSandboxNode.cpp
     src/dsp/LiveLooperNode.cpp
     src/dsp/MasterTapeVinylCuttingNode.cpp
     src/dsp/MasteringMeterNode.cpp

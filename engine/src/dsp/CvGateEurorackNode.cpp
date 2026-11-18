@@ -42,6 +42,7 @@ bool CvGateEurorackNode::prepare(double sampleRate, std::size_t /*maxBlockSize*/
 void CvGateEurorackNode::reset() noexcept
 {
     m_currentNote.store(60, std::memory_order_release);
+    m_currentVelocity.store(100, std::memory_order_release);
     m_gateActive.store(false, std::memory_order_release);
     m_pitchBendSemitones.store(0.0f, std::memory_order_release);
 
@@ -49,6 +50,9 @@ void CvGateEurorackNode::reset() noexcept
     m_currentPitchVoltage = 0.0f;
     m_triggerCountdownSamples = 0;
     m_clockPulseSamples = 0;
+    m_dinSyncPhase24 = 0.0;
+    m_dinSyncPhase48 = 0.0;
+    m_pllSmoothedInterval = 1000.0;
     m_lfoPhase = 0.0;
     m_lastSahValue = 0.0f;
 }
@@ -70,16 +74,17 @@ CvChannelConfig CvGateEurorackNode::getChannelConfig(std::size_t channelIdx) con
     return {};
 }
 
-void CvGateEurorackNode::noteOn(std::uint8_t note, std::uint8_t /*velocity*/) noexcept
+void CvGateEurorackNode::noteOn(const std::uint8_t note, const std::uint8_t velocity) noexcept
 {
     m_currentNote.store(note, std::memory_order_release);
+    m_currentVelocity.store(velocity, std::memory_order_release);
     m_gateActive.store(true, std::memory_order_release);
 
     // 5ms trigger pulse (0.005 sec * sampleRate)
     m_triggerCountdownSamples = static_cast<std::uint32_t>(m_sampleRate * 0.005);
 }
 
-void CvGateEurorackNode::noteOff(std::uint8_t note) noexcept
+void CvGateEurorackNode::noteOff(const std::uint8_t note) noexcept
 {
     if (m_currentNote.load(std::memory_order_acquire) == note)
     {
@@ -87,7 +92,7 @@ void CvGateEurorackNode::noteOff(std::uint8_t note) noexcept
     }
 }
 
-void CvGateEurorackNode::setPitchBend(float semitones) noexcept
+void CvGateEurorackNode::setPitchBend(const float semitones) noexcept
 {
     m_pitchBendSemitones.store(std::clamp(semitones, -24.0f, 24.0f), std::memory_order_release);
 }
@@ -96,6 +101,36 @@ void CvGateEurorackNode::tickClock() noexcept
 {
     // 5ms clock pulse width
     m_clockPulseSamples = static_cast<std::uint32_t>(m_sampleRate * 0.005);
+}
+
+void CvGateEurorackNode::setTransportRunning(const bool running) noexcept
+{
+    m_transportRunning.store(running, std::memory_order_release);
+}
+
+bool CvGateEurorackNode::isTransportRunning() const noexcept
+{
+    return m_transportRunning.load(std::memory_order_acquire);
+}
+
+void CvGateEurorackNode::setTempoBpm(const double bpm) noexcept
+{
+    m_tempoBpm.store(std::clamp(bpm, 20.0, 400.0), std::memory_order_release);
+}
+
+double CvGateEurorackNode::tempoBpm() const noexcept
+{
+    return m_tempoBpm.load(std::memory_order_acquire);
+}
+
+void CvGateEurorackNode::setClockPllJitterFilter(const bool enabled) noexcept
+{
+    m_clockPllEnabled.store(enabled, std::memory_order_release);
+}
+
+bool CvGateEurorackNode::clockPllJitterFilter() const noexcept
+{
+    return m_clockPllEnabled.load(std::memory_order_acquire);
 }
 
 void CvGateEurorackNode::setCalibrationOffset(std::uint8_t note, float voltageOffset) noexcept
@@ -200,6 +235,65 @@ void CvGateEurorackNode::process(ProcessContext& context) noexcept
                 {
                     out[i] = 0.0f;
                 }
+            }
+            break;
+        }
+
+        case CvOutputMode::dinSync24Clock:
+        case CvOutputMode::dinSync48Clock:
+        {
+            const bool is48 = (cfg.mode == CvOutputMode::dinSync48Clock);
+            const double ppqn = is48 ? 48.0 : 24.0;
+            const double rawInterval = m_sampleRate / (m_tempoBpm.load(std::memory_order_relaxed) * ppqn / 60.0);
+
+            // Phase-Locked Loop (PLL) jitter filter
+            if (m_clockPllEnabled.load(std::memory_order_relaxed))
+            {
+                m_pllSmoothedInterval += 0.05 * (rawInterval - m_pllSmoothedInterval);
+            }
+            else
+            {
+                m_pllSmoothedInterval = rawInterval;
+            }
+
+            const double pulseWidthSamples = std::max(1.0, m_sampleRate * 0.003); // 3ms pulse width
+            const bool running = m_transportRunning.load(std::memory_order_relaxed);
+            auto& phase = is48 ? m_dinSyncPhase48 : m_dinSyncPhase24;
+
+            for (std::size_t i = 0; i < numSamples; ++i)
+            {
+                if (! running)
+                {
+                    out[i] = 0.0f;
+                    continue;
+                }
+
+                out[i] = (phase < pulseWidthSamples) ? 1.0f : 0.0f;
+                phase += 1.0;
+                if (phase >= m_pllSmoothedInterval)
+                {
+                    phase -= m_pllSmoothedInterval;
+                }
+            }
+            break;
+        }
+
+        case CvOutputMode::dinSyncRunStop:
+        {
+            const float runVal = m_transportRunning.load(std::memory_order_relaxed) ? 1.0f : 0.0f;
+            for (std::size_t i = 0; i < numSamples; ++i)
+            {
+                out[i] = runVal;
+            }
+            break;
+        }
+
+        case CvOutputMode::velocityVoltage:
+        {
+            const float velNorm = static_cast<float>(m_currentVelocity.load(std::memory_order_relaxed)) / 127.0f;
+            for (std::size_t i = 0; i < numSamples; ++i)
+            {
+                out[i] = velNorm;
             }
             break;
         }
