@@ -97,6 +97,11 @@
 #include <dawg/engine/dsp/CvGateEurorackNode.h>
 #include <dawg/engine/dsp/CvPitchCalibrator.h>
 #include <dawg/engine/dsp/DrumSliceEngine.h>
+#include <dawg/engine/dsp/SpatialObjectPannerNode.h>
+#include <dawg/engine/dsp/VintageTapeMachineNode.h>
+#include <dawg/engine/dsp/VocalHarmonyEngine.h>
+#include <dawg/engine/dsp/StompboxPedalboardNode.h>
+#include <dawg/engine/GenerativePerformanceEngine.h>
 #include "../../ui/shell/WorkspaceLayoutManager.h"
 
 #include <array>
@@ -7309,6 +7314,329 @@ void testWorkspaceElasticWarpAutomationArpAndEurorackSuite()
         require(cvNode.getCalibrationOffset(69) == measurement.voltageCorrectionOffset, "Calibration curve applied to node");
     }
 }
+
+void testSpatialTapeVocalGuitarAndFollowGrooveSuite()
+{
+    using namespace dawg::engine;
+    using namespace dawg::engine::dsp;
+
+    // =========================================================================
+    // 1. Immersive 3D Spatial Audio & Dolby Atmos 7.1.4 Object Panner
+    // =========================================================================
+    {
+        SpatialObjectPannerNode panner;
+        require(panner.prepare(48000.0, 256, 12), "SpatialObjectPannerNode prepared");
+
+        // Check speaker layouts
+        require(SpatialObjectPannerNode::speakerCount(SpatialBusFormat::stereo20) == 2, "Stereo 2.0 has 2 speakers");
+        require(SpatialObjectPannerNode::speakerCount(SpatialBusFormat::surround51) == 6, "Surround 5.1 has 6 speakers");
+        require(SpatialObjectPannerNode::speakerCount(SpatialBusFormat::atmos712) == 10, "Atmos 7.1.2 has 10 speakers");
+        require(SpatialObjectPannerNode::speakerCount(SpatialBusFormat::atmos714) == 12, "Atmos 7.1.4 has 12 speakers");
+
+        // Distance gain attenuation (1/d)
+        require(std::abs(SpatialObjectPannerNode::distanceGain(1.0f) - 1.0f) < 1e-4f, "Distance 1m has unity gain");
+        require(std::abs(SpatialObjectPannerNode::distanceGain(2.0f) - 0.5f) < 1e-4f, "Distance 2m has 0.5 gain");
+
+        // Trajectory generation (Orbit)
+        SpatialTrajectory traj;
+        traj.shape = SpatialTrajectoryShape::orbit;
+        traj.periodSec = 4.0;
+        traj.radiusM = 3.0f;
+        traj.elevationDeg = 15.0f;
+
+        SphericalPosition basePos { .azimuthDeg = 0.0f, .elevationDeg = 0.0f, .distanceM = 1.0f, .size = 0.0f };
+        const auto pos0 = SpatialObjectPannerNode::evaluateTrajectory(traj, basePos, 0.0);
+        const auto pos1 = SpatialObjectPannerNode::evaluateTrajectory(traj, basePos, 1.0); // 1/4 period = 90 deg
+        require(std::abs(pos0.azimuthDeg - 0.0f) < 1e-3f, "Orbit start azimuth is 0 deg");
+        require(std::abs(pos1.azimuthDeg - 90.0f) < 1e-3f, "Orbit 1/4 cycle is 90 deg");
+        require(pos0.distanceM == 3.0f && pos0.elevationDeg == 15.0f, "Orbit radius and elevation preserved");
+
+        // 7.1.4 Multichannel Object Panning
+        panner.setFormat(SpatialBusFormat::atmos714);
+        panner.setPosition({ .azimuthDeg = 90.0f, .elevationDeg = 0.0f, .distanceM = 1.0f, .size = 0.0f });
+
+        std::array<float, 256> inCh {};
+        inCh.fill(0.8f);
+        std::array<std::array<float, 256>, 12> outChs {};
+        std::array<float*, 12> outPtrs {};
+        for (std::size_t c = 0; c < 12; ++c)
+        {
+            outChs[c].fill(0.0f);
+            outPtrs[c] = outChs[c].data();
+        }
+
+        ProcessContext ctx {
+            .audio = AudioBufferView {
+                .channels = outPtrs.data(),
+                .channelCount = 12,
+                .frameCount = 256
+            },
+            .midi = MidiBufferView {},
+            .sampleRate = 48000.0,
+            .sidechain = AudioBufferView {}
+        };
+
+        // Put input in channel 0 and 1 (stereo input)
+        std::copy(inCh.begin(), inCh.end(), outChs[0].begin());
+        std::copy(inCh.begin(), inCh.end(), outChs[1].begin());
+        panner.process(ctx);
+        // Process second block so gain ramp reaches steady-state target
+        std::copy(inCh.begin(), inCh.end(), outChs[0].begin());
+        std::copy(inCh.begin(), inCh.end(), outChs[1].begin());
+        panner.process(ctx);
+
+        // At +90 deg azimuth (hard right), right side speakers (ch 1 = Right, ch 5 = Rss) receive high energy
+        // while Left speakers (ch 0 = Left) receive minimal energy
+        require(outChs[1][128] > 0.2f || outChs[5][128] > 0.2f, "Right surround channels receive audio");
+        require(outChs[0][128] < 0.1f, "Left channel receives minimal audio when panned hard right");
+
+        // Binaural 7.1.4 monitoring mode
+        panner.setBinauralMonitoring(true);
+        std::copy(inCh.begin(), inCh.end(), outChs[0].begin());
+        panner.process(ctx);
+        require(std::abs(outChs[0][128]) > 0.01f || std::abs(outChs[1][128]) > 0.01f, "Binaural headphone downmix produces audio");
+    }
+
+    // =========================================================================
+    // 2. Vintage Analog Tape Machine & Dynamic Cassette Saturation
+    // =========================================================================
+    {
+        VintageTapeMachineNode tape;
+        require(tape.prepare(48000.0, 256, 2), "VintageTapeMachineNode prepared");
+
+        // Verify speed time-constants and head bump frequencies
+        tape.setSpeed(TapeMachineSpeed::ips7_5);
+        require(tape.headBumpFrequencyHz() == 35.0f, "7.5 ips head bump is 35 Hz");
+        tape.setSpeed(TapeMachineSpeed::ips15);
+        require(tape.headBumpFrequencyHz() == 50.0f, "15 ips head bump is 50 Hz");
+        tape.setSpeed(TapeMachineSpeed::ips30);
+        require(tape.headBumpFrequencyHz() == 80.0f, "30 ips head bump is 80 Hz");
+        require(tape.highFrequencyTimeConstantUs() == 17.5f, "30 ips HF time constant is 17.5 us");
+
+        // Hysteresis saturation transfer function
+        float playState = 0.0f;
+        const float satSmall = VintageTapeMachineNode::hysteresis(0.1f, playState, 0.1f, 0.3f, 0.0f);
+        require(std::abs(satSmall - 0.1f) < 0.05f, "Small signals stay linear through hysteresis");
+
+        const float satLarge = VintageTapeMachineNode::hysteresis(5.0f, playState, 0.1f, 0.3f, 0.0f);
+        require(satLarge < 1.0f && satLarge > 0.9f, "Large signals compress and soft-clip under 1.0");
+
+        // Process audio through tape engine
+        tape.setInputDriveDb(12.0f);
+        tape.setHeadBumpDb(3.0f);
+        tape.setWow(0.3f, 1.0f);
+        tape.setFlutter(0.2f, 9.0f);
+
+        std::array<float, 256> lCh {};
+        std::array<float, 256> rCh {};
+        for (std::size_t i = 0; i < 256; ++i)
+        {
+            lCh[i] = std::sin(2.0f * 3.14159265f * 100.0f * (static_cast<float>(i) / 48000.0f));
+            rCh[i] = lCh[i];
+        }
+        std::array<float*, 2> tapePtrs = { lCh.data(), rCh.data() };
+        ProcessContext tapeCtx {
+            .audio = AudioBufferView { .channels = tapePtrs.data(), .channelCount = 2, .frameCount = 256 },
+            .midi = MidiBufferView {},
+            .sampleRate = 48000.0,
+            .sidechain = AudioBufferView {}
+        };
+
+        tape.process(tapeCtx);
+        require(tape.latencySamples() > 0, "Tape has positive transport latency");
+        require(! std::isnan(lCh[128]), "Tape output is valid finite signal");
+    }
+
+    // =========================================================================
+    // 3. Multi-Part Vocal Harmonizer, Doubler & Formant Shifter
+    // =========================================================================
+    {
+        // Scale snapping & degree shifts
+        // In C major (root 0), D (MIDI 62) + 2 diatonic steps = F (MIDI 65)
+        const int snapped = VocalHarmonyEngine::snapToScale(61, 0, ChordScale::major);
+        require(snapped == 60 || snapped == 62, "C# (61) snaps to C (60) or D (62) in C Major");
+
+        const int shiftedThird = VocalHarmonyEngine::shiftByScaleDegrees(60, 0, ChordScale::major, 2);
+        require(shiftedThird == 64, "C (60) shifted +2 degrees in C Major is E (64)");
+        const int shiftedFifth = VocalHarmonyEngine::shiftByScaleDegrees(60, 0, ChordScale::major, 4);
+        require(shiftedFifth == 67, "C (60) shifted +4 degrees in C Major is G (67)");
+
+        // F0 pitch detector on 220 Hz sine tone (A3)
+        std::array<float, 2048> tone220 {};
+        for (std::size_t i = 0; i < 2048; ++i)
+        {
+            tone220[i] = 0.8f * std::sin(2.0f * 3.14159265f * 220.0f * (static_cast<float>(i) / 48000.0f));
+        }
+        const double f0 = VocalHarmonyEngine::detectFrameF0(tone220.data(), 2048, 48000.0);
+        require(std::abs(f0 - 220.0) < 5.0, "YIN detected ~220 Hz fundamental");
+
+        // SATB default voices
+        const auto satb = VocalHarmonyEngine::defaultSatbVoices();
+        require(satb.size() == 4, "SATB has 4 harmony voices");
+        require(satb[0].scaleDegreeOffset == 4, "Soprano is +4 degrees (+5th)");
+        require(satb[1].scaleDegreeOffset == 2, "Alto is +2 degrees (+3rd)");
+
+        // Vocal Doubler node
+        VocalDoublerNode doubler;
+        require(doubler.prepare(48000.0, 256, 2), "VocalDoublerNode prepared");
+        doubler.setHaasDelayMs(15.0f);
+        doubler.setDetuneCents(10.0f);
+        doubler.setWidth(1.0f);
+        require(doubler.modulationAmplitudeSec() > 0.0f, "Detune modulation amplitude is positive");
+
+        std::array<float, 256> vL {};
+        std::array<float, 256> vR {};
+        vL.fill(0.5f);
+        vR.fill(0.5f);
+        std::array<float*, 2> vPtrs = { vL.data(), vR.data() };
+        ProcessContext doublerCtx {
+            .audio = AudioBufferView { .channels = vPtrs.data(), .channelCount = 2, .frameCount = 256 },
+            .midi = MidiBufferView {},
+            .sampleRate = 48000.0,
+            .sidechain = AudioBufferView {}
+        };
+        doubler.process(doublerCtx);
+        require(! std::isnan(vL[128]) && ! std::isnan(vR[128]), "Vocal doubler processed cleanly");
+    }
+
+    // =========================================================================
+    // 4. Stompbox Pedalboard & Dual-IR Guitar Cabinet Rig
+    // =========================================================================
+    {
+        // Stompbox Diode Clip transfer
+        require(std::abs(StompboxPedalboardNode::diodeClip(0.0f)) < 1e-5f, "Diode clip zero is zero");
+        require(StompboxPedalboardNode::diodeClip(5.0f) < 1.0f, "Positive diode clip soft-saturates under 1.0");
+        require(StompboxPedalboardNode::diodeClip(-5.0f) > -1.0f, "Negative diode clip saturates");
+
+        StompboxPedalboardNode pedalboard;
+        require(pedalboard.prepare(48000.0, 256, 2), "StompboxPedalboardNode prepared");
+        pedalboard.setOverdrive({ .enabled = true, .driveDb = 20.0f, .tone = 0.2f, .levelDb = 0.0f, .cleanBlend = 0.5f });
+        pedalboard.setModulation({ .enabled = true, .mode = BbdModulationMode::chorus, .rateHz = 1.0f, .depth = 0.5f, .feedback = 0.0f, .mix = 0.5f });
+        pedalboard.setTremolo({ .enabled = true, .rateHz = 4.0f, .depth = 0.5f, .shape = TremoloShape::sine });
+
+        std::array<float, 256> gL {};
+        std::array<float, 256> gR {};
+        gL.fill(0.3f);
+        gR.fill(0.3f);
+        std::array<float*, 2> gPtrs = { gL.data(), gR.data() };
+        ProcessContext gCtx {
+            .audio = AudioBufferView { .channels = gPtrs.data(), .channelCount = 2, .frameCount = 256 },
+            .midi = MidiBufferView {},
+            .sampleRate = 48000.0,
+            .sidechain = AudioBufferView {}
+        };
+        pedalboard.process(gCtx);
+        require(pedalboard.tremoloGain() > 0.0f, "Tremolo gain is active");
+
+        // Dual IR Cabinet
+        DualIrCabinetNode cab;
+        require(cab.prepare(48000.0, 256, 2), "DualIrCabinetNode prepared");
+
+        // Synthesize two impulse responses: Mic A at tap 0, Mic B at tap 10
+        std::array<float, 128> irA {};
+        std::array<float, 128> irB {};
+        irA.fill(0.0f);
+        irB.fill(0.0f);
+        irA[0] = 1.0f;
+        irB[10] = 0.9f;
+
+        require(cab.loadImpulseResponse(0, irA.data(), 128), "Mic A loaded");
+        require(cab.loadImpulseResponse(1, irB.data(), 128), "Mic B loaded");
+
+        // Estimate alignment between mic A and mic B
+        const auto align = cab.estimateAlignment();
+        require(std::abs(align.delaySamples - 10.0f) < 0.5f, "Estimate alignment detected 10 sample delay on Mic B");
+        require(! align.invertPolarity, "Polarity is positive");
+
+        cab.applyAutoAlignment();
+        require(cab.combinedIrLength() > 0, "Combined IR generated");
+
+        cab.process(gCtx);
+        require(! std::isnan(gL[100]), "Dual IR cabinet convolution output is valid");
+    }
+
+    // =========================================================================
+    // 5. Generative Scene Follow Actions & Algorithmic Humanizer Pocket
+    // =========================================================================
+    {
+        // Markov Scene Follow Engine
+        MarkovSceneFollowEngine follow(4, 42);
+        require(follow.sceneCount() == 4, "4 scenes configured");
+
+        // Advance 1 bar with repeatBars = 1: switches scene from 0 to 1
+        const auto nextScene = follow.advanceBar();
+        require(nextScene.has_value() && *nextScene == 1, "Linear scene follow advanced from 0 to 1");
+
+        // Repeat bars = 2
+        follow.setRepeatBars(1, 2);
+        const auto bar1 = follow.advanceBar();
+        require(! bar1.has_value(), "First bar of 2 does not advance yet");
+        const auto bar2 = follow.advanceBar();
+        require(bar2.has_value() && *bar2 == 2, "Second bar of 2 advances to scene 2");
+
+        // Follow Action resolution
+        require(follow.resolveFollowAction(FollowAction::nextClip, 1, 0) == 2, "nextClip from 1 is 2");
+        require(follow.resolveFollowAction(FollowAction::prevClip, 0, 0) == 3, "prevClip from 0 wraps to 3");
+        require(follow.resolveFollowAction(FollowAction::firstClip, 2, 0) == 0, "firstClip is 0");
+        require(follow.resolveFollowAction(FollowAction::lastClip, 1, 0) == 3, "lastClip is 3");
+        require(follow.resolveFollowAction(FollowAction::jumpToScene, 1, 3) == 3, "jumpToScene targets scene 3");
+
+        // Dual follow actions: chanceA = 1.0 always picks actionA
+        const auto dualAction = follow.resolveDualFollowAction(FollowAction::nextClip, FollowAction::prevClip, 1.0f, 1, 0, 0);
+        require(dualAction.has_value() && *dualAction == 2, "Dual action 100% chance selects action A");
+
+        // Stationary distribution for 4-scene cyclic Markov chain gives 0.25 each
+        const auto dist = follow.stationaryDistribution(64);
+        require(dist.size() == 4, "Stationary distribution size is 4");
+        require(std::abs(dist[0] - 0.25) < 0.05, "Cyclic chain has uniform 0.25 stationary probability");
+
+        // Groove & Pocket Quantizer
+        require(GroovePocketQuantizer::defaultSwing(GrooveTemplate::mpc60) == 62.0f, "MPC 60 default swing is 62%");
+        require(GroovePocketQuantizer::defaultSwing(GrooveTemplate::sp1200) == 58.0f, "SP-1200 default swing is 58%");
+
+        // Swung grid position for an odd 16th note (beat 0.25) with 62% swing pushes it later
+        const double straightBeat = 0.25;
+        const double swungBeat = GroovePocketQuantizer::swungGridPosition(straightBeat, 62.0f);
+        require(swungBeat > straightBeat, "62% swing shifts offbeat 16th later in time");
+
+        std::vector<GrooveNote> drumPattern = {
+            { .pitch = 36, .startBeat = 0.0, .durationBeats = 0.25, .velocity = 100 },  // Kick
+            { .pitch = 42, .startBeat = 0.25, .durationBeats = 0.25, .velocity = 90 },  // Hat
+            { .pitch = 38, .startBeat = 1.0, .durationBeats = 0.25, .velocity = 110 },  // Snare
+            { .pitch = 42, .startBeat = 1.25, .durationBeats = 0.25, .velocity = 85 }   // Hat
+        };
+
+        GrooveSettings mpcSettings {
+            .grooveTemplate = GrooveTemplate::mpc60,
+            .swingPercent = 60.0f,
+            .strength = 1.0f,
+            .humanizeMs = 0.0f,
+            .bpm = 90.0,
+            .seed = 123
+        };
+
+        const auto grooved = GroovePocketQuantizer::apply(drumPattern, mpcSettings);
+        require(grooved.size() == 4, "Grooved pattern preserves 4 notes");
+        require(grooved[1].startBeat > drumPattern[1].startBeat, "Offbeat hat was swung later");
+
+        // Dilla pocket timing: kick pushed early, snare laid back
+        GrooveSettings dillaSettings {
+            .grooveTemplate = GrooveTemplate::dillaPocket,
+            .swingPercent = 54.0f,
+            .strength = 1.0f,
+            .humanizeMs = 0.0f,
+            .bpm = 90.0,
+            .seed = 456
+        };
+        const auto dillaNotes = GroovePocketQuantizer::apply(drumPattern, dillaSettings);
+        require(dillaNotes[2].startBeat > drumPattern[2].startBeat, "Dilla pocket lays back snare slightly late");
+
+        // Profile extraction & re-application
+        const auto profile = GroovePocketQuantizer::extractProfile(grooved);
+        const auto reApplied = GroovePocketQuantizer::applyProfile(drumPattern, profile, 1.0f);
+        require(reApplied.size() == 4, "Profile applied successfully");
+    }
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -7491,4 +7819,5 @@ int main()
     testDrumDebleedAudioScrubAndIntraClipModulationSuite();
     testRealtimeProfilingSimdDjCrossfaderSpectralRepairAndSmpteSuite();
     testWorkspaceElasticWarpAutomationArpAndEurorackSuite();
+    testSpatialTapeVocalGuitarAndFollowGrooveSuite();
 }

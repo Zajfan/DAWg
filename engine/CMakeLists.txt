@@ -8,6 +8,7 @@ add_library(dawg_engine_core STATIC
     src/DjCrossfaderEngine.cpp
     src/DspGraph.cpp
     src/DspPerformanceProfiler.cpp
+    src/GenerativePerformanceEngine.cpp
     src/GraphHandoff.cpp
     src/HardwareControlSurfaceEngine.cpp
     src/HardwareControlSurfaceManager.cpp
@@ -68,6 +69,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/PolymetricSequencerEngine.cpp
     src/dsp/PolyphaseOversampler.cpp
     src/dsp/SpatialHeadTrackerBridge.cpp
+    src/dsp/SpatialObjectPannerNode.cpp
     src/dsp/SpatialSurroundPannerNode.cpp
     src/dsp/SpectralBalanceAssistant.cpp
     src/SpectralRepairEngine.cpp
@@ -78,6 +80,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/SpringReverbMagneticDrumEchoNode.cpp
     src/dsp/SslChannelStripNode.cpp
     src/dsp/StepSequencerEngine.cpp
+    src/dsp/StompboxPedalboardNode.cpp
     src/dsp/StudioControlRoomSimulatorNode.cpp
     src/dsp/StudioMonitorCalibrationNode.cpp
     src/dsp/TapeConsoleSummingNode.cpp
@@ -87,6 +90,8 @@ add_library(dawg_engine_core STATIC
     src/dsp/TransientExciterNode.cpp
     src/dsp/TransientSlicerEngine.cpp
     src/dsp/TransientSplitGranularResynthesizerNode.cpp
+    src/dsp/VintageTapeMachineNode.cpp
+    src/dsp/VocalHarmonyEngine.cpp
     src/dsp/VocalPitchCorrectorNode.cpp
     src/dsp/WavetableSynthNode.cpp
     src/plugins/AraPluginBridge.cpp
