@@ -103,6 +103,28 @@ public:
         const std::filesystem::path& destinationFolder,
         const std::filesystem::path& projectSourceRoot = "");
 
+    // 5. Self-Contained Project Archive Bundler (.dawgz)
+    [[nodiscard]] std::expected<void, ProjectFileError> bundleToDawgz(
+        const project::ProjectSnapshot& snapshot,
+        const std::filesystem::path& archiveFilePath,
+        const std::vector<std::filesystem::path>& assetFiles,
+        const std::string& author = "Producer");
+
+    [[nodiscard]] std::expected<project::ProjectSnapshot, ProjectFileError> unbundleFromDawgz(
+        const std::filesystem::path& archiveFilePath,
+        const std::filesystem::path& targetExtractionDirectory);
+
+    // 6. Checksum-based Asset Relocator
+    struct AssetRelocationReport
+    {
+        std::vector<std::pair<std::string, std::filesystem::path>> relocatedAssets;
+        std::vector<std::string> unresolvedAssets;
+    };
+
+    [[nodiscard]] static AssetRelocationReport relocateMissingAssets(
+        project::ProjectSnapshot& snapshot,
+        const std::vector<std::filesystem::path>& searchDirectories);
+
 private:
     std::string m_activeBranch {"main"};
     std::vector<ProjectCommit> m_commits;

@@ -7930,6 +7930,25 @@ void testControlSurfacesModularLinkConductorAndDspSandboxSuite()
         require(json.find("\"section\": \"Chorus 1\"") != std::string::npos, "JSON contains section");
         require(json.find("\"bar\": 17") != std::string::npos, "JSON contains bar");
         require(json.find("\"clickAccent\": \"high\"") != std::string::npos, "JSON contains clickAccent");
+
+        LanJamSyncMessage syncOut {
+            .senderId = "PeerNode-Alpha",
+            .messageSequence = 42,
+            .isPlaying = true,
+            .bpm = 126.5,
+            .samplePosition = 96000,
+            .activeSceneIndex = 3
+        };
+        const auto syncJson = LanMulticastAudioStreamer::serializeJamSync(syncOut);
+        require(! syncJson.empty(), "Serialized jam sync not empty");
+        const auto syncIn = LanMulticastAudioStreamer::deserializeJamSync(syncJson);
+        require(syncIn.has_value(), "Deserialized jam sync valid");
+        require(syncIn->senderId == "PeerNode-Alpha", "Sender id matches");
+        require(syncIn->messageSequence == 42, "Sequence matches");
+        require(syncIn->isPlaying == true, "Playing matches");
+        require(std::abs(syncIn->bpm - 126.5) < 0.01, "BPM matches");
+        require(syncIn->samplePosition == 96000, "Sample pos matches");
+        require(syncIn->activeSceneIndex == 3, "Scene index matches");
     }
 
     // =========================================================================

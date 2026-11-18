@@ -35,7 +35,7 @@ TrackInspectorView::TrackInspectorView(CommandHandler commandHandler, OpenDspEdi
     m_lblTrackDspLoad.setFont(juce::FontOptions {10.0f});
     m_lblTrackDspLoad.setColour(juce::Label::textColourId, juce::Colour::fromRGB(120, 200, 160));
     m_lblTrackDspLoad.setJustificationType(juce::Justification::centredLeft);
-    m_lblTrackDspLoad.setText("DSP: 0 µs", juce::dontSendNotification);
+    m_lblTrackDspLoad.setText("DSP: 0 us", juce::dontSendNotification);
     addAndMakeVisible(m_lblTrackDspLoad);
 
     // Input & Monitoring
@@ -304,7 +304,7 @@ void TrackInspectorView::updateFromSelectedTrack()
             break;
         }
     }
-    m_lblTrackDspLoad.setText("DSP: " + juce::String(trackUs, 0) + " µs (" + juce::String(trackPct, 1) + "%)", juce::dontSendNotification);
+    m_lblTrackDspLoad.setText("DSP: " + juce::String(trackUs, 0) + " us (" + juce::String(trackPct, 1) + "%)", juce::dontSendNotification);
 
     // Track color (hash or default)
     const auto colIdx = static_cast<juce::uint8>((trk->id * 47) % 256);

@@ -260,10 +260,10 @@ void SpatialRadarView::paint(juce::Graphics& g)
     // Orientation Labels
     g.setColour(juce::Colour::fromRGB(140, 165, 200));
     g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
-    g.drawText("FRONT (0°)", center.x - 40, center.y - maxR - 16, 80, 14, juce::Justification::centred);
-    g.drawText("REAR (180°)", center.x - 40, center.y + maxR + 2, 80, 14, juce::Justification::centred);
-    g.drawText("LEFT (-90°)", center.x - maxR - 70, center.y - 7, 65, 14, juce::Justification::centredRight);
-    g.drawText("RIGHT (+90°)", center.x + maxR + 5, center.y - 7, 75, 14, juce::Justification::centredLeft);
+    g.drawText("FRONT (0 deg)", center.x - 45, center.y - maxR - 16, 90, 14, juce::Justification::centred);
+    g.drawText("REAR (180 deg)", center.x - 45, center.y + maxR + 2, 90, 14, juce::Justification::centred);
+    g.drawText("LEFT (-90 deg)", center.x - maxR - 75, center.y - 7, 70, 14, juce::Justification::centredRight);
+    g.drawText("RIGHT (+90 deg)", center.x + maxR + 5, center.y - 7, 80, 14, juce::Justification::centredLeft);
 
     // Center Listener Icon (Ears + Nose)
     g.setColour(juce::Colour::fromRGB(220, 230, 245));
@@ -292,7 +292,7 @@ void SpatialRadarView::paint(juce::Graphics& g)
 
             // Elevation angle badge
             g.setFont(juce::FontOptions(8.0f));
-            const juce::String elStr = (obj.elevationDeg > 0.0f ? "+" : "") + juce::String(static_cast<int>(obj.elevationDeg)) + "°";
+            const juce::String elStr = (obj.elevationDeg > 0.0f ? "+" : "") + juce::String(static_cast<int>(obj.elevationDeg)) + " deg";
             g.drawText(elStr, pt.x - 20, pt.y - 24 + elOffset, 40, 10, juce::Justification::centred);
         }
 
@@ -338,7 +338,7 @@ void SpatialRadarView::resized()
     if (m_selectedIdx >= 0 && m_selectedIdx < static_cast<int>(m_objects.size()))
     {
         const auto& obj = m_objects[static_cast<std::size_t>(m_selectedIdx)];
-        m_azimuthLabel.setText(juce::String(static_cast<int>(obj.azimuthDeg)) + "° Az", juce::dontSendNotification);
+        m_azimuthLabel.setText(juce::String(static_cast<int>(obj.azimuthDeg)) + " deg Az", juce::dontSendNotification);
         m_distanceLabel.setText(juce::String(obj.distanceMeters, 2) + "m Dist", juce::dontSendNotification);
     }
 }
@@ -375,7 +375,7 @@ void SpatialRadarView::mouseDown(const juce::MouseEvent& e)
         m_draggingPuck = true;
         const auto& obj = m_objects[static_cast<std::size_t>(hit)];
         m_elevationSlider.setValue(obj.elevationDeg, juce::dontSendNotification);
-        m_azimuthLabel.setText(juce::String(static_cast<int>(obj.azimuthDeg)) + "° Az", juce::dontSendNotification);
+        m_azimuthLabel.setText(juce::String(static_cast<int>(obj.azimuthDeg)) + " deg Az", juce::dontSendNotification);
         m_distanceLabel.setText(juce::String(obj.distanceMeters, 2) + "m Dist", juce::dontSendNotification);
         repaint();
     }
@@ -403,7 +403,7 @@ void SpatialRadarView::mouseDrag(const juce::MouseEvent& e)
             obj.azimuthDeg = az;
             obj.distanceMeters = dist;
 
-            m_azimuthLabel.setText(juce::String(static_cast<int>(az)) + "° Az", juce::dontSendNotification);
+            m_azimuthLabel.setText(juce::String(static_cast<int>(az)) + " deg Az", juce::dontSendNotification);
             m_distanceLabel.setText(juce::String(dist, 2) + "m Dist", juce::dontSendNotification);
         }
 

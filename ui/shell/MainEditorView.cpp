@@ -132,6 +132,7 @@ MainEditorView::MainEditorView(EditorViewModel model,
         .redo = m_transportCallbacks.redo,
         .trackSelected = [this](project::TrackId trkId) {
             m_trackInspector.setSelectedTrackId(trkId);
+            m_deviceRackView.setSelectedTrackId(trkId);
         }
     }, waveformCache)
     , m_sessionMatrixView(m_commandHandler, m_transportCallbacks.audition)
@@ -183,6 +184,7 @@ MainEditorView::MainEditorView(EditorViewModel model,
     })
     , m_commandPalette([this](const std::string& actionId) {
         if (actionId == "panel:mixer") setDockMode(BottomDockMode::mixer);
+        else if (actionId == "panel:deviceRack") setDockMode(BottomDockMode::deviceChain);
         else if (actionId == "panel:pianoRoll") setDockMode(BottomDockMode::pianoRoll);
         else if (actionId == "panel:channelRack") setDockMode(BottomDockMode::channelRack);
         else if (actionId == "panel:drumSampler") setDockMode(BottomDockMode::drumSampler);
@@ -229,6 +231,7 @@ MainEditorView::MainEditorView(EditorViewModel model,
         else if (actionId == "template:mastering") { if (m_menuCallbacks.newFromTemplate) m_menuCallbacks.newFromTemplate("masteringSession"); }
     })
     , m_mixerPanel(m_commandHandler, m_transportCallbacks.setMasterLimiter)
+    , m_deviceRackView(m_commandHandler)
     , m_pianoRollView(m_commandHandler)
     , m_channelRackView(m_commandHandler, m_transportCallbacks.audition)
     , m_drumSamplerView(m_commandHandler, m_transportCallbacks.audition)
@@ -326,10 +329,12 @@ MainEditorView::MainEditorView(EditorViewModel model,
         m.addItem(1, "Mixer Console [M]", true, m_dockMode == BottomDockMode::mixer);
         m.addItem(2, "Console Patchbay / Routing Matrix [X]", true, m_dockMode == BottomDockMode::routingMatrix);
         m.addItem(3, "3D Spatial Radar & Binaural [Z]", true, m_dockMode == BottomDockMode::spatialRadar);
+        m.addItem(4, "Device Chain / FX Rack [C]", true, m_dockMode == BottomDockMode::deviceChain);
         m.showMenuAsync(juce::PopupMenu::Options {}, [this](int r) {
             if (r == 1) setDockMode(BottomDockMode::mixer);
             else if (r == 2) setDockMode(BottomDockMode::routingMatrix);
             else if (r == 3) setDockMode(BottomDockMode::spatialRadar);
+            else if (r == 4) setDockMode(BottomDockMode::deviceChain);
         });
     };
     addAndMakeVisible(m_btnCatMix);
@@ -397,6 +402,8 @@ MainEditorView::MainEditorView(EditorViewModel model,
     m_detachDockButton.onClick = [this] {
         if (m_dockMode == BottomDockMode::mixer)
             detachPanel(DetachablePanel::mixer);
+        else if (m_dockMode == BottomDockMode::deviceChain)
+            detachPanel(DetachablePanel::deviceChain);
         else if (m_dockMode == BottomDockMode::pianoRoll)
             detachPanel(DetachablePanel::pianoRoll);
         else if (m_dockMode == BottomDockMode::channelRack)
@@ -429,6 +436,7 @@ MainEditorView::MainEditorView(EditorViewModel model,
     addChildComponent(m_sidebarSplitter);
 
     addAndMakeVisible(m_mixerPanel);
+    addChildComponent(m_deviceRackView);
     addChildComponent(m_pianoRollView);
     addChildComponent(m_channelRackView);
     addChildComponent(m_drumSamplerView);
@@ -636,6 +644,9 @@ void MainEditorView::layoutDockPanel(BottomDockMode mode, juce::Rectangle<int> b
     case BottomDockMode::mixer:
         if (! m_floatingMixer) m_mixerPanel.setBounds(bounds);
         break;
+    case BottomDockMode::deviceChain:
+        if (! m_floatingDeviceRack) m_deviceRackView.setBounds(bounds);
+        break;
     case BottomDockMode::pianoRoll:
         if (! m_floatingPianoRoll) m_pianoRollView.setBounds(bounds);
         break;
@@ -676,6 +687,11 @@ void MainEditorView::setDockMode(BottomDockMode mode)
     if (m_dockMode == BottomDockMode::mixer && m_floatingMixer)
     {
         m_floatingMixer->toFront(true);
+        return;
+    }
+    if (m_dockMode == BottomDockMode::deviceChain && m_floatingDeviceRack)
+    {
+        m_floatingDeviceRack->toFront(true);
         return;
     }
     if (m_dockMode == BottomDockMode::pianoRoll && m_floatingPianoRoll)
@@ -736,6 +752,7 @@ void MainEditorView::setDockMode(BottomDockMode mode)
     };
 
     if (! m_floatingMixer) m_mixerPanel.setVisible(isPanelActive(BottomDockMode::mixer));
+    if (! m_floatingDeviceRack) m_deviceRackView.setVisible(isPanelActive(BottomDockMode::deviceChain));
     if (! m_floatingPianoRoll) m_pianoRollView.setVisible(isPanelActive(BottomDockMode::pianoRoll));
     if (! m_floatingChannelRack) m_channelRackView.setVisible(isPanelActive(BottomDockMode::channelRack));
     if (! m_floatingDrumSampler) m_drumSamplerView.setVisible(isPanelActive(BottomDockMode::drumSampler));
@@ -751,22 +768,23 @@ void MainEditorView::setDockMode(BottomDockMode mode)
     juce::String dockName;
     switch (m_dockMode)
     {
-    case BottomDockMode::mixer: dockName = "● Mix: Console"; break;
-    case BottomDockMode::routingMatrix: dockName = "● Mix: Patchbay"; break;
-    case BottomDockMode::spatialRadar: dockName = "● Mix: Spatial 3D"; break;
-    case BottomDockMode::pianoRoll: dockName = "● Edit: Piano Roll"; break;
-    case BottomDockMode::channelRack: dockName = "● Edit: Channel Rack"; break;
-    case BottomDockMode::drumSampler: dockName = "● Edit: Drum Sampler"; break;
-    case BottomDockMode::sampleZones: dockName = "● Edit: SFZ Zones"; break;
-    case BottomDockMode::wireGrid: dockName = "● Synth: DSP Wire Grid"; break;
-    case BottomDockMode::modulationRack: dockName = "● Synth: Modulators"; break;
-    case BottomDockMode::masteringSuite: dockName = "● Master: Suite"; break;
-    case BottomDockMode::pitchComping: dockName = "● Master: Pitch Blob"; break;
+    case BottomDockMode::mixer: dockName = "Mix: Console"; break;
+    case BottomDockMode::deviceChain: dockName = "Mix: Device Rack"; break;
+    case BottomDockMode::routingMatrix: dockName = "Mix: Patchbay"; break;
+    case BottomDockMode::spatialRadar: dockName = "Mix: Spatial 3D"; break;
+    case BottomDockMode::pianoRoll: dockName = "Edit: Piano Roll"; break;
+    case BottomDockMode::channelRack: dockName = "Edit: Channel Rack"; break;
+    case BottomDockMode::drumSampler: dockName = "Edit: Drum Sampler"; break;
+    case BottomDockMode::sampleZones: dockName = "Edit: SFZ Zones"; break;
+    case BottomDockMode::wireGrid: dockName = "Synth: DSP Wire Grid"; break;
+    case BottomDockMode::modulationRack: dockName = "Synth: Modulators"; break;
+    case BottomDockMode::masteringSuite: dockName = "Master: Suite"; break;
+    case BottomDockMode::pitchComping: dockName = "Master: Pitch Blob"; break;
     }
     m_lblActiveDock.setText(dockName, juce::dontSendNotification);
 
     // Update category button styling
-    const bool catMix = (m_dockMode == BottomDockMode::mixer || m_dockMode == BottomDockMode::routingMatrix || m_dockMode == BottomDockMode::spatialRadar);
+    const bool catMix = (m_dockMode == BottomDockMode::mixer || m_dockMode == BottomDockMode::deviceChain || m_dockMode == BottomDockMode::routingMatrix || m_dockMode == BottomDockMode::spatialRadar);
     const bool catEdit = (m_dockMode == BottomDockMode::pianoRoll || m_dockMode == BottomDockMode::channelRack || m_dockMode == BottomDockMode::drumSampler || m_dockMode == BottomDockMode::sampleZones);
     const bool catModular = (m_dockMode == BottomDockMode::wireGrid || m_dockMode == BottomDockMode::modulationRack);
     const bool catMaster = (m_dockMode == BottomDockMode::masteringSuite || m_dockMode == BottomDockMode::pitchComping);
@@ -829,6 +847,29 @@ void MainEditorView::detachPanel(DetachablePanel panel)
             m_floatingMixer->setVisible(true);
             m_tabMixerButton.setButtonText("Mixer [↙]");
             setDockMode(m_dockMode == BottomDockMode::mixer ? BottomDockMode::pianoRoll : m_dockMode);
+        }
+        break;
+
+    case DetachablePanel::deviceChain:
+        if (! m_floatingDeviceRack)
+        {
+            removeChildComponent(&m_deviceRackView);
+            m_floatingDeviceRack = std::make_unique<FloatingPanelWindow>(
+                "Device Rack - DAWg",
+                &m_deviceRackView,
+                [this] { reDockPanel(DetachablePanel::deviceChain); });
+
+            if (hasMultiMonitor)
+            {
+                const auto secondScreen = displays.displays[1].userBounds.toNearestInt();
+                m_floatingDeviceRack->setBounds(secondScreen.reduced(24, 24));
+            }
+            else
+            {
+                m_floatingDeviceRack->setBounds(80, 80, 840, 360);
+            }
+            m_floatingDeviceRack->setVisible(true);
+            setDockMode(m_dockMode == BottomDockMode::deviceChain ? BottomDockMode::mixer : m_dockMode);
         }
         break;
 
@@ -1036,6 +1077,15 @@ void MainEditorView::reDockPanel(DetachablePanel panel)
         }
         break;
 
+    case DetachablePanel::deviceChain:
+        if (m_floatingDeviceRack)
+        {
+            m_floatingDeviceRack.reset();
+            addChildComponent(m_deviceRackView);
+            setDockMode(BottomDockMode::deviceChain);
+        }
+        break;
+
     case DetachablePanel::pianoRoll:
         if (m_floatingPianoRoll)
         {
@@ -1155,6 +1205,7 @@ void MainEditorView::reDockPanel(DetachablePanel panel)
 void MainEditorView::reDockAllPanels()
 {
     reDockPanel(DetachablePanel::mixer);
+    reDockPanel(DetachablePanel::deviceChain);
     reDockPanel(DetachablePanel::pianoRoll);
     reDockPanel(DetachablePanel::channelRack);
     reDockPanel(DetachablePanel::sessionMatrix);
@@ -1173,6 +1224,7 @@ bool MainEditorView::isPanelDetached(DetachablePanel panel) const noexcept
     switch (panel)
     {
     case DetachablePanel::mixer: return m_floatingMixer != nullptr;
+    case DetachablePanel::deviceChain: return m_floatingDeviceRack != nullptr;
     case DetachablePanel::pianoRoll: return m_floatingPianoRoll != nullptr;
     case DetachablePanel::channelRack: return m_floatingChannelRack != nullptr;
     case DetachablePanel::sessionMatrix: return m_floatingSessionMatrix != nullptr;
@@ -1407,6 +1459,7 @@ void MainEditorView::setViewModel(EditorViewModel model)
     m_sessionMatrixView.setViewModel(m_model);
     m_trackInspector.setViewModel(m_model);
     m_mixerPanel.setViewModel(m_model);
+    m_deviceRackView.setViewModel(m_model);
     m_pianoRollView.setViewModel(m_model);
     m_channelRackView.setViewModel(m_model);
     m_drumSamplerView.setViewModel(m_model);
@@ -1425,6 +1478,7 @@ void MainEditorView::setSnapshot(project::ProjectSnapshot snapshot)
     m_sessionMatrixView.setViewModel(m_model);
     m_trackInspector.setViewModel(m_model);
     m_mixerPanel.setViewModel(m_model);
+    m_deviceRackView.setViewModel(m_model);
     m_pianoRollView.setViewModel(m_model);
     m_channelRackView.setViewModel(m_model);
     m_drumSamplerView.setViewModel(m_model);
@@ -1505,9 +1559,9 @@ juce::PopupMenu MainEditorView::getMenuForIndex(int menuIndex, const juce::Strin
         menu.addItem(cmdToggleAutomation, "Toggle Automation Lanes  (A)", true, m_timelineView.showAutomation());
         menu.addItem(cmdToggleBrowser, "Toggle Browser Panel  (B)", true, m_browserVisible);
         menu.addSeparator();
-        menu.addItem(cmdDetachMixer, "Detach Mixer to Window  (↗)", true, isPanelDetached(DetachablePanel::mixer));
-        menu.addItem(cmdDetachPianoRoll, "Detach Piano Roll to Window  (↗)", true, isPanelDetached(DetachablePanel::pianoRoll));
-        menu.addItem(cmdDetachChannelRack, "Detach Channel Rack to Window  (↗)", true, isPanelDetached(DetachablePanel::channelRack));
+        menu.addItem(cmdDetachMixer, "Detach Mixer to Window", true, isPanelDetached(DetachablePanel::mixer));
+        menu.addItem(cmdDetachPianoRoll, "Detach Piano Roll to Window", true, isPanelDetached(DetachablePanel::pianoRoll));
+        menu.addItem(cmdDetachChannelRack, "Detach Channel Rack to Window", true, isPanelDetached(DetachablePanel::channelRack));
         menu.addItem(cmdReDockAll, "Re-Dock All Floating Panels  (↙)", true, false);
         menu.addItem(cmdToggleMaximizeDock, "Maximize Bottom Dock  (F11)", true, m_dockMaximized);
         menu.addSeparator();
@@ -1823,6 +1877,11 @@ bool MainEditorView::keyPressed(const juce::KeyPress& key)
     if (key.getKeyCode() == 'M' || key.getKeyCode() == 'm')
     {
         setDockMode(BottomDockMode::mixer);
+        return true;
+    }
+    if (key.getKeyCode() == 'C' || key.getKeyCode() == 'c')
+    {
+        setDockMode(BottomDockMode::deviceChain);
         return true;
     }
     if (key.getKeyCode() == 'P' || key.getKeyCode() == 'p')

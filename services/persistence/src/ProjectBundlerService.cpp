@@ -418,4 +418,250 @@ float ProjectBundlerService::calculateLoudnessNormalizationGain(
     return std::pow(10.0f, deltaDb / 20.0f);
 }
 
+// ============================================================================
+// 5. Self-Contained Project Archive Bundler (.dawgz)
+// ============================================================================
+std::expected<void, ProjectFileError> ProjectBundlerService::bundleToDawgz(
+    const project::ProjectSnapshot& snapshot,
+    const fs::path& archiveFilePath,
+    const std::vector<fs::path>& assetFiles,
+    const std::string& author)
+{
+    std::ofstream out(archiveFilePath, std::ios::binary);
+    if (! out.is_open())
+    {
+        return std::unexpected(ProjectFileError {
+            ProjectFileError::Code::ioFailure,
+            "Failed to create .dawgz archive file: " + archiveFilePath.string()
+        });
+    }
+
+    // 8-byte Magic
+    const char magic[8] = {'D', 'A', 'W', 'G', 'Z', '0', '1', '\0'};
+    out.write(magic, 8);
+
+    // Save project JSON to temporary file and read back
+    std::error_code ec;
+    const auto tempProjectJson = fs::temp_directory_path() / ("dawgz_tmp_" + std::to_string(snapshot.id) + ".json");
+    auto saveRes = saveProject(snapshot, tempProjectJson);
+    if (! saveRes)
+    {
+        return saveRes;
+    }
+
+    std::ifstream pIn(tempProjectJson, std::ios::binary);
+    std::string projectJsonStr((std::istreambuf_iterator<char>(pIn)), std::istreambuf_iterator<char>());
+    pIn.close();
+    fs::remove(tempProjectJson, ec);
+
+    // Prepare Manifest
+    PackageManifest manifest;
+    manifest.packageFormatVersion = "2.0-DAWGZ";
+    manifest.projectId = std::to_string(snapshot.id);
+    manifest.projectName = snapshot.name;
+    manifest.author = author;
+
+    const auto now = std::chrono::system_clock::now();
+    const auto timeT = std::chrono::system_clock::to_time_t(now);
+    std::ostringstream timeStr;
+    timeStr << std::put_time(std::gmtime(&timeT), "%Y-%m-%dT%H:%M:%SZ");
+    manifest.timestampIso = timeStr.str();
+
+    std::vector<std::pair<std::string, fs::path>> validAssets;
+    for (const auto& a : assetFiles)
+    {
+        if (fs::exists(a))
+        {
+            const std::string relPath = "Audio/" + a.filename().string();
+            manifest.assets.push_back(AssetPackageEntry {
+                .relativePath = relPath,
+                .fileSizeBytes = fs::file_size(a),
+                .checksumHex = computeSimpleChecksum(a)
+            });
+            validAssets.emplace_back(relPath, a);
+        }
+    }
+
+    Json manifestJson;
+    manifestJson["packageFormatVersion"] = manifest.packageFormatVersion;
+    manifestJson["projectId"] = manifest.projectId;
+    manifestJson["projectName"] = manifest.projectName;
+    manifestJson["author"] = manifest.author;
+    manifestJson["timestampIso"] = manifest.timestampIso;
+    Json assetsArr = Json::array();
+    for (const auto& e : manifest.assets)
+    {
+        assetsArr.push_back({
+            {"relativePath", e.relativePath},
+            {"fileSizeBytes", e.fileSizeBytes},
+            {"checksumHex", e.checksumHex}
+        });
+    }
+    manifestJson["assets"] = std::move(assetsArr);
+    const std::string manifestJsonStr = manifestJson.dump(2);
+
+    const auto totalEntries = static_cast<std::uint32_t>(2 + validAssets.size());
+    out.write(reinterpret_cast<const char*>(&totalEntries), sizeof(totalEntries));
+
+    auto writeEntry = [&out](const std::string& relPath, const char* data, std::size_t size) {
+        const auto pathLen = static_cast<std::uint16_t>(relPath.size());
+        out.write(reinterpret_cast<const char*>(&pathLen), sizeof(pathLen));
+        out.write(relPath.data(), static_cast<std::streamsize>(pathLen));
+
+        const auto fileSize = static_cast<std::uint64_t>(size);
+        out.write(reinterpret_cast<const char*>(&fileSize), sizeof(fileSize));
+
+        // 64-bit FNV-1a checksum
+        std::uint64_t hash = 14695981039346656037ULL;
+        for (std::size_t i = 0; i < size; ++i)
+        {
+            hash ^= static_cast<std::uint8_t>(data[i]);
+            hash *= 1099511628211ULL;
+        }
+        out.write(reinterpret_cast<const char*>(&hash), sizeof(hash));
+        out.write(data, static_cast<std::streamsize>(size));
+    };
+
+    // Entry 1: project.json
+    writeEntry("project.json", projectJsonStr.data(), projectJsonStr.size());
+
+    // Entry 2: manifest.json
+    writeEntry("manifest.json", manifestJsonStr.data(), manifestJsonStr.size());
+
+    // Entries 3..N: assets
+    for (const auto& [relPath, filePath] : validAssets)
+    {
+        std::ifstream fileIn(filePath, std::ios::binary);
+        if (fileIn.is_open())
+        {
+            std::string content((std::istreambuf_iterator<char>(fileIn)), std::istreambuf_iterator<char>());
+            writeEntry(relPath, content.data(), content.size());
+        }
+    }
+
+    return {};
+}
+
+std::expected<project::ProjectSnapshot, ProjectFileError> ProjectBundlerService::unbundleFromDawgz(
+    const fs::path& archiveFilePath,
+    const fs::path& targetExtractionDirectory)
+{
+    std::ifstream in(archiveFilePath, std::ios::binary);
+    if (! in.is_open())
+    {
+        return std::unexpected(ProjectFileError {
+            ProjectFileError::Code::ioFailure,
+            "Cannot open .dawgz file: " + archiveFilePath.string()
+        });
+    }
+
+    char magic[8];
+    in.read(magic, 8);
+    if (std::memcmp(magic, "DAWGZ01\0", 8) != 0)
+    {
+        return std::unexpected(ProjectFileError {
+            ProjectFileError::Code::invalidFormat,
+            "Invalid .dawgz header magic"
+        });
+    }
+
+    std::uint32_t totalEntries = 0;
+    in.read(reinterpret_cast<char*>(&totalEntries), sizeof(totalEntries));
+
+    std::error_code ec;
+    fs::create_directories(targetExtractionDirectory, ec);
+
+    for (std::uint32_t i = 0; i < totalEntries; ++i)
+    {
+        std::uint16_t pathLen = 0;
+        in.read(reinterpret_cast<char*>(&pathLen), sizeof(pathLen));
+        std::string relPath(pathLen, '\0');
+        in.read(relPath.data(), pathLen);
+
+        std::uint64_t fileSize = 0;
+        in.read(reinterpret_cast<char*>(&fileSize), sizeof(fileSize));
+
+        std::uint64_t storedHash = 0;
+        in.read(reinterpret_cast<char*>(&storedHash), sizeof(storedHash));
+
+        std::vector<char> buffer(fileSize);
+        if (fileSize > 0)
+        {
+            in.read(buffer.data(), static_cast<std::streamsize>(fileSize));
+        }
+
+        const auto outFilePath = targetExtractionDirectory / relPath;
+        fs::create_directories(outFilePath.parent_path(), ec);
+        std::ofstream fileOut(outFilePath, std::ios::binary);
+        if (fileOut.is_open() && fileSize > 0)
+        {
+            fileOut.write(buffer.data(), static_cast<std::streamsize>(fileSize));
+        }
+    }
+
+    const auto projectJsonPath = targetExtractionDirectory / "project.json";
+    if (! fs::exists(projectJsonPath))
+    {
+        return std::unexpected(ProjectFileError {
+            ProjectFileError::Code::invalidFormat,
+            "Missing project.json in extracted .dawgz archive"
+        });
+    }
+
+    return loadProject(projectJsonPath);
+}
+
+// ============================================================================
+// 6. Checksum-based Asset Relocator
+// ============================================================================
+ProjectBundlerService::AssetRelocationReport ProjectBundlerService::relocateMissingAssets(
+    project::ProjectSnapshot& snapshot,
+    const std::vector<fs::path>& searchDirectories)
+{
+    AssetRelocationReport report;
+
+    // Build directory cache: filename -> paths
+    std::unordered_map<std::string, std::vector<fs::path>> candidateFiles;
+    for (const auto& dir : searchDirectories)
+    {
+        if (! fs::exists(dir)) continue;
+
+        std::error_code ec;
+        for (const auto& entry : fs::recursive_directory_iterator(dir, fs::directory_options::skip_permission_denied, ec))
+        {
+            if (entry.is_regular_file())
+            {
+                candidateFiles[entry.path().filename().string()].push_back(entry.path());
+            }
+        }
+    }
+
+    for (auto& asset : snapshot.assets)
+    {
+        if (asset.path.empty()) continue;
+
+        if (fs::exists(asset.path))
+        {
+            continue;
+        }
+
+        const std::string missingFilename = fs::path(asset.path).filename().string();
+        const auto it = candidateFiles.find(missingFilename);
+
+        if (it != candidateFiles.end() && ! it->second.empty())
+        {
+            const auto foundPath = it->second.front();
+            report.relocatedAssets.emplace_back(asset.path, foundPath);
+            asset.path = foundPath.string();
+            asset.pathKind = project::AudioAssetPathKind::absolute;
+        }
+        else
+        {
+            report.unresolvedAssets.push_back(asset.path);
+        }
+    }
+
+    return report;
+}
+
 } // namespace dawg::persistence

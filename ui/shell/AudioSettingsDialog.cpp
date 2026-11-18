@@ -43,11 +43,11 @@ AudioSettingsComponent::AudioSettingsComponent(juce::AudioDeviceManager& deviceM
     m_bufferPresetLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(200, 220, 240));
     addAndMakeVisible(m_bufferPresetLabel);
 
-    m_bufferPresetCombo.addItem("32 frames (0.67 ms @ 48kHz — Ultra-Low Latency)", 1);
-    m_bufferPresetCombo.addItem("64 frames (1.33 ms @ 48kHz — Commercial Studio Standard)", 2);
-    m_bufferPresetCombo.addItem("128 frames (2.67 ms @ 48kHz — Safe Monitoring)", 3);
-    m_bufferPresetCombo.addItem("256 frames (5.33 ms @ 48kHz — Moderate Load)", 4);
-    m_bufferPresetCombo.addItem("512 frames (10.67 ms @ 48kHz — Heavy Mixing)", 5);
+    m_bufferPresetCombo.addItem("32 frames (0.67 ms @ 48kHz - Ultra-Low Latency)", 1);
+    m_bufferPresetCombo.addItem("64 frames (1.33 ms @ 48kHz - Commercial Studio Standard)", 2);
+    m_bufferPresetCombo.addItem("128 frames (2.67 ms @ 48kHz - Safe Monitoring)", 3);
+    m_bufferPresetCombo.addItem("256 frames (5.33 ms @ 48kHz - Moderate Load)", 4);
+    m_bufferPresetCombo.addItem("512 frames (10.67 ms @ 48kHz - Heavy Mixing)", 5);
     m_bufferPresetCombo.setSelectedId(2, juce::dontSendNotification);
     m_bufferPresetCombo.onChange = [this] {
         static constexpr std::array<int, 5> sizes {32, 64, 128, 256, 512};

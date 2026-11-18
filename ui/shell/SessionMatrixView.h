@@ -95,7 +95,7 @@ private:
     }};
 
     juce::ComboBox m_quantizeCombo;
-    juce::TextButton m_stopAllButton {"Stop All Clips [■]"};
+    juce::TextButton m_stopAllButton {"Stop All Clips [Stop]"};
 
     engine::DjCrossfaderEngine m_crossfaderEngine;
     juce::Slider m_crossfaderSlider;

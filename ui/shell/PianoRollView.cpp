@@ -702,7 +702,7 @@ void PianoRollView::drawVelocityLane(juce::Graphics& g, const juce::Rectangle<in
 
     const char* title = "VELOCITY";
     if (m_expressionMode == ExpressionMode::mpePitch)
-        title = "MPE PITCH (±24 ST)";
+        title = "MPE PITCH (+/-24 ST)";
     else if (m_expressionMode == ExpressionMode::mpePressure)
         title = "MPE PRESSURE";
     else if (m_expressionMode == ExpressionMode::mpeTimbre)
@@ -801,7 +801,7 @@ void PianoRollView::drawVelocityLane(juce::Graphics& g, const juce::Rectangle<in
             g.setColour(juce::Colour::fromRGB(55, 60, 75));
             g.drawHorizontalLine(static_cast<int>(midY), static_cast<float>(bounds.getX()), static_cast<float>(bounds.getRight()));
 
-            // Retuned pitch target lines (±1 semitone grid)
+            // Retuned pitch target lines (+/-1 semitone grid)
             g.setColour(juce::Colour::fromRGB(40, 45, 55));
             g.drawHorizontalLine(static_cast<int>(midY - 18.0f), static_cast<float>(bounds.getX()), static_cast<float>(bounds.getRight()));
             g.drawHorizontalLine(static_cast<int>(midY + 18.0f), static_cast<float>(bounds.getX()), static_cast<float>(bounds.getRight()));

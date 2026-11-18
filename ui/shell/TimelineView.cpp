@@ -30,6 +30,18 @@ TimelineView::TimelineView(Callbacks callbacks, media::WaveformCache* waveformCa
     };
     addAndMakeVisible(m_razorButton);
 
+    m_macroButton.onClick = [this] {
+        m_showMacros = ! m_showMacros;
+        m_macroButton.setButtonText(m_showMacros ? "Macros: ON" : "Macros: OFF");
+        m_macroButton.setColour(juce::TextButton::buttonColourId,
+                                m_showMacros ? juce::Colour::fromRGB(0, 180, 220)
+                                            : juce::Colour::fromRGB(40, 42, 50));
+        m_headerWidth = m_showMacros ? 260 : 200;
+        resized();
+        repaint();
+    };
+    addAndMakeVisible(m_macroButton);
+
     m_addMarkerButton.onClick = [this] {
         const auto curSample = static_cast<std::uint64_t>(std::max<std::int64_t>(0, m_model.playbackPosition));
         addMarker(curSample, "Marker " + std::to_string(m_markers.size() + 1));
@@ -522,9 +534,12 @@ void TimelineView::drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bo
         g.setColour(juce::Colour::fromRGB(32, 34, 42));
         g.fillRect(headerBounds);
 
-        // Surface 8 Macro Knobs with animated colored modulation rings
-        auto macroArea = headerBounds.removeFromRight(76).reduced(2, 4);
-        drawMacroOverlay(g, track, macroArea);
+        // Surface 8 Macro Knobs with animated colored modulation rings only if toggled ON
+        if (m_showMacros)
+        {
+            auto macroArea = headerBounds.removeFromRight(76).reduced(2, 4);
+            drawMacroOverlay(g, track, macroArea);
+        }
 
         const bool isFolder = track.isFolder || track.kind == project::TrackKind::folder;
         const bool isChild = (track.parentFolderId != 0);
@@ -902,7 +917,7 @@ void TimelineView::drawAutomationOverlay(juce::Graphics& g, const project::Track
     g.setColour(juce::Colour::fromRGB(0, 225, 255).withAlpha(0.85f));
     g.strokePath(curvePath, juce::PathStrokeType(2.0f));
 
-    // Draw Bézier Curvature Tension Handles between points
+    // Draw Bezier Curvature Tension Handles between points
     for (std::size_t p = 0; p + 1 < points.size(); ++p)
     {
         const auto& p1 = points[p];
@@ -1099,11 +1114,12 @@ void TimelineView::drawPlayhead(juce::Graphics& g, juce::Rectangle<int> bounds)
 
 void TimelineView::resized()
 {
-    const int btnWidth = (m_headerWidth - 16) / 4;
-    m_snapButton.setBounds(4, m_minimapHeight + 4, btnWidth, m_rulerHeight - 8);
-    m_autoButton.setBounds(4 + btnWidth + 2, m_minimapHeight + 4, btnWidth, m_rulerHeight - 8);
-    m_razorButton.setBounds(4 + (btnWidth + 2) * 2, m_minimapHeight + 4, btnWidth, m_rulerHeight - 8);
-    m_addMarkerButton.setBounds(4 + (btnWidth + 2) * 3, m_minimapHeight + 4, btnWidth, m_rulerHeight - 8);
+    const int btnWidth = (m_headerWidth - 18) / 5;
+    m_snapButton.setBounds(3, m_minimapHeight + 4, btnWidth, m_rulerHeight - 8);
+    m_autoButton.setBounds(3 + btnWidth + 2, m_minimapHeight + 4, btnWidth, m_rulerHeight - 8);
+    m_razorButton.setBounds(3 + (btnWidth + 2) * 2, m_minimapHeight + 4, btnWidth, m_rulerHeight - 8);
+    m_macroButton.setBounds(3 + (btnWidth + 2) * 3, m_minimapHeight + 4, btnWidth, m_rulerHeight - 8);
+    m_addMarkerButton.setBounds(3 + (btnWidth + 2) * 4, m_minimapHeight + 4, btnWidth, m_rulerHeight - 8);
 }
 
 void TimelineView::mouseMove(const juce::MouseEvent& e)
@@ -1300,8 +1316,8 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
-    // Check if clicked inside track header Macro overlay
-    if (e.x >= m_headerWidth - 76 && e.x < m_headerWidth && e.y >= tracksTopY())
+    // Check if clicked inside track header Macro overlay (only when enabled)
+    if (m_showMacros && e.x >= m_headerWidth - 76 && e.x < m_headerWidth && e.y >= tracksTopY())
     {
         int ty = tracksTopY();
         for (const auto& track : m_model.project.tracks)
@@ -1400,7 +1416,7 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                     }
                 }
 
-                // Check Bézier curvature tension handles
+                // Check Bezier curvature tension handles
                 for (std::size_t p = 0; p + 1 < trackLane->points.size(); ++p)
                 {
                     const auto& p1 = trackLane->points[p];

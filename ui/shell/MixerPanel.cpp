@@ -33,9 +33,6 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
     addAndMakeVisible(m_soloButton);
     addAndMakeVisible(m_phaseButton);
     addAndMakeVisible(m_armButton);
-    addAndMakeVisible(m_eqButton);
-    addAndMakeVisible(m_sslEqButton);
-    m_sslEqButton.setClickingTogglesState(true);
 
     m_panLawCombo.addItem("-3dB", 1);
     m_panLawCombo.addItem("-4.5dB", 2);
@@ -50,11 +47,95 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
     m_vcaCombo.setSelectedId(1, juce::dontSendNotification);
     addAndMakeVisible(m_vcaCombo);
 
-    addAndMakeVisible(m_compButton);
-    addAndMakeVisible(m_synthButton);
-    addAndMakeVisible(m_revButton);
-    addAndMakeVisible(m_delayButton);
-    addAndMakeVisible(m_limiterButton);
+    m_addInsertBtn.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(40, 52, 70));
+    m_addInsertBtn.onClick = [this] {
+        juce::PopupMenu menu;
+        menu.addItem(1, "Parametric EQ (6-Band)");
+        menu.addItem(2, "Dynamics Compressor");
+        menu.addItem(3, "ResoTamer Suppressor");
+        menu.addItem(4, "StereoScope Imager");
+        menu.addItem(5, "MasterPhase Dynamic EQ");
+        menu.addItem(6, "Complex 259 Synth");
+        menu.addItem(7, "Studio Reverb");
+        menu.addItem(8, "Stereo Delay");
+        menu.addItem(9, "Preamp: SSL 4k Line");
+        menu.addSeparator();
+        menu.addItem(10, "Sidechain Listen", true, m_sidechainListen);
+
+        menu.showMenuAsync(juce::PopupMenu::Options {}, [this](int result) {
+            const std::string trkName = m_nameLabel.getText().toStdString();
+            if (result == 1) {
+                m_slotNames[0] = "EQ";
+                m_slotButtons[0].setButtonText("EQ");
+                DspEditorWindow::open(DspEditorKind::parametricEq, trkName);
+            }
+            else if (result == 2) {
+                m_slotNames[1] = "COMP";
+                m_slotButtons[1].setButtonText("COMP");
+                DspEditorWindow::open(DspEditorKind::compressor, trkName);
+            }
+            else if (result == 3) {
+                m_slotNames[0] = "RESO";
+                m_slotButtons[0].setButtonText("RESO");
+                DspEditorWindow::open(DspEditorKind::resonanceSuppressor, trkName);
+            }
+            else if (result == 4) {
+                m_slotNames[1] = "SCOPE";
+                m_slotButtons[1].setButtonText("SCOPE");
+                DspEditorWindow::open(DspEditorKind::multibandImager, trkName);
+            }
+            else if (result == 5) {
+                m_slotNames[0] = "MPHASE";
+                m_slotButtons[0].setButtonText("MPHASE");
+                DspEditorWindow::open(DspEditorKind::linearPhaseEq, trkName);
+            }
+            else if (result == 6) {
+                m_slotNames[0] = "259";
+                m_slotButtons[0].setButtonText("259");
+                DspEditorWindow::open(DspEditorKind::buchlaComplexSynth, trkName);
+            }
+            else if (result == 7) {
+                m_slotNames[1] = "REV";
+                m_slotButtons[1].setButtonText("REV");
+                DspEditorWindow::open(DspEditorKind::reverb, trkName);
+            }
+            else if (result == 8) {
+                m_slotNames[1] = "DLY";
+                m_slotButtons[1].setButtonText("DLY");
+                DspEditorWindow::open(DspEditorKind::delay, trkName);
+            }
+            else if (result == 9) {
+                m_preampModel = 0;
+                m_slotNames[0] = "SSL";
+                m_slotButtons[0].setButtonText("SSL");
+            }
+            else if (result == 10) {
+                m_sidechainListen = ! m_sidechainListen;
+            }
+            repaint();
+        });
+    };
+    addAndMakeVisible(m_addInsertBtn);
+
+    for (std::size_t i = 0; i < 2; ++i)
+    {
+        m_slotButtons[i].setButtonText(m_slotNames[i]);
+        m_slotButtons[i].setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(36, 42, 54));
+        m_slotButtons[i].onClick = [this, i] {
+            openInsertEditor(i);
+        };
+        addAndMakeVisible(m_slotButtons[i]);
+    }
+
+    m_macroToggleBtn.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(40, 46, 58));
+    m_macroToggleBtn.onClick = [this] {
+        m_showMacros = ! m_showMacros;
+        m_macroToggleBtn.setColour(juce::TextButton::buttonColourId,
+            m_showMacros ? juce::Colour::fromRGB(0, 180, 220) : juce::Colour::fromRGB(40, 46, 58));
+        resized();
+        repaint();
+    };
+    addAndMakeVisible(m_macroToggleBtn);
 
     m_panKnob.onValueChange = [this] {
         if (! m_updatingFromModel)
@@ -98,85 +179,27 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
         });
     };
 
-    m_sslEqButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(40, 80, 120));
-    m_sslEqButton.onClick = [this] {
-        juce::PopupMenu menu;
-        menu.addItem(1, "Preamp Model: SSL 4000 Console Line", true, m_preampModel == 0);
-        menu.addItem(2, "Preamp Model: Germanium Transistor Fuzz", true, m_preampModel == 1);
-        menu.addItem(3, "Preamp Model: British Class-A Transformer", true, m_preampModel == 2);
-        menu.addItem(4, "Preamp Model: 1/2\" 2-Track Tape Saturation", true, m_preampModel == 3);
-        menu.addSeparator();
-        menu.addItem(5, "Auto-Gain Compensation", true, m_autoGainComp);
-
-        menu.showMenuAsync(juce::PopupMenu::Options {}, [this](int result) {
-            if (result >= 1 && result <= 4)
-            {
-                m_preampModel = result - 1;
-                const char* labels[] = {"SSL 4k", "Germ Fuzz", "Class-A", "Tape 1/2\""};
-                m_sslEqButton.setButtonText(labels[m_preampModel]);
-            }
-            else if (result == 5)
-            {
-                m_autoGainComp = ! m_autoGainComp;
-            }
-            repaint();
-        });
-    };
-
-    m_eqButton.onClick = [this] {
-        if (m_eqButton.getToggleState())
-            m_eqButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(60, 160, 220));
-        DspEditorWindow::open(DspEditorKind::parametricEq, m_nameLabel.getText().toStdString());
-    };
-
-    m_compButton.onClick = [this] {
-        if (m_compButton.getToggleState())
-            m_compButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(220, 140, 50));
-        DspEditorWindow::open(DspEditorKind::compressor, m_nameLabel.getText().toStdString());
-    };
-
-    m_synthButton.onClick = [this] {
-        if (m_synthButton.getToggleState())
-            m_synthButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(180, 80, 230));
-        DspEditorWindow::open(DspEditorKind::synth, m_nameLabel.getText().toStdString());
-    };
-
-    m_revButton.onClick = [this] {
-        if (m_revButton.getToggleState())
-            m_revButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(50, 180, 220));
-        DspEditorWindow::open(DspEditorKind::reverb, m_nameLabel.getText().toStdString());
-    };
-
-    m_delayButton.onClick = [this] {
-        if (m_delayButton.getToggleState())
-            m_delayButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(230, 170, 40));
-        DspEditorWindow::open(DspEditorKind::delay, m_nameLabel.getText().toStdString());
-    };
-
-    m_limiterButton.onClick = [this] {
-        if (m_limiterButton.getToggleState())
-            m_limiterButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(220, 60, 80));
-    };
-
     m_muteButton.setClickingTogglesState(true);
     m_soloButton.setClickingTogglesState(true);
     m_phaseButton.setClickingTogglesState(true);
     m_armButton.setClickingTogglesState(true);
-    m_eqButton.setClickingTogglesState(true);
-    m_compButton.setClickingTogglesState(true);
-    m_scListenButton.setClickingTogglesState(true);
-    m_scListenButton.onClick = [this] {
-        if (m_scListenButton.getToggleState())
-            m_scListenButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(0, 180, 240));
-    };
-    addAndMakeVisible(m_scListenButton);
-
-    m_synthButton.setClickingTogglesState(true);
-    m_revButton.setClickingTogglesState(true);
-    m_delayButton.setClickingTogglesState(true);
-    m_limiterButton.setClickingTogglesState(true);
 
     startTimerHz(30);
+}
+
+void ChannelStripComponent::openInsertEditor(std::size_t slotIdx)
+{
+    const std::string trkName = m_nameLabel.getText().toStdString();
+    const auto& name = m_slotNames[slotIdx];
+    if (name == "EQ") DspEditorWindow::open(DspEditorKind::parametricEq, trkName);
+    else if (name == "COMP") DspEditorWindow::open(DspEditorKind::compressor, trkName);
+    else if (name == "RESO") DspEditorWindow::open(DspEditorKind::resonanceSuppressor, trkName);
+    else if (name == "SCOPE") DspEditorWindow::open(DspEditorKind::multibandImager, trkName);
+    else if (name == "MPHASE") DspEditorWindow::open(DspEditorKind::linearPhaseEq, trkName);
+    else if (name == "259") DspEditorWindow::open(DspEditorKind::buchlaComplexSynth, trkName);
+    else if (name == "REV") DspEditorWindow::open(DspEditorKind::reverb, trkName);
+    else if (name == "DLY") DspEditorWindow::open(DspEditorKind::delay, trkName);
+    else DspEditorWindow::open(DspEditorKind::parametricEq, trkName);
 }
 
 ChannelStripComponent::~ChannelStripComponent()
@@ -332,6 +355,16 @@ void ChannelStripComponent::updateTrack(const project::Track& track)
     if (track.recordArmed)
         m_armButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour::fromRGB(220, 40, 40));
 
+    if (! track.inserts.empty())
+    {
+        for (std::size_t i = 0; i < std::min<std::size_t>(2, track.inserts.size()); ++i)
+        {
+            const auto& ins = track.inserts[i];
+            m_slotNames[i] = ins.name.empty() ? ("Slot " + std::to_string(i + 1)) : ins.name;
+            m_slotButtons[i].setButtonText(m_slotNames[i]);
+        }
+    }
+
     m_updatingFromModel = false;
 }
 
@@ -341,8 +374,11 @@ void ChannelStripComponent::paint(juce::Graphics& g)
     g.setColour(juce::Colour::fromRGB(50, 54, 62));
     g.drawRect(getLocalBounds(), 1);
 
-    // 8-Macro Modulation Overlay
-    drawMacroOverlay(g, m_macroBounds);
+    // 8-Macro Modulation Overlay (only when drawer is expanded)
+    if (m_showMacros && ! m_macroBounds.isEmpty())
+    {
+        drawMacroOverlay(g, m_macroBounds);
+    }
 
     // Visual Gain Reduction (GR) Overlay
     if (m_gainReductionDb > 0.1f)
@@ -372,23 +408,16 @@ void ChannelStripComponent::resized()
     m_nameLabel.setBounds(area.removeFromTop(20));
     area.removeFromTop(2);
 
-    // DSP Inserts row 1: EQ, SSL 4k
-    auto dspRow1 = area.removeFromTop(16);
-    m_eqButton.setBounds(dspRow1.removeFromLeft(dspRow1.getWidth() / 2).reduced(1));
-    m_sslEqButton.setBounds(dspRow1.reduced(1));
-    area.removeFromTop(1);
+    // Dynamic Insert Slots Header (Progressive Disclosure)
+    auto insertHdr = area.removeFromTop(18);
+    m_addInsertBtn.setBounds(insertHdr.removeFromLeft(insertHdr.getWidth() / 2).reduced(1));
+    m_macroToggleBtn.setBounds(insertHdr.reduced(1));
+    area.removeFromTop(2);
 
-    // DSP Inserts row 2: COMP, SC (Sidechain Listen), SYNTH
-    auto dspRow2 = area.removeFromTop(16);
-    m_compButton.setBounds(dspRow2.removeFromLeft(dspRow2.getWidth() * 2 / 5).reduced(1));
-    m_scListenButton.setBounds(dspRow2.removeFromLeft(dspRow2.getWidth() / 2).reduced(1));
-    m_synthButton.setBounds(dspRow2.reduced(1));
-    area.removeFromTop(1);
-
-    // DSP Inserts row 3: REV, DLY
-    auto dspRow3 = area.removeFromTop(16);
-    m_revButton.setBounds(dspRow3.removeFromLeft(dspRow3.getWidth() / 2).reduced(1));
-    m_delayButton.setBounds(dspRow3.reduced(1));
+    // Slot buttons (2 active slots)
+    auto slotRow = area.removeFromTop(16);
+    m_slotButtons[0].setBounds(slotRow.removeFromLeft(slotRow.getWidth() / 2).reduced(1));
+    m_slotButtons[1].setBounds(slotRow.reduced(1));
     area.removeFromTop(2);
 
     // Routing Dropdowns: Pan Law & VCA
@@ -400,7 +429,7 @@ void ChannelStripComponent::resized()
     m_panKnob.setBounds(area.removeFromTop(24).reduced(6, 0));
     area.removeFromTop(2);
 
-    // Button row: M, S, Ø, REC
+    // Button row: M, S, POL, REC
     auto buttonRow1 = area.removeFromTop(20);
     m_muteButton.setBounds(buttonRow1.removeFromLeft(buttonRow1.getWidth() / 2).reduced(1));
     m_soloButton.setBounds(buttonRow1.reduced(1));
@@ -411,9 +440,16 @@ void ChannelStripComponent::resized()
     m_armButton.setBounds(buttonRow2.reduced(1));
     area.removeFromTop(3);
 
-    // 8-Macro Modulation Mini-Matrix
-    m_macroBounds = area.removeFromTop(26).reduced(1, 0);
-    area.removeFromTop(3);
+    // 8-Macro Modulation Mini-Matrix (Collapsible Drawer)
+    if (m_showMacros)
+    {
+        m_macroBounds = area.removeFromTop(28).reduced(1, 0);
+        area.removeFromTop(3);
+    }
+    else
+    {
+        m_macroBounds = {};
+    }
 
     m_fader.setBounds(area);
 }
@@ -828,7 +864,7 @@ void MixerPanel::switchScene(const bool toSceneB)
 
     m_sceneAButton.setColour(juce::TextButton::buttonColourId, !m_activeSceneIsB ? juce::Colour(0xff238636) : juce::Colour(0xff21262d));
     m_sceneBButton.setColour(juce::TextButton::buttonColourId, m_activeSceneIsB ? juce::Colour(0xff238636) : juce::Colour(0xff21262d));
-    m_copySceneButton.setButtonText(m_activeSceneIsB ? "B ➔ A" : "A ➔ B");
+    m_copySceneButton.setButtonText(m_activeSceneIsB ? "B -> A" : "A -> B");
 }
 
 void MixerPanel::copyActiveSceneToOpposite()

@@ -34,12 +34,13 @@ public:
     [[nodiscard]] bool isMuted() const noexcept { return m_muteButton.getToggleState(); }
     [[nodiscard]] bool isSolo() const noexcept { return m_soloButton.getToggleState(); }
     [[nodiscard]] bool isPhaseInvert() const noexcept { return m_phaseButton.getToggleState(); }
-    [[nodiscard]] bool isSidechainListen() const noexcept { return m_scListenButton.getToggleState(); }
+    [[nodiscard]] bool isSidechainListen() const noexcept { return m_sidechainListen; }
 
 private:
     void sendGainPan();
     void timerCallback() override;
     void drawMacroOverlay(juce::Graphics& g, juce::Rectangle<int> bounds);
+    void openInsertEditor(std::size_t slotIdx);
 
     CommandHandler m_handler;
     project::TrackId m_trackId {0};
@@ -62,16 +63,15 @@ private:
     juce::ComboBox m_vcaCombo;
     juce::TextButton m_muteButton {"M"};
     juce::TextButton m_soloButton {"S"};
-    juce::TextButton m_phaseButton {"Ø"};
+    juce::TextButton m_phaseButton {"POL"};
     juce::TextButton m_armButton {"REC"};
-    juce::TextButton m_eqButton {"EQ"};
-    juce::TextButton m_sslEqButton {"SSL 4k"};
-    juce::TextButton m_compButton {"COMP"};
-    juce::TextButton m_scListenButton {"SC"};
-    juce::TextButton m_synthButton {"SYNTH"};
-    juce::TextButton m_revButton {"REV"};
-    juce::TextButton m_delayButton {"DLY"};
-    juce::TextButton m_limiterButton {"LIMIT"};
+
+    juce::TextButton m_addInsertBtn {"+ FX"};
+    std::array<juce::TextButton, 2> m_slotButtons;
+    std::array<std::string, 2> m_slotNames {{"EQ", "COMP"}};
+    juce::TextButton m_macroToggleBtn {"[M]"};
+    bool m_showMacros {false};
+    bool m_sidechainListen {false};
 };
 
 class MasterStripComponent final : public juce::Component
@@ -186,7 +186,7 @@ private:
     bool m_activeSceneIsB {false};
     juce::TextButton m_sceneAButton {"Mix A"};
     juce::TextButton m_sceneBButton {"Mix B"};
-    juce::TextButton m_copySceneButton {"A ➔ B"};
+    juce::TextButton m_copySceneButton {"A -> B"};
 
     // VCA Spill Controls
     int m_vcaSpillGroup {0}; // 0 = all tracks

@@ -2,6 +2,7 @@
 
 #include "ChannelRackView.h"
 #include "CommandPaletteOverlay.h"
+#include "DeviceRackView.h"
 #include "DragSplitterBar.h"
 #include "DrumPadSamplerView.h"
 #include "DspWireGridView.h"
@@ -75,6 +76,7 @@ public:
     enum class BottomDockMode : std::uint8_t
     {
         mixer,
+        deviceChain,
         pianoRoll,
         channelRack,
         drumSampler,
@@ -90,6 +92,7 @@ public:
     enum class DetachablePanel : std::uint8_t
     {
         mixer,
+        deviceChain,
         pianoRoll,
         channelRack,
         sessionMatrix,
@@ -223,7 +226,7 @@ private:
     juce::TextButton m_btnWsLive {"Live [7]"};
     juce::TextButton m_btnWsSave {"Save As..."};
     juce::TextButton m_btnToggleInspector {"Inspector [I]"};
-    juce::TextButton m_btnCommandPalette {"⌘K Search"};
+    juce::TextButton m_btnCommandPalette {"Ctrl+K Search"};
 
     // Left Track Inspector
     TrackInspectorView m_trackInspector;
@@ -236,15 +239,15 @@ private:
 
     // Bottom Dock (Categorized Smart Dock)
     BottomDockMode m_dockMode {BottomDockMode::mixer};
-    juce::TextButton m_btnCatMix {"🎚 Mix ▾"};
-    juce::TextButton m_btnCatEdit {"🎹 Edit ▾"};
-    juce::TextButton m_btnCatModular {"⚡ Synth ▾"};
-    juce::TextButton m_btnCatMaster {"📊 Master ▾"};
+    juce::TextButton m_btnCatMix {"Mix"};
+    juce::TextButton m_btnCatEdit {"Edit"};
+    juce::TextButton m_btnCatModular {"Synth"};
+    juce::TextButton m_btnCatMaster {"Master"};
     juce::Label m_lblActiveDock;
     juce::TextButton m_tabBrowserButton {"Browser [B]"};
-    juce::TextButton m_btnDualDock {"◫ Dual"};
-    juce::TextButton m_detachDockButton {"↗"};
-    juce::TextButton m_maximizeDockButton {"⛶"};
+    juce::TextButton m_btnDualDock {"Dual"};
+    juce::TextButton m_detachDockButton {"Detach"};
+    juce::TextButton m_maximizeDockButton {"Max"};
 
     bool m_dualDockEnabled {false};
     BottomDockMode m_secondaryDockMode {BottomDockMode::pianoRoll};
@@ -264,6 +267,7 @@ private:
     juce::TextButton m_tabSampleZoneButton {"SFZ Zones [K]"};
 
     MixerPanel m_mixerPanel;
+    DeviceRackView m_deviceRackView;
     PianoRollView m_pianoRollView;
     ChannelRackView m_channelRackView;
     DrumPadSamplerView m_drumSamplerView;
@@ -283,6 +287,7 @@ private:
 
     // Detached Floating Windows
     std::unique_ptr<FloatingPanelWindow> m_floatingMixer;
+    std::unique_ptr<FloatingPanelWindow> m_floatingDeviceRack;
     std::unique_ptr<FloatingPanelWindow> m_floatingPianoRoll;
     std::unique_ptr<FloatingPanelWindow> m_floatingChannelRack;
     std::unique_ptr<FloatingPanelWindow> m_floatingDrumSampler;

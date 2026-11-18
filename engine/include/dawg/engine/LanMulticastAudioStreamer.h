@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -33,6 +34,26 @@ struct StageViewTelemetry
     std::string clickAccent {"high"}; // high, mid, low
     std::string nextCue {"Chorus in 4 bars"};
     bool isPlaying {false};
+};
+
+struct LanJamSyncMessage
+{
+    std::string senderId;
+    std::uint32_t messageSequence {0};
+    bool isPlaying {false};
+    double bpm {120.0};
+    std::int64_t samplePosition {0};
+    std::uint32_t activeSceneIndex {0};
+};
+
+struct LanJamPeer
+{
+    std::string peerId;
+    std::string peerName;
+    std::string ipAddress;
+    std::uint16_t port {9002};
+    double latencyMs {0.0};
+    bool isMaster {false};
 };
 
 class LanMulticastAudioStreamer final
@@ -81,6 +102,12 @@ public:
     // Remote Web/Tablet Stage View JSON Telemetry Generator
     // =========================================================================
     [[nodiscard]] static std::string formatStageViewJson(const StageViewTelemetry& telemetry);
+
+    // =========================================================================
+    // Multi-User LAN Jam P2P Transport & Scene Synchronization
+    // =========================================================================
+    [[nodiscard]] static std::string serializeJamSync(const LanJamSyncMessage& msg);
+    [[nodiscard]] static std::optional<LanJamSyncMessage> deserializeJamSync(std::string_view jsonStr);
 
 private:
     std::uint32_t m_ssrc {0xDA560001};

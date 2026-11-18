@@ -64,7 +64,7 @@ DspEditorComponent::DspEditorComponent(DspEditorKind kind, std::string title)
 
     for (int i = 0; i < 5; ++i)
     {
-        m_starButtons[static_cast<std::size_t>(i)].setButtonText(juce::CharPointer_UTF8("\xe2\x98\x85")); // ★
+        m_starButtons[static_cast<std::size_t>(i)].setButtonText("*");
         m_starButtons[static_cast<std::size_t>(i)].setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
         m_starButtons[static_cast<std::size_t>(i)].setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(255, 205, 50));
         m_starButtons[static_cast<std::size_t>(i)].onClick = [this, star = i + 1] { updateStars(star); };
@@ -1261,15 +1261,15 @@ void DspEditorWindow::open(DspEditorKind kind, const std::string& trackName, std
     juce::String title;
     switch (kind)
     {
-    case DspEditorKind::parametricEq: title = "Parametric EQ — " + juce::String(trackName); break;
-    case DspEditorKind::compressor: title = "Dynamics Compressor — " + juce::String(trackName); break;
-    case DspEditorKind::synth: title = "TNHC Poly Synth — " + juce::String(trackName); break;
-    case DspEditorKind::reverb: title = "Algorithmic Reverb — " + juce::String(trackName); break;
-    case DspEditorKind::delay: title = "Stereo Delay — " + juce::String(trackName); break;
-    case DspEditorKind::resonanceSuppressor: title = "ResoTamer Dynamic Suppressor — " + juce::String(trackName); break;
-    case DspEditorKind::multibandImager: title = "StereoScope Mastering Imager — " + juce::String(trackName); break;
-    case DspEditorKind::linearPhaseEq: title = "MasterPhase Linear EQ — " + juce::String(trackName); break;
-    case DspEditorKind::buchlaComplexSynth: title = "Complex 259 West-Coast Synth — " + juce::String(trackName); break;
+    case DspEditorKind::parametricEq: title = "Parametric EQ - " + juce::String(trackName); break;
+    case DspEditorKind::compressor: title = "Dynamics Compressor - " + juce::String(trackName); break;
+    case DspEditorKind::synth: title = "TNHC Poly Synth - " + juce::String(trackName); break;
+    case DspEditorKind::reverb: title = "Algorithmic Reverb - " + juce::String(trackName); break;
+    case DspEditorKind::delay: title = "Stereo Delay - " + juce::String(trackName); break;
+    case DspEditorKind::resonanceSuppressor: title = "ResoTamer Dynamic Suppressor - " + juce::String(trackName); break;
+    case DspEditorKind::multibandImager: title = "StereoScope Mastering Imager - " + juce::String(trackName); break;
+    case DspEditorKind::linearPhaseEq: title = "MasterPhase Linear EQ - " + juce::String(trackName); break;
+    case DspEditorKind::buchlaComplexSynth: title = "Complex 259 West-Coast Synth - " + juce::String(trackName); break;
     }
 
     new DspEditorWindow(title, kind, std::move(onClose));

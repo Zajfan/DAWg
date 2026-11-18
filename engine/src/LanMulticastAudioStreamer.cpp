@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <optional>
 #include <sstream>
 
 namespace dawg::engine {
@@ -158,6 +159,52 @@ std::string LanMulticastAudioStreamer::formatStageViewJson(const StageViewTeleme
        << "  \"isPlaying\": " << (telemetry.isPlaying ? "true" : "false") << "\n"
        << "}";
     return ss.str();
+}
+
+std::string LanMulticastAudioStreamer::serializeJamSync(const LanJamSyncMessage& msg)
+{
+    std::ostringstream ss;
+    ss << "{\"sender\":\"" << msg.senderId << "\","
+       << "\"seq\":" << msg.messageSequence << ","
+       << "\"playing\":" << (msg.isPlaying ? "true" : "false") << ","
+       << "\"bpm\":" << std::fixed << std::setprecision(2) << msg.bpm << ","
+       << "\"samplePos\":" << msg.samplePosition << ","
+       << "\"scene\":" << msg.activeSceneIndex << "}";
+    return ss.str();
+}
+
+std::optional<LanJamSyncMessage> LanMulticastAudioStreamer::deserializeJamSync(std::string_view jsonStr)
+{
+    auto extractString = [](std::string_view s, std::string_view key) -> std::string {
+        const std::string needle = "\"" + std::string(key) + "\":\"";
+        const auto pos = s.find(needle);
+        if (pos == std::string_view::npos) return {};
+        const auto start = pos + needle.size();
+        const auto end = s.find('\"', start);
+        if (end == std::string_view::npos) return {};
+        return std::string(s.substr(start, end - start));
+    };
+
+    auto extractNumber = [](std::string_view s, std::string_view key) -> double {
+        const std::string needle = "\"" + std::string(key) + "\":";
+        const auto pos = s.find(needle);
+        if (pos == std::string_view::npos) return 0.0;
+        const auto start = pos + needle.size();
+        char* endPtr = nullptr;
+        return std::strtod(s.data() + start, &endPtr);
+    };
+
+    LanJamSyncMessage msg;
+    msg.senderId = extractString(jsonStr, "sender");
+    if (msg.senderId.empty()) return std::nullopt;
+
+    msg.messageSequence = static_cast<std::uint32_t>(extractNumber(jsonStr, "seq"));
+    msg.isPlaying = (jsonStr.find("\"playing\":true") != std::string_view::npos);
+    msg.bpm = extractNumber(jsonStr, "bpm");
+    msg.samplePosition = static_cast<std::int64_t>(extractNumber(jsonStr, "samplePos"));
+    msg.activeSceneIndex = static_cast<std::uint32_t>(extractNumber(jsonStr, "scene"));
+
+    return msg;
 }
 
 } // namespace dawg::engine

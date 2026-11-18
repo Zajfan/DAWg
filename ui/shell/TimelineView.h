@@ -139,8 +139,10 @@ private:
     juce::TextButton m_snapButton {"Snap: 1/16"};
     juce::TextButton m_autoButton {"Auto: OFF"};
     juce::TextButton m_razorButton {"Razor [S]"};
+    juce::TextButton m_macroButton {"Macros: OFF"};
     juce::TextButton m_addMarkerButton {"+ Marker"};
     bool m_razorMode {false};
+    bool m_showMacros {false};
 
     std::vector<TimelineMarker> m_markers;
 

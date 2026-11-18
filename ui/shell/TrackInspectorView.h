@@ -69,7 +69,7 @@ private:
     juce::TextButton m_btnArm {"REC"};
     juce::TextButton m_btnSolo {"S"};
     juce::TextButton m_btnMute {"M"};
-    juce::TextButton m_btnPolarity {"Ø"};
+    juce::TextButton m_btnPolarity {"POL"};
 
     // Volume & Meter
     MidiLearnableSlider m_faderVolume;

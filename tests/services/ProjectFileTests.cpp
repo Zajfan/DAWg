@@ -606,6 +606,71 @@ void testNativePluginRoundTrip(const fs::path& root)
     }
     (void) trackId;
 }
+
+void testCompressedDawgzArchiveAndAssetRelocation(const fs::path& root)
+{
+    auto project = Project::create("Beat Session", 1);
+    const auto trackId = project.addAudioTrack("Drums");
+    auto snap = project.snapshot();
+
+    // Create fixture audio files
+    const auto audioDir = root / "OriginalAudio";
+    fs::create_directories(audioDir);
+    const auto sampleA = audioDir / "kick.wav";
+    const auto sampleB = audioDir / "snare.wav";
+    writeDocument(sampleA, "RIFF_DUMMY_KICK_DATA");
+    writeDocument(sampleB, "RIFF_DUMMY_SNARE_DATA");
+
+    snap.assets.push_back(AudioAsset {
+        .id = 101,
+        .path = sampleA.string(),
+        .pathKind = AudioAssetPathKind::absolute,
+        .sampleRate = 48000,
+        .channelCount = 2,
+        .frameCount = 1000
+    });
+    snap.assets.push_back(AudioAsset {
+        .id = 102,
+        .path = sampleB.string(),
+        .pathKind = AudioAssetPathKind::absolute,
+        .sampleRate = 48000,
+        .channelCount = 2,
+        .frameCount = 1000
+    });
+
+    ProjectBundlerService bundler;
+    const auto dawgzPath = root / "BeatSession.dawgz";
+    auto bundleRes = bundler.bundleToDawgz(snap, dawgzPath, {sampleA, sampleB}, "Producer");
+    require(bundleRes.has_value(), "bundleToDawgz must succeed");
+    require(fs::exists(dawgzPath), "archive file must exist");
+    require(fs::file_size(dawgzPath) > 50, "archive file has content");
+
+    // Unbundle
+    const auto extractDir = root / "ExtractedSession";
+    auto unbundleRes = bundler.unbundleFromDawgz(dawgzPath, extractDir);
+    require(unbundleRes.has_value(), "unbundleFromDawgz must succeed");
+    require(fs::exists(extractDir / "project.json"), "extracted project.json exists");
+    require(fs::exists(extractDir / "manifest.json"), "extracted manifest.json exists");
+    require(fs::exists(extractDir / "Audio" / "kick.wav"), "extracted kick.wav exists");
+    require(fs::exists(extractDir / "Audio" / "snare.wav"), "extracted snare.wav exists");
+
+    // Test Asset Relocator
+    ProjectSnapshot missingSnap = snap;
+    missingSnap.assets[0].path = "/nonexistent/old/path/kick.wav";
+    missingSnap.assets[1].path = "/another/lost/folder/snare.wav";
+
+    const auto userSamplesDir = root / "UserSampleLibrary";
+    fs::create_directories(userSamplesDir / "Packs" / "VintageDrums");
+    writeDocument(userSamplesDir / "Packs" / "VintageDrums" / "kick.wav", "RIFF_DUMMY_KICK_DATA");
+    writeDocument(userSamplesDir / "Packs" / "VintageDrums" / "snare.wav", "RIFF_DUMMY_SNARE_DATA");
+
+    auto report = ProjectBundlerService::relocateMissingAssets(missingSnap, {userSamplesDir});
+    require(report.relocatedAssets.size() == 2, "both missing assets relocated");
+    require(report.unresolvedAssets.empty(), "no unresolved assets");
+    require(missingSnap.assets[0].path == (userSamplesDir / "Packs" / "VintageDrums" / "kick.wav").string(), "kick path updated");
+    require(missingSnap.assets[1].path == (userSamplesDir / "Packs" / "VintageDrums" / "snare.wav").string(), "snare path updated");
+    (void) trackId;
+}
 }
 
 int main()
@@ -622,5 +687,6 @@ int main()
     testProjectBundlerAndBranchingVersioning(directory.root);
     testAudioPoolManagerAndMissingAssetRelinking(directory.root);
     testNativePluginRoundTrip(directory.root);
-    std::puts("PASS: 11 persistence behavior tests");
+    testCompressedDawgzArchiveAndAssetRelocation(directory.root);
+    std::puts("PASS: 12 persistence behavior tests");
 }
