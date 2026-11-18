@@ -21,6 +21,8 @@ add_library(dawg_engine_core STATIC
     src/MidiControllerManager.cpp
     src/MixSnapshotMorpher.cpp
     src/MultiTrackRecordingEngine.cpp
+    src/MultitrackCompingEngine.cpp
+    src/MusicXmlNotationEngine.cpp
     src/OscSurfaceProtocolEngine.cpp
     src/PlaybackRingBuffer.cpp
     src/ProStudioDeliveryEngine.cpp
@@ -38,6 +40,7 @@ add_library(dawg_engine_core STATIC
     src/clap/ClapPluginNode.cpp
     src/dsp/AcousticDrumBleedCancellationNode.cpp
     src/dsp/AcousticPhysicalModelEngine.cpp
+    src/dsp/AdaptiveResonanceSuppressorNode.cpp
     src/dsp/AmbisonicsProcessorNode.cpp
     src/dsp/AnalogDegraderSuiteNode.cpp
     src/dsp/AnalogLadderRingModSynthNode.cpp
@@ -49,6 +52,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/BinauralSpatialPannerNode.cpp
     src/dsp/BrickwallLimiterNode.cpp
     src/dsp/ChordPadProgressionEngine.cpp
+    src/dsp/ComplexOscillatorWavefolderNode.cpp
     src/dsp/ConvolutionReverbNode.cpp
     src/dsp/CvGateEurorackNode.cpp
     src/dsp/CvPitchCalibrator.cpp
@@ -90,6 +94,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/PolyphaseOversampler.cpp
     src/dsp/RayTracingAcousticRoomNode.cpp
     src/dsp/SongwritingChordAssistantEngine.cpp
+    src/dsp/SofaBinauralSpatializerNode.cpp
     src/dsp/SpatialHeadTrackerBridge.cpp
     src/dsp/SpatialImmersive916Node.cpp
     src/dsp/SpatialObjectPannerNode.cpp

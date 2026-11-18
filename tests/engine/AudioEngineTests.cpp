@@ -132,6 +132,11 @@
 #include <dawg/engine/GenerativeEuclideanSequencerEngine.h>
 #include <dawg/engine/dsp/MultibandStereoImagerNode.h>
 #include <dawg/engine/StudioControlRoomMonitorConsole.h>
+#include <dawg/engine/dsp/AdaptiveResonanceSuppressorNode.h>
+#include <dawg/engine/MultitrackCompingEngine.h>
+#include <dawg/engine/dsp/ComplexOscillatorWavefolderNode.h>
+#include <dawg/engine/dsp/SofaBinauralSpatializerNode.h>
+#include <dawg/engine/MusicXmlNotationEngine.h>
 #include "../../ui/shell/WorkspaceLayoutManager.h"
 
 #include <array>
@@ -9376,6 +9381,246 @@ void testTubeAlignmentEuclideanImagerAndMonitorConsoleSuite()
         }
     }
 }
+
+void testResonanceCompingBuchlaSofaAndMusicXmlSuite()
+{
+    // =========================================================================
+    // 1. Adaptive Dynamic Resonance Suppressor & Smart Spectral Balancer
+    // =========================================================================
+    {
+        dawg::engine::dsp::AdaptiveResonanceSuppressorNode suppressor;
+        require(!suppressor.name().empty(), "Suppressor node name");
+        require(suppressor.prepare(48000.0, 512, 2), "Suppressor prepared");
+
+        suppressor.setDepth(0.7f);
+        suppressor.setSharpness(2.0f);
+        suppressor.setTame(0.5f);
+        suppressor.setRecover(0.3f);
+        suppressor.setSpectralTilt(1.5f);
+        require(suppressor.depth() == 0.7f, "Depth verified");
+        require(suppressor.sharpness() == 2.0f, "Sharpness verified");
+        require(suppressor.tame() == 0.5f, "Tame verified");
+        require(suppressor.recover() == 0.3f, "Recover verified");
+        require(suppressor.spectralTilt() == 1.5f, "Tilt verified");
+
+        std::array<float, 512> l {};
+        std::array<float, 512> r {};
+        // Synthetic signal: broadband noise with sharp resonant spike at 2.5kHz
+        for (std::size_t i = 0; i < 512; ++i)
+        {
+            const float resonance = std::sin(2.0f * std::numbers::pi_v<float> * 2500.0f * static_cast<float>(i) / 48000.0f) * 0.9f;
+            l[i] = resonance;
+            r[i] = resonance;
+        }
+
+        std::array<float*, 2> channels {l.data(), r.data()};
+        dawg::engine::ProcessContext ctx {
+            .audio = dawg::engine::AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 512
+            },
+            .midi = {},
+            .sampleRate = 48000.0,
+            .sidechain = {}
+        };
+
+        suppressor.process(ctx);
+        for (std::size_t i = 0; i < 512; ++i)
+        {
+            require(std::isfinite(l[i]), "Suppressed left output is finite");
+            require(std::isfinite(r[i]), "Suppressed right output is finite");
+        }
+
+        // Test Delta audition
+        suppressor.setAuditionDelta(true);
+        require(suppressor.isAuditionDelta(), "Delta audition active");
+        suppressor.process(ctx);
+        for (std::size_t i = 0; i < 512; ++i)
+        {
+            require(std::isfinite(l[i]), "Delta audition output is finite");
+        }
+    }
+
+    // =========================================================================
+    // 2. Multitrack Take Comping & Phase-Locked Group Editing
+    // =========================================================================
+    {
+        dawg::engine::MultitrackCompingEngine compEngine;
+
+        // Register two drum tracks in group 1 (e.g. Snare Top and Snare Bottom)
+        compEngine.registerTrack(10, 1);
+        compEngine.registerTrack(11, 1);
+        require(compEngine.trackGroup(10) == 1, "Track 10 in group 1");
+        require(compEngine.trackGroup(11) == 1, "Track 11 in group 1");
+
+        dawg::engine::TakeLane takeA {1, "Take 1", 4, 0x3498DBFF, false};
+        dawg::engine::TakeLane takeB {2, "Take 2", 5, 0xE74C3CFF, false};
+
+        compEngine.addTake(10, takeA);
+        compEngine.addTake(10, takeB);
+        compEngine.addTake(11, takeA);
+        compEngine.addTake(11, takeB);
+
+        // Phase-locked group swipe: 0 to 1000 frames from Take 1, 1000 to 2000 from Take 2
+        compEngine.swipeRegionGroup(1, 0, 0, 1000);
+        compEngine.swipeRegionGroup(1, 1, 1000, 2000);
+
+        const auto* regions10 = compEngine.compRegions(10);
+        const auto* regions11 = compEngine.compRegions(11);
+        require(regions10 != nullptr && regions11 != nullptr, "Comp regions created");
+        require(regions10->size() == 2, "Track 10 has 2 comp regions");
+        require(regions11->size() == 2, "Track 11 has 2 comp regions");
+        require((*regions10)[0].takeId == 1 && (*regions10)[0].endFrame == 1000, "Region 0 take 1");
+        require((*regions10)[1].takeId == 2 && (*regions10)[1].startFrame == 1000, "Region 1 take 2");
+
+        // Verify identical phase-locked bounds across tracks
+        require((*regions10)[0].startFrame == (*regions11)[0].startFrame, "Phase locked start 0");
+        require((*regions10)[1].startFrame == (*regions11)[1].startFrame, "Phase locked start 1");
+
+        // Render composite track with micro-crossfade
+        std::vector<float> take1Audio(2000, 0.5f);
+        std::vector<float> take2Audio(2000, -0.5f);
+        std::vector<const float*> takePtrs {take1Audio.data(), take2Audio.data()};
+        std::vector<float> compositeOut(2000, 0.0f);
+
+        compEngine.renderCompositeTrack(10, takePtrs, takePtrs.size(), compositeOut.data(), 2000, 64);
+        for (std::size_t i = 0; i < 2000; ++i)
+        {
+            require(std::isfinite(compositeOut[i]), "Composite rendered audio is finite");
+        }
+        // Check pre-cut and post-cut values
+        require(std::abs(compositeOut[200] - 0.5f) < 1e-4f, "Take 1 audio reproduced");
+        require(std::abs(compositeOut[1800] - (-0.5f)) < 1e-4f, "Take 2 audio reproduced");
+    }
+
+    // =========================================================================
+    // 3. West-Coast Complex Oscillator & Buchla/Serge Wavefolder Suite
+    // =========================================================================
+    {
+        dawg::engine::dsp::ComplexOscillatorWavefolderNode synth;
+        require(!synth.name().empty(), "Complex oscillator name");
+        require(synth.prepare(48000.0, 512, 2), "Complex oscillator prepared");
+
+        synth.setCarrierFrequency(220.0f);
+        synth.setModulatorFrequency(110.0f);
+        synth.setModulatorWaveform(dawg::engine::dsp::ModulatorWaveform::Triangle);
+        synth.setFmIndex(1.5f);
+        synth.setFoldAmount(0.6f);
+        synth.setFoldSymmetry(0.2f);
+        synth.setFoldStages(4);
+        synth.setLpgMode(dawg::engine::dsp::LpgMode::Combo);
+        synth.setLpgDecayMs(120.0f);
+        synth.strikeLpg(1.0f);
+
+        std::array<float, 512> l {};
+        std::array<float, 512> r {};
+        std::array<float*, 2> channels {l.data(), r.data()};
+        dawg::engine::ProcessContext ctx {
+            .audio = dawg::engine::AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 512
+            },
+            .midi = {},
+            .sampleRate = 48000.0,
+            .sidechain = {}
+        };
+
+        synth.process(ctx);
+
+        float maxEnergy = 0.0f;
+        for (std::size_t i = 0; i < 512; ++i)
+        {
+            require(std::isfinite(l[i]), "Buchla synth left output is finite");
+            require(std::isfinite(r[i]), "Buchla synth right output is finite");
+            maxEnergy = std::max(maxEnergy, std::abs(l[i]));
+        }
+        require(maxEnergy > 0.05f, "Complex oscillator produced audio with wavefolding and LPG");
+    }
+
+    // =========================================================================
+    // 4. Personalized Binaural 3D Spatializer & SOFA HRTF Renderer
+    // =========================================================================
+    {
+        dawg::engine::dsp::SofaBinauralSpatializerNode spatializer;
+        require(!spatializer.name().empty(), "Sofa spatializer name");
+        require(spatializer.prepare(48000.0, 512, 2), "Sofa spatializer prepared");
+        require(spatializer.sofaPointCount() >= 20, "Default spherical HRTF loaded");
+
+        spatializer.setSourceAzimuth(45.0f);
+        spatializer.setSourceElevation(15.0f);
+        spatializer.setSourceDistance(1.5f);
+
+        // Quaternion 90 deg Yaw rotation (w = cos(45°), z = sin(45°))
+        dawg::engine::dsp::Quaternion headYaw90 {0.7071f, 0.0f, 0.0f, 0.7071f};
+        spatializer.setTargetHeadOrientation(headYaw90);
+
+        std::array<float, 512> l {};
+        std::array<float, 512> r {};
+        l.fill(0.7f);
+        r.fill(0.7f);
+
+        std::array<float*, 2> channels {l.data(), r.data()};
+        dawg::engine::ProcessContext ctx {
+            .audio = dawg::engine::AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 512
+            },
+            .midi = {},
+            .sampleRate = 48000.0,
+            .sidechain = {}
+        };
+
+        spatializer.process(ctx);
+
+        for (std::size_t i = 0; i < 512; ++i)
+        {
+            require(std::isfinite(l[i]), "Binaural left output is finite");
+            require(std::isfinite(r[i]), "Binaural right output is finite");
+        }
+    }
+
+    // =========================================================================
+    // 5. Audio/MIDI Sheet Music & MusicXML Notation Engraving Engine
+    // =========================================================================
+    {
+        dawg::engine::MusicXmlNotationEngine notation;
+        notation.setTimeSignature(4, 4);
+
+        // 5.1 Enharmonic Spelling: F Major (1 Flat: Bb)
+        notation.setKeySignature(dawg::engine::KeySignature::F_Major);
+        const auto pitchBb = notation.spellPitch(70); // MIDI 70 = Bb4
+        require(pitchBb.step == 'B' && pitchBb.alter == -1 && pitchBb.octave == 4, "Spelled as Bb4 in F Major");
+
+        // 5.2 Enharmonic Spelling: D Major (2 Sharps: F#, C#)
+        notation.setKeySignature(dawg::engine::KeySignature::D_Major);
+        const auto pitchFsharp = notation.spellPitch(66); // MIDI 66 = F#4
+        require(pitchFsharp.step == 'F' && pitchFsharp.alter == 1 && pitchFsharp.octave == 4, "Spelled as F#4 in D Major");
+
+        // 5.3 Polyphonic Voice & Staff Splitting
+        std::vector<dawg::engine::NotationNoteInput> notes {
+            {72, 0.0, 1.0, 100, 0}, // C5 (Treble staff 1, voice 1)
+            {64, 1.0, 1.0, 95, 0},  // E4 (Treble staff 1, voice 1)
+            {48, 0.0, 2.0, 110, 0}  // C3 (Bass staff 2, voice 2)
+        };
+
+        const auto quantized = notation.quantizeNotes(notes);
+        require(quantized.size() == 3, "All 3 notes quantized");
+        require(quantized[0].staff == 1 && quantized[0].voice == 1, "C5 routed to treble staff voice 1");
+        require(quantized[1].staff == 2 && quantized[1].voice == 2, "C3 routed to bass staff voice 2");
+
+        // 5.4 MusicXML 4.0 Document Serialization
+        const std::string xml = notation.exportMusicXml(notes, "Symphony No. 1", "Piano");
+        require(xml.find("score-partwise") != std::string::npos, "MusicXML root element present");
+        require(xml.find("<part-name>Piano</part-name>") != std::string::npos, "Part name present");
+        require(xml.find("<measure number=\"1\">") != std::string::npos, "Measure 1 present");
+        require(xml.find("<step>C</step>") != std::string::npos, "Note pitch step present");
+        require(xml.find("<clef number=\"1\">") != std::string::npos, "Treble clef present");
+        require(xml.find("<clef number=\"2\">") != std::string::npos, "Bass clef present");
+    }
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -9565,4 +9810,5 @@ int main()
     testVectorAnalogAmbisonicsVocalAndRgbSequencerSuite();
     testRestorationDrumTriggerSpatialAtmosSpectralAndDynamicEqSuite();
     testTubeAlignmentEuclideanImagerAndMonitorConsoleSuite();
+    testResonanceCompingBuchlaSofaAndMusicXmlSuite();
 }
