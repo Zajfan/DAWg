@@ -63,7 +63,7 @@ private:
 
     // Header & Actions
     juce::Label m_titleLabel;
-    juce::TextButton m_sliceButton {"⚡ Auto-Slice to 16 Pads"};
+    juce::TextButton m_sliceButton {"Auto-Slice to 16 Pads"};
     juce::TextButton m_loadSampleButton {"Load Sample..."};
 
     // Parameter Controls for Selected Pad

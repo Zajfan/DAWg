@@ -383,7 +383,7 @@ MainEditorView::MainEditorView(EditorViewModel model,
 
     m_lblActiveDock.setFont(juce::FontOptions {11.0f}.withStyle("Bold"));
     m_lblActiveDock.setColour(juce::Label::textColourId, juce::Colour::fromRGB(0, 220, 255));
-    m_lblActiveDock.setText("● Mixer Console", juce::dontSendNotification);
+    m_lblActiveDock.setText("[MIX] Mixer Console", juce::dontSendNotification);
     addAndMakeVisible(m_lblActiveDock);
 
     m_btnDualDock.setTooltip("Split bottom dock into dual side-by-side panes");
@@ -845,7 +845,7 @@ void MainEditorView::detachPanel(DetachablePanel panel)
                 m_floatingMixer->setBounds(80, 80, 960, 520);
             }
             m_floatingMixer->setVisible(true);
-            m_tabMixerButton.setButtonText("Mixer [↙]");
+            m_tabMixerButton.setButtonText("Mixer [DOCK]");
             setDockMode(m_dockMode == BottomDockMode::mixer ? BottomDockMode::pianoRoll : m_dockMode);
         }
         break;
@@ -892,7 +892,7 @@ void MainEditorView::detachPanel(DetachablePanel panel)
                 m_floatingPianoRoll->setBounds(120, 120, 900, 480);
             }
             m_floatingPianoRoll->setVisible(true);
-            m_tabPianoRollButton.setButtonText("Piano Roll [↙]");
+            m_tabPianoRollButton.setButtonText("Piano Roll [DOCK]");
             setDockMode(m_dockMode == BottomDockMode::pianoRoll ? BottomDockMode::mixer : m_dockMode);
         }
         break;
@@ -908,7 +908,7 @@ void MainEditorView::detachPanel(DetachablePanel panel)
 
             m_floatingChannelRack->setBounds(160, 160, 800, 380);
             m_floatingChannelRack->setVisible(true);
-            m_tabChannelRackButton.setButtonText("Channel Rack [↙]");
+            m_tabChannelRackButton.setButtonText("Channel Rack [DOCK]");
             setDockMode(m_dockMode == BottomDockMode::channelRack ? BottomDockMode::mixer : m_dockMode);
         }
         break;
@@ -939,7 +939,7 @@ void MainEditorView::detachPanel(DetachablePanel panel)
 
             m_floatingDrumSampler->setBounds(150, 150, 860, 420);
             m_floatingDrumSampler->setVisible(true);
-            m_tabDrumSamplerButton.setButtonText("Drum Sampler [↙]");
+            m_tabDrumSamplerButton.setButtonText("Drum Sampler [DOCK]");
             setDockMode(m_dockMode == BottomDockMode::drumSampler ? BottomDockMode::mixer : m_dockMode);
         }
         break;
@@ -955,7 +955,7 @@ void MainEditorView::detachPanel(DetachablePanel panel)
 
             m_floatingRoutingMatrix->setBounds(160, 160, 820, 400);
             m_floatingRoutingMatrix->setVisible(true);
-            m_tabRoutingMatrixButton.setButtonText("Patchbay [↙]");
+            m_tabRoutingMatrixButton.setButtonText("Patchbay [DOCK]");
             setDockMode(m_dockMode == BottomDockMode::routingMatrix ? BottomDockMode::mixer : m_dockMode);
         }
         break;
@@ -971,7 +971,7 @@ void MainEditorView::detachPanel(DetachablePanel panel)
 
             m_floatingModulationRack->setBounds(180, 180, 840, 420);
             m_floatingModulationRack->setVisible(true);
-            m_tabModulationButton.setButtonText("Modulators [↙]");
+            m_tabModulationButton.setButtonText("Modulators [DOCK]");
             setDockMode(m_dockMode == BottomDockMode::modulationRack ? BottomDockMode::mixer : m_dockMode);
         }
         break;
@@ -987,7 +987,7 @@ void MainEditorView::detachPanel(DetachablePanel panel)
 
             m_floatingSpatialRadar->setBounds(200, 200, 720, 520);
             m_floatingSpatialRadar->setVisible(true);
-            m_tabSpatialRadarButton.setButtonText("Spatial 3D [↙]");
+            m_tabSpatialRadarButton.setButtonText("Spatial 3D [DOCK]");
             setDockMode(m_dockMode == BottomDockMode::spatialRadar ? BottomDockMode::mixer : m_dockMode);
         }
         break;
@@ -1003,7 +1003,7 @@ void MainEditorView::detachPanel(DetachablePanel panel)
 
             m_floatingWireGrid->setBounds(220, 220, 860, 540);
             m_floatingWireGrid->setVisible(true);
-            m_tabWireGridButton.setButtonText("Modular Grid [↙]");
+            m_tabWireGridButton.setButtonText("Modular Grid [DOCK]");
             setDockMode(m_dockMode == BottomDockMode::wireGrid ? BottomDockMode::mixer : m_dockMode);
         }
         break;
@@ -1019,7 +1019,7 @@ void MainEditorView::detachPanel(DetachablePanel panel)
 
             m_floatingMasteringSuite->setBounds(240, 240, 880, 520);
             m_floatingMasteringSuite->setVisible(true);
-            m_tabMasteringButton.setButtonText("Mastering [↙]");
+            m_tabMasteringButton.setButtonText("Mastering [DOCK]");
             setDockMode(m_dockMode == BottomDockMode::masteringSuite ? BottomDockMode::mixer : m_dockMode);
         }
         break;
@@ -1035,7 +1035,7 @@ void MainEditorView::detachPanel(DetachablePanel panel)
 
             m_floatingPitchBlob->setBounds(250, 250, 880, 520);
             m_floatingPitchBlob->setVisible(true);
-            m_tabPitchBlobButton.setButtonText("Pitch/Blob [↙]");
+            m_tabPitchBlobButton.setButtonText("Pitch/Blob [DOCK]");
             setDockMode(m_dockMode == BottomDockMode::pitchComping ? BottomDockMode::mixer : m_dockMode);
         }
         break;
@@ -1051,7 +1051,7 @@ void MainEditorView::detachPanel(DetachablePanel panel)
 
             m_floatingSampleZone->setBounds(260, 260, 920, 480);
             m_floatingSampleZone->setVisible(true);
-            m_tabSampleZoneButton.setButtonText("SFZ Zones [↙]");
+            m_tabSampleZoneButton.setButtonText("SFZ Zones [DOCK]");
             setDockMode(m_dockMode == BottomDockMode::sampleZones ? BottomDockMode::mixer : m_dockMode);
         }
         break;
@@ -1562,7 +1562,7 @@ juce::PopupMenu MainEditorView::getMenuForIndex(int menuIndex, const juce::Strin
         menu.addItem(cmdDetachMixer, "Detach Mixer to Window", true, isPanelDetached(DetachablePanel::mixer));
         menu.addItem(cmdDetachPianoRoll, "Detach Piano Roll to Window", true, isPanelDetached(DetachablePanel::pianoRoll));
         menu.addItem(cmdDetachChannelRack, "Detach Channel Rack to Window", true, isPanelDetached(DetachablePanel::channelRack));
-        menu.addItem(cmdReDockAll, "Re-Dock All Floating Panels  (↙)", true, false);
+        menu.addItem(cmdReDockAll, "Re-Dock All Floating Panels  (Dock)", true, false);
         menu.addItem(cmdToggleMaximizeDock, "Maximize Bottom Dock  (F11)", true, m_dockMaximized);
         menu.addSeparator();
         menu.addItem(cmdOpenVideoMonitor, "Video Picture Monitor & SMPTE Sync...", true, VideoPlaybackWindow::isOpen());

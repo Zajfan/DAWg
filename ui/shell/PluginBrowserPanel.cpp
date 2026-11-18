@@ -173,7 +173,7 @@ void PluginBrowserPanel::paintListBoxItem(int rowNumber, juce::Graphics& g, int 
 
     g.setColour(juce::Colour::fromRGB(140, 145, 160));
     g.setFont(juce::FontOptions(10.0f));
-    const auto subText = juce::String(plugin.vendor) + (plugin.isInstrument ? " • [Instrument]" : " • [Effect]");
+    const auto subText = juce::String(plugin.vendor) + (plugin.isInstrument ? " - [Instrument]" : " - [Effect]");
     g.drawText(subText, 8, 19, width - 70, 14, juce::Justification::topLeft);
 }
 

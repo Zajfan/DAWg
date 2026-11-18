@@ -982,7 +982,7 @@ void TimelineView::drawRazorAndSlipOverlay(juce::Graphics& g)
 
         g.setColour(juce::Colours::white);
         g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
-        g.drawText("[✂ SLICE]", razorPill, juce::Justification::centred);
+        g.drawText("[CUT]", razorPill, juce::Justification::centred);
     }
 
     // 2. Slip Edit Mode Indicator
@@ -1512,22 +1512,22 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
             menu.addItem(4, "Split Clip at Cursor (S)");
             menu.addItem(5, "Delete Clip");
             menu.addSeparator();
-            menu.addItem(6, "⚡ Split Clip into 4 Stems (Drums, Bass, Vocals, Other)");
-            menu.addItem(7, "⚡ Extract Groove to MIDI Pattern");
+            menu.addItem(6, "Split Clip into 4 Stems (Drums, Bass, Vocals, Other)");
+            menu.addItem(7, "Extract Groove to MIDI Pattern");
             menu.addSeparator();
-            menu.addItem(8, "⚡ Detect Transients & Add Warp Markers");
-            menu.addItem(9, "⚡ Elastic Quantize Warp Markers (1/16)");
-            menu.addItem(10, "⚡ Elastic Quantize Warp Markers (1/8)");
-            menu.addItem(11, "⚡ Clear All Warp Markers");
+            menu.addItem(8, "Detect Transients & Add Warp Markers");
+            menu.addItem(9, "Elastic Quantize Warp Markers (1/16)");
+            menu.addItem(10, "Elastic Quantize Warp Markers (1/8)");
+            menu.addItem(11, "Clear All Warp Markers");
             menu.addSeparator();
-            menu.addItem(12, "⚡ Slice Transients to Drum Pad Sampler");
-            menu.addItem(13, "⚡ Slice Transients to Multi-Sample Instrument");
-            menu.addItem(14, "⚡ Extract Groove Template (MPC60 / SP1200)");
-            menu.addItem(15, "⚡ Toggle Reverse Playback");
-            menu.addItem(16, "⚡ Toggle Granular Slice Scrub");
+            menu.addItem(12, "Slice Transients to Drum Pad Sampler");
+            menu.addItem(13, "Slice Transients to Multi-Sample Instrument");
+            menu.addItem(14, "Extract Groove Template (MPC60 / SP1200)");
+            menu.addItem(15, "Toggle Reverse Playback");
+            menu.addItem(16, "Toggle Granular Slice Scrub");
             menu.addSeparator();
-            menu.addItem(17, "⚡ Freeze Track In-Place");
-            menu.addItem(18, "⚡ Unfreeze Track");
+            menu.addItem(17, "Freeze Track In-Place");
+            menu.addItem(18, "Unfreeze Track");
 
             menu.showMenuAsync(juce::PopupMenu::Options {}, [this, clipId, mouseX = e.x](int result) {
                 if (result == 1)

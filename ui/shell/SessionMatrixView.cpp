@@ -455,13 +455,13 @@ void SessionMatrixView::drawGrid(juce::Graphics& g, juce::Rectangle<int>)
                     g.setColour(juce::Colour::fromRGB(120, 255, 170));
                     g.strokePath(ringPath, juce::PathStrokeType(2.0f));
 
-                    // Playing square [■]
+                    // Playing square [Stop Box]
                     g.setColour(juce::Colour::fromRGB(180, 255, 190));
                     g.fillRect(playBtn.reduced(5.0f));
                 }
                 else
                 {
-                    // Triangle [▶]
+                    // Triangle [Play Arrow]
                     g.setColour(juce::Colour::fromRGB(220, 230, 240));
                     juce::Path p;
                     p.addTriangle(playBtn.getX() + 6.0f, playBtn.getY() + 5.0f,

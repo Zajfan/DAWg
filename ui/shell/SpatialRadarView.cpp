@@ -218,17 +218,17 @@ void SpatialRadarView::paint(juce::Graphics& g)
     if (m_format == SpatialFormat::binauralHrtf)
     {
         g.setColour(juce::Colour::fromRGB(45, 180, 240));
-        g.drawText("🎧 HRTF BINAURAL 3D", modeBadge, juce::Justification::centred);
+        g.drawText("[HRTF] BINAURAL 3D", modeBadge, juce::Justification::centred);
     }
     else if (m_format == SpatialFormat::surround714)
     {
         g.setColour(juce::Colour::fromRGB(240, 180, 45));
-        g.drawText("🔊 7.1.4 ATMOS SURROUND", modeBadge, juce::Justification::centred);
+        g.drawText("[7.1.4] ATMOS SURROUND", modeBadge, juce::Justification::centred);
     }
     else
     {
         g.setColour(juce::Colour::fromRGB(200, 70, 210));
-        g.drawText("🌐 AMBISONICS B-FORMAT", modeBadge, juce::Justification::centred);
+        g.drawText("[FOA] AMBISONICS B-FORMAT", modeBadge, juce::Justification::centred);
     }
 
     // Concentric Range Rings: 1m, 2.5m, 5m, 10m

@@ -32,7 +32,7 @@ PitchBlobCompingView::PitchBlobCompingView()
 
     m_snapButton.onClick = [this] {
         m_snapToScale = !m_snapToScale;
-        m_snapButton.setButtonText(m_snapToScale ? "Snap Scale [✓]" : "Snap Scale [ ]");
+        m_snapButton.setButtonText(m_snapToScale ? "Snap Scale [ON]" : "Snap Scale [OFF]");
         if (m_snapToScale)
         {
             m_pitchEditor.quantizeToScale(m_scaleClasses, 1.0f);
@@ -43,7 +43,7 @@ PitchBlobCompingView::PitchBlobCompingView()
 
     m_toggleLanesButton.onClick = [this] {
         m_showTakeLanes = !m_showTakeLanes;
-        m_toggleLanesButton.setButtonText(m_showTakeLanes ? "Take Lanes [▲]" : "Take Lanes [▼]");
+        m_toggleLanesButton.setButtonText(m_showTakeLanes ? "Take Lanes [Hide]" : "Take Lanes [Show]");
         resized();
         repaint();
     };

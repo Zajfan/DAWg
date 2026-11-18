@@ -62,8 +62,8 @@ private:
 
     // UI Buttons & Combos
     juce::ComboBox m_scaleCombo;
-    juce::TextButton m_snapButton {"Snap Scale [✓]"};
-    juce::TextButton m_toggleLanesButton {"Take Lanes [▼]"};
+    juce::TextButton m_snapButton {"Snap Scale [ON]"};
+    juce::TextButton m_toggleLanesButton {"Take Lanes [Hide]"};
     juce::TextButton m_flattenCompButton {"Flatten Comp"};
     juce::Slider m_formantSlider;
     juce::Label m_formantLabel {"Formant", "Formant Shift: 0 st"};

@@ -102,7 +102,7 @@ VideoPlaybackWindow::ContentComponent::ContentComponent(const EditorViewModel& m
     m_lblSyncStatus.setFont(juce::FontOptions(11.0f, juce::Font::bold));
     m_lblSyncStatus.setColour(juce::Label::textColourId, juce::Colour::fromRGB(80, 220, 120));
     m_lblSyncStatus.setJustificationType(juce::Justification::centred);
-    m_lblSyncStatus.setText("● LOCKED TO TIMELINE PLAYHEAD", juce::dontSendNotification);
+    m_lblSyncStatus.setText("[SYNC] LOCKED TO TIMELINE PLAYHEAD", juce::dontSendNotification);
     addAndMakeVisible(m_lblSyncStatus);
 }
 
@@ -122,7 +122,7 @@ void VideoPlaybackWindow::ContentComponent::setViewModel(const EditorViewModel& 
     const auto totalFrames = static_cast<std::uint64_t>((static_cast<double>(curSample + oneHourOffsetSamples) / sr) * fps);
     m_lblFrameNumber.setText("Frame: " + juce::String(totalFrames) + "  |  Time: " + juce::String(static_cast<double>(curSample) / sr, 2) + "s", juce::dontSendNotification);
 
-    m_lblSyncStatus.setText(m_model.playing ? "▶ RUNNING (SAMPLE-ACCURATE SYNC)" : "■ PARKED (FRAME-ACCURATE SCRUB)", juce::dontSendNotification);
+    m_lblSyncStatus.setText(m_model.playing ? "[PLAY] RUNNING (SAMPLE-ACCURATE SYNC)" : "[STOP] PARKED (FRAME-ACCURATE SCRUB)", juce::dontSendNotification);
     m_lblSyncStatus.setColour(juce::Label::textColourId, m_model.playing ? juce::Colour::fromRGB(80, 220, 120) : juce::Colour::fromRGB(255, 180, 50));
     repaint();
 }

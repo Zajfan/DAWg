@@ -64,7 +64,7 @@ private:
     SpatialFormat m_format {SpatialFormat::binauralHrtf};
 
     juce::ComboBox m_formatCombo;
-    juce::TextButton m_hrtfHeadphoneButton {"🎧 Binaural HRTF"};
+    juce::TextButton m_hrtfHeadphoneButton {"Binaural HRTF"};
     juce::ComboBox m_headSizeCombo;
     juce::Slider m_elevationSlider;
     juce::Label m_elevationLabel;
