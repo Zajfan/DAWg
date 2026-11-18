@@ -1,5 +1,6 @@
 #include <dawg/plugins/ClapPluginLoader.h>
 #include <dawg/plugins/PluginScanner.h>
+#include <dawg/plugins/NativePluginCatalog.h>
 
 #include <cassert>
 #include <filesystem>
@@ -52,6 +53,38 @@ void testBuiltInPlugins()
     (void) foundEq;
     (void) foundComp;
     (void) foundReverb;
+
+    // Check expanded native suite
+    assert(builtins.size() >= 17);
+    const auto* buchlaDef = NativePluginCatalog::findPlugin("dawg.synth.buchla_complex");
+    assert(buchlaDef != nullptr);
+    assert(buchlaDef->descriptor.isInstrument);
+    assert(!buchlaDef->parameters.empty());
+    assert(!buchlaDef->presets.empty());
+    (void) buchlaDef;
+
+    const auto* resoDef = NativePluginCatalog::findPlugin("dawg.fx.resonance_suppressor");
+    assert(resoDef != nullptr);
+    assert(!resoDef->descriptor.isInstrument);
+    assert(!resoDef->parameters.empty());
+    assert(!resoDef->presets.empty());
+    (void) resoDef;
+
+    // Test node instantiation
+    auto buchlaNode = NativePluginCatalog::createNode("dawg.synth.buchla_complex");
+    assert(buchlaNode != nullptr);
+    assert(buchlaNode->name() == "West-Coast Complex Oscillator & Wavefolder");
+
+    auto resoNode = NativePluginCatalog::createNode("dawg.fx.resonance_suppressor");
+    assert(resoNode != nullptr);
+    assert(resoNode->name() == "Adaptive Dynamic Resonance Suppressor");
+
+    auto tubeNode = NativePluginCatalog::createNode("dawg.fx.tube_transformer");
+    assert(tubeNode != nullptr);
+
+    auto imagerNode = NativePluginCatalog::createNode("dawg.fx.multiband_imager");
+    assert(imagerNode != nullptr);
+
     std::cout << "testBuiltInPlugins: PASSED\n";
 }
 

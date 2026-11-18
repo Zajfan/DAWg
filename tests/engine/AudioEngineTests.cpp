@@ -142,6 +142,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -150,6 +151,7 @@
 #include <memory>
 #include <new>
 #include <span>
+#include <thread>
 
 namespace {
 void require(const bool condition, const char* message)
@@ -9621,6 +9623,202 @@ void testResonanceCompingBuchlaSofaAndMusicXmlSuite()
         require(xml.find("<clef number=\"2\">") != std::string::npos, "Bass clef present");
     }
 }
+
+void testEngineHardeningStressAndBenchmarksSuite()
+{
+    // =========================================================================
+    // 1. Dynamic Sample Rate Sweep (44.1 kHz to 192 kHz) Under Load
+    // =========================================================================
+    {
+        std::array<double, 6> sampleRates {44100.0, 48000.0, 88200.0, 96000.0, 176400.0, 192000.0};
+        dawg::engine::dsp::TubeTransformerSaturationNode tube;
+        dawg::engine::dsp::MultibandStereoImagerNode imager;
+        dawg::engine::dsp::AdaptiveResonanceSuppressorNode suppressor;
+        dawg::engine::dsp::ComplexOscillatorWavefolderNode synth;
+        dawg::engine::dsp::SofaBinauralSpatializerNode spatializer;
+
+        for (double sr : sampleRates)
+        {
+            require(tube.prepare(sr, 512, 2), "Tube prepared at dynamic SR");
+            require(imager.prepare(sr, 512, 2), "Imager prepared at dynamic SR");
+            require(suppressor.prepare(sr, 512, 2), "Suppressor prepared at dynamic SR");
+            require(synth.prepare(sr, 512, 2), "Synth prepared at dynamic SR");
+            require(spatializer.prepare(sr, 512, 2), "Spatializer prepared at dynamic SR");
+
+            std::array<float, 512> l {};
+            std::array<float, 512> r {};
+            std::array<float*, 2> channels {l.data(), r.data()};
+            dawg::engine::ProcessContext ctx {
+                .audio = dawg::engine::AudioBufferView {
+                    .channels = channels.data(),
+                    .channelCount = 2,
+                    .frameCount = 512
+                },
+                .midi = {},
+                .sampleRate = sr,
+                .sidechain = {}
+            };
+
+            synth.process(ctx);
+            tube.process(ctx);
+            suppressor.process(ctx);
+            imager.process(ctx);
+            spatializer.process(ctx);
+
+            for (std::size_t i = 0; i < 512; ++i)
+            {
+                require(std::isfinite(l[i]), "Chained DSP output L finite across SR sweep");
+                require(std::isfinite(r[i]), "Chained DSP output R finite across SR sweep");
+            }
+        }
+    }
+
+    // =========================================================================
+    // 2. Buffer Starvation & Boundary Resilience
+    // =========================================================================
+    {
+        dawg::engine::dsp::ComplexOscillatorWavefolderNode synth;
+        require(synth.prepare(48000.0, 1024, 2), "Synth prepared");
+
+        dawg::engine::dsp::AdaptiveResonanceSuppressorNode suppressor;
+        require(suppressor.prepare(48000.0, 1024, 2), "Suppressor prepared");
+
+        std::array<std::size_t, 6> testBlockSizes {0, 1, 3, 7, 64, 1024};
+        std::array<float, 1024> l {};
+        std::array<float, 1024> r {};
+        std::array<float*, 2> channels {l.data(), r.data()};
+
+        for (std::size_t sz : testBlockSizes)
+        {
+            dawg::engine::ProcessContext ctx {
+                .audio = dawg::engine::AudioBufferView {
+                    .channels = channels.data(),
+                    .channelCount = 2,
+                    .frameCount = sz
+                },
+                .midi = {},
+                .sampleRate = 48000.0,
+                .sidechain = {}
+            };
+
+            synth.process(ctx);
+            suppressor.process(ctx);
+
+            for (std::size_t i = 0; i < sz; ++i)
+            {
+                require(std::isfinite(l[i]), "DSP output finite on arbitrary block size");
+                require(std::isfinite(r[i]), "DSP output finite on arbitrary block size");
+            }
+        }
+    }
+
+    // =========================================================================
+    // 3. Concurrent Rapid Graph Handoff & Lock-Free Retirement
+    // =========================================================================
+    {
+        dawg::engine::AudioEngine engine;
+        dawg::engine::EngineConfig cfg {.sampleRate = 48000.0, .maximumBlockSize = 256, .outputChannels = 2};
+        require(engine.prepare(cfg), "Engine prepared for graph handoff");
+
+        std::atomic<bool> keepRunning {true};
+        std::thread audioThread([&]() {
+            std::array<float, 256> outL {};
+            std::array<float, 256> outR {};
+            std::array<float*, 2> channels {outL.data(), outR.data()};
+            dawg::engine::AudioBufferView outView {channels.data(), 2, 256};
+            dawg::engine::TransportSnapshot transport {};
+
+            while (keepRunning.load(std::memory_order_relaxed))
+            {
+                engine.process(outView, {}, transport);
+            }
+        });
+
+        // Publish 50 compiled graphs in rapid succession
+        for (std::uint64_t gen = 1; gen <= 50; ++gen)
+        {
+            auto g = std::make_unique<dawg::engine::CompiledGraph>();
+            g->generation = gen;
+            g->bpm = 120.0 + static_cast<double>(gen % 10);
+            engine.publishCompiledGraph(std::move(g));
+            engine.reclaimRetiredGraphs();
+        }
+
+        keepRunning.store(false, std::memory_order_relaxed);
+        audioThread.join();
+        engine.reclaimRetiredGraphs();
+    }
+
+    // =========================================================================
+    // 4. Real-time Sanitizer & Zero Allocation Verification
+    // =========================================================================
+    {
+        dawg::engine::dsp::ComplexOscillatorWavefolderNode synth;
+        require(synth.prepare(48000.0, 256, 2), "Synth prepared");
+
+        dawg::engine::dsp::AdaptiveResonanceSuppressorNode suppressor;
+        require(suppressor.prepare(48000.0, 256, 2), "Suppressor prepared");
+
+        dawg::engine::dsp::TubeTransformerSaturationNode tube;
+        require(tube.prepare(48000.0, 256, 2), "Tube prepared");
+
+        dawg::engine::dsp::MultibandStereoImagerNode imager;
+        require(imager.prepare(48000.0, 256, 2), "Imager prepared");
+
+        dawg::engine::dsp::SofaBinauralSpatializerNode spatializer;
+        require(spatializer.prepare(48000.0, 256, 2), "Spatializer prepared");
+
+        std::array<float, 256> l {};
+        std::array<float, 256> r {};
+        std::array<float*, 2> channels {l.data(), r.data()};
+        dawg::engine::ProcessContext ctx {
+            .audio = dawg::engine::AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 256
+            },
+            .midi = {},
+            .sampleRate = 48000.0,
+            .sidechain = {}
+        };
+
+#if !defined(DAWG_TSAN_ACTIVE)
+        g_trackAllocations.store(true, std::memory_order_release);
+        const auto allocStart = g_allocationCount.load(std::memory_order_acquire);
+#endif
+
+        synth.process(ctx);
+        tube.process(ctx);
+        suppressor.process(ctx);
+        imager.process(ctx);
+        spatializer.process(ctx);
+
+#if !defined(DAWG_TSAN_ACTIVE)
+        const auto allocEnd = g_allocationCount.load(std::memory_order_acquire);
+        g_trackAllocations.store(false, std::memory_order_release);
+        require(allocEnd == allocStart, "ZERO heap allocations in real-time chained DSP processing");
+#endif
+    }
+
+    // =========================================================================
+    // 5. CPU SIMD Optimization & Throughput Benchmark
+    // =========================================================================
+    {
+        constexpr std::size_t benchFrames = 2048;
+        std::vector<float> inData(benchFrames, 0.707f);
+        std::vector<float> outData(benchFrames, 0.0f);
+
+        const auto t0 = std::chrono::steady_clock::now();
+        for (std::size_t iter = 0; iter < 5000; ++iter)
+        {
+            dawg::engine::SimdMath::applyGain(outData.data(), 1.05f, benchFrames);
+            dawg::engine::SimdMath::scaleAndAccumulate(outData.data(), inData.data(), 0.5f, benchFrames);
+        }
+        const auto t1 = std::chrono::steady_clock::now();
+        const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+        require(elapsedMs < 1000, "SIMD vector operations exceed required real-time throughput");
+    }
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -9811,4 +10009,5 @@ int main()
     testRestorationDrumTriggerSpatialAtmosSpectralAndDynamicEqSuite();
     testTubeAlignmentEuclideanImagerAndMonitorConsoleSuite();
     testResonanceCompingBuchlaSofaAndMusicXmlSuite();
+    testEngineHardeningStressAndBenchmarksSuite();
 }

@@ -5,6 +5,7 @@
 #include "VideoPlaybackWindow.h"
 #include "WorkspaceLayoutManager.h"
 #include <dawg/engine/SmpteTimecode.h>
+#include <dawg/plugins/NativePluginCatalog.h>
 
 #include <utility>
 
@@ -430,7 +431,24 @@ MainEditorView::MainEditorView(EditorViewModel model,
 
     m_pluginBrowser = std::make_unique<PluginBrowserPanel>(
         [this](const plugins::PluginDescriptor& plugin, bool createNewTrack) {
-            PluginWindow::open(plugin.name);
+            std::vector<PluginParameterDesc> params;
+            if (const auto* def = plugins::NativePluginCatalog::findPlugin(plugin.id))
+            {
+                for (const auto& p : def->parameters)
+                {
+                    params.push_back(PluginParameterDesc {
+                        .id = p.id,
+                        .name = p.name,
+                        .minVal = p.minVal,
+                        .maxVal = p.maxVal,
+                        .defaultVal = p.defaultVal,
+                        .currentVal = p.defaultVal,
+                        .unitLabel = p.unit,
+                        .isStepped = p.isStepped
+                    });
+                }
+            }
+            PluginWindow::open(plugin.name, std::move(params));
             if (createNewTrack)
             {
                 if (plugin.isInstrument)

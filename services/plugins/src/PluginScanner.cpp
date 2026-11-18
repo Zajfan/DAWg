@@ -1,4 +1,5 @@
 #include <dawg/plugins/PluginScanner.h>
+#include <dawg/plugins/NativePluginCatalog.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -58,74 +59,7 @@ PluginCategory categorizeFromName(const std::string& name, bool& outIsInstrument
 
 std::vector<PluginDescriptor> PluginScanner::getBuiltInPlugins()
 {
-    return {
-        {
-            .id = "tnhc.parametric_eq",
-            .name = "Tnhc 4-Band Parametric EQ",
-            .vendor = "The No-hands Company",
-            .version = "1.0.0",
-            .path = "",
-            .format = PluginFormat::native,
-            .category = PluginCategory::eq,
-            .isInstrument = false,
-            .isSandboxed = false
-        },
-        {
-            .id = "tnhc.studio_compressor",
-            .name = "Tnhc Studio Dynamics Compressor",
-            .vendor = "The No-hands Company",
-            .version = "1.0.0",
-            .path = "",
-            .format = PluginFormat::native,
-            .category = PluginCategory::dynamics,
-            .isInstrument = false,
-            .isSandboxed = false
-        },
-        {
-            .id = "tnhc.master_limiter",
-            .name = "Tnhc Brickwall Master Limiter",
-            .vendor = "The No-hands Company",
-            .version = "1.0.0",
-            .path = "",
-            .format = PluginFormat::native,
-            .category = PluginCategory::dynamics,
-            .isInstrument = false,
-            .isSandboxed = false
-        },
-        {
-            .id = "tnhc.synth",
-            .name = "Tnhc Polyphonic Subtractive Synth",
-            .vendor = "The No-hands Company",
-            .version = "1.0.0",
-            .path = "",
-            .format = PluginFormat::native,
-            .category = PluginCategory::instrument,
-            .isInstrument = true,
-            .isSandboxed = false
-        },
-        {
-            .id = "tnhc.plate_reverb",
-            .name = "Tnhc Algorithmic Plate Reverb",
-            .vendor = "The No-hands Company",
-            .version = "1.0.0",
-            .path = "",
-            .format = PluginFormat::native,
-            .category = PluginCategory::spatial,
-            .isInstrument = false,
-            .isSandboxed = false
-        },
-        {
-            .id = "tnhc.stereo_delay",
-            .name = "Tnhc Stereo Delay",
-            .vendor = "The No-hands Company",
-            .version = "1.0.0",
-            .path = "",
-            .format = PluginFormat::native,
-            .category = PluginCategory::spatial,
-            .isInstrument = false,
-            .isSandboxed = false
-        }
-    };
+    return NativePluginCatalog::getDescriptors();
 }
 
 std::vector<std::filesystem::path> PluginScanner::parseEnvPath(const char* envVar)

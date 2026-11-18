@@ -4,6 +4,7 @@ add_subdirectory(media)
 add_library(dawg_services_plugins STATIC
     plugins/src/PluginScanner.cpp
     plugins/src/ClapPluginLoader.cpp
+    plugins/src/NativePluginCatalog.cpp
 )
 target_include_directories(dawg_services_plugins PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/plugins/include)
 target_link_libraries(dawg_services_plugins PUBLIC dawg_engine_core ${CMAKE_DL_LIBS})
