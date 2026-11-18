@@ -22,6 +22,7 @@ add_library(dawg_engine_core STATIC
     src/MultiTrackRecordingEngine.cpp
     src/OscSurfaceProtocolEngine.cpp
     src/PlaybackRingBuffer.cpp
+    src/ProStudioDeliveryEngine.cpp
     src/RecordRingBuffer.cpp
     src/RenderSnapshotPublisher.cpp
     src/SessionMatrixEngine.cpp
@@ -61,21 +62,25 @@ add_library(dawg_engine_core STATIC
     src/dsp/MasteringStemExportEngine.cpp
     src/dsp/MacroModulationMatrix.cpp
     src/dsp/MicrotonalTuningEngine.cpp
+    src/dsp/MtsEspTuningEngine.cpp
     src/dsp/ModulatorRack.cpp
     src/dsp/MpeVoiceManager.cpp
     src/dsp/MultiMicDrumDebleedEngine.cpp
     src/dsp/MultiSampleInstrumentNode.cpp
     src/dsp/MultiTrackPhaseAlignerNode.cpp
     src/dsp/MultibandCompressorNode.cpp
+    src/dsp/MultibandTransientDuckingNode.cpp
     src/dsp/NeuralAmpModelerNode.cpp
     src/dsp/OpticalVariMuCompressorNode.cpp
     src/dsp/ParametricEQNode.cpp
     src/dsp/PhysicalModelingSynthNode.cpp
     src/dsp/PolymetricSequencerEngine.cpp
     src/dsp/PolyphaseOversampler.cpp
+    src/dsp/SongwritingChordAssistantEngine.cpp
     src/dsp/SpatialHeadTrackerBridge.cpp
     src/dsp/SpatialObjectPannerNode.cpp
     src/dsp/SpatialSurroundPannerNode.cpp
+    src/dsp/SpectralAdditiveResynthesisNode.cpp
     src/dsp/SpectralBalanceAssistant.cpp
     src/SpectralRepairEngine.cpp
     src/dsp/SpectralMorphCrossSynthNode.cpp

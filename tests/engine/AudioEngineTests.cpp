@@ -107,6 +107,11 @@
 #include <dawg/engine/LanMulticastAudioStreamer.h>
 #include <dawg/engine/DynamicConductorEngine.h>
 #include <dawg/engine/dsp/LiveDspScriptSandboxNode.h>
+#include <dawg/engine/dsp/SpectralAdditiveResynthesisNode.h>
+#include <dawg/engine/dsp/SongwritingChordAssistantEngine.h>
+#include <dawg/engine/dsp/MtsEspTuningEngine.h>
+#include <dawg/engine/dsp/MultibandTransientDuckingNode.h>
+#include <dawg/engine/ProStudioDeliveryEngine.h>
 #include "../../ui/shell/WorkspaceLayoutManager.h"
 
 #include <array>
@@ -7956,6 +7961,232 @@ void testControlSurfacesModularLinkConductorAndDspSandboxSuite()
         require(std::abs(inL[50] - 0.42f) < 1e-4f, "Pass-through active seamlessly after hot reload");
     }
 }
+
+void testSpectralSongwritingMtsTransientAndDeliverySuite()
+{
+    using namespace dawg::engine;
+    using namespace dawg::engine::dsp;
+
+    // =========================================================================
+    // 1. Spectral Additive Resynthesis & 2D Morphing Sampler
+    // =========================================================================
+    {
+        SpectralAdditiveResynthesisNode resynth;
+        require(resynth.prepare(48000.0, 128, 2), "SpectralAdditiveResynthesisNode prepared");
+
+        resynth.setMorphX(0.5f);
+        resynth.setFormantWarp(1.2f);
+        resynth.setInharmonicity(0.1f);
+        resynth.setFundamentalPitch(440.0f);
+        resynth.setResidualNoiseMix(0.2f);
+
+        std::array<float, 128> outL {};
+        std::array<float, 128> outR {};
+        std::array<float*, 2> channels = { outL.data(), outR.data() };
+        ProcessContext ctx {
+            .audio = AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 128
+            },
+            .sidechain = AudioBufferView {}
+        };
+
+        resynth.process(ctx);
+        require(! std::isnan(outL[50]), "Output sample is valid");
+
+        float energy = 0.0f;
+        for (float s : outL) energy += s * s;
+        require(energy > 0.001f, "Additive synthesis generates non-zero energy");
+
+        // Time-freezing & Scrubbing
+        resynth.setTimeFreeze(true);
+        resynth.setScrubPosition(0.35f);
+        require(resynth.isTimeFrozen(), "Time freeze engaged");
+        require(resynth.scrubPosition() == 0.35f, "Scrub position matches");
+
+        resynth.process(ctx);
+        require(! std::isnan(outL[10]), "Frozen frame resynthesis valid");
+    }
+
+    // =========================================================================
+    // 2. Songwriting Chord Assistant & Interactive Circle of Fifths
+    // =========================================================================
+    {
+        const auto circle = SongwritingChordAssistantEngine::generateCircleOfFifths();
+        require(circle.size() == 12, "Circle of fifths has 12 keys");
+        require(circle[0].tonicPitchClass == 0, "Key 0 is C");
+        require(circle[1].tonicPitchClass == 7, "Key 1 is G (fifth up from C)");
+
+        // Diatonic chords in C Major
+        const auto diatonics = SongwritingChordAssistantEngine::getDiatonicChords(0, false);
+        require(diatonics.size() == 7, "7 diatonic chords in C major");
+        require(diatonics[0].root == 0 && diatonics[0].quality == ChordQuality::maj7, "I is Cmaj7");
+        require(diatonics[4].root == 7 && diatonics[4].quality == ChordQuality::dom7, "V is G7");
+
+        // Secondary dominants in C: V7/V is D7 (root 2)
+        const auto secDoms = SongwritingChordAssistantEngine::getSecondaryDominants(0);
+        require(secDoms.size() == 5, "5 secondary dominants found");
+        require(secDoms[3].chord.root == 2 && secDoms[3].romanNumeral == "V7/V", "V7/V is D7");
+
+        // Modal interchange in C: bVI is Abmaj7 (root 8)
+        const auto borrowed = SongwritingChordAssistantEngine::getModalInterchangeChords(0);
+        require(borrowed.size() >= 5, "Modal interchange chords returned");
+        require(borrowed[0].chord.root == 8 && borrowed[0].romanNumeral == "bVI", "bVI is Abmaj7");
+
+        // Voice Leading Optimization: C major (60, 64, 67) -> F major (F, A, C)
+        std::vector<std::uint8_t> currentVoicing = { 60, 64, 67 }; // C, E, G
+        Chord fMaj {.root = 5, .quality = ChordQuality::major, .bassNote = -1}; // F, A, C
+        const auto optVoicing = SongwritingChordAssistantEngine::optimizeVoiceLeading(currentVoicing, fMaj, 4);
+        require(! optVoicing.empty(), "Optimal voicing generated");
+        // Check that common tone C (60) is retained
+        const bool hasCommonTone = std::find(optVoicing.begin(), optVoicing.end(), 60) != optVoicing.end();
+        require(hasCommonTone, "Voice leading preserves common tone C");
+
+        // Master Chord Track
+        SongwritingChordAssistantEngine assistant;
+        assistant.addChordEvent(ChordTrackEvent {.tick = 0, .chord = diatonics[0], .customLabel = "Cmaj7"});
+        assistant.addChordEvent(ChordTrackEvent {.tick = 1920, .chord = diatonics[3], .customLabel = "Fmaj7"});
+        require(assistant.chordAtTick(0).root == 0, "Chord at tick 0 is C");
+        require(assistant.chordAtTick(1000).root == 0, "Chord at tick 1000 is still C");
+        require(assistant.chordAtTick(1920).root == 5, "Chord at tick 1920 is F");
+    }
+
+    // =========================================================================
+    // 3. Universal Microtonal Tuning Suite (MTS-ESP & Hermode Retuning)
+    // =========================================================================
+    {
+        MtsEspTuningEngine tuning;
+        require(tuning.isMaster(), "Tuning engine acts as MTS-ESP Master");
+        require(std::abs(tuning.noteFrequencyHz(69) - 440.0) < 1e-4, "A4 is 440 Hz in 12-TET");
+
+        // Load 1/4-Comma Meantone
+        tuning.loadHistoricalPreset(HistoricalTuningPreset::meantoneQuarterComma);
+        require(tuning.noteOffsetCents(64) < -10.0, "Major 3rd (E4) is pure/narrow in 1/4-comma meantone");
+
+        // Dynamic Hermode Retuning
+        tuning.loadHistoricalPreset(HistoricalTuningPreset::equalTemperament12);
+        tuning.setHermodeConfig(HermodeTuningConfig {.enabled = true, .depth = 1.0f, .glideMs = 20.0f});
+
+        // Play C4 (60) and E4 (64)
+        std::array<std::uint8_t, 2> activeNotes = { 60, 64 };
+        tuning.updateActiveNotes(activeNotes);
+
+        const double stdE4 = tuning.noteFrequencyHz(64);
+        const double hermodeE4 = tuning.dynamicNoteFrequencyHz(64);
+        require(hermodeE4 < stdE4, "Hermode retuning flattens major third towards pure 5:4 ratio (-13.7 cents)");
+    }
+
+    // =========================================================================
+    // 4. Multiband Transient Designer & Intelligent Spectral Clashing Ducking
+    // =========================================================================
+    {
+        MultibandTransientDuckingNode mbDucking;
+        require(mbDucking.prepare(48000.0, 128, 2), "MultibandTransientDuckingNode prepared");
+
+        mbDucking.setAttackGainDb(TransientBand::low, 6.0f);
+        mbDucking.setSustainGainDb(TransientBand::mid, -4.0f);
+        mbDucking.setCrossoverFrequencies(180.0f, 3500.0f);
+        mbDucking.setSubHarmonicEnabled(true);
+        mbDucking.setSubHarmonicMix(0.35f);
+
+        require(mbDucking.lowMidCrossoverHz() == 180.0f, "Low-mid crossover is 180 Hz");
+        require(mbDucking.isSubHarmonicEnabled(), "Sub-harmonic generator active");
+
+        std::array<float, 128> mainL {};
+        std::array<float, 128> mainR {};
+        std::array<float, 128> sideL {};
+        std::array<float, 128> sideR {};
+        mainL[0] = 1.0f; // Impulse for transient analysis
+        sideL.fill(0.5f); // Sidechain signal active
+
+        std::array<float*, 2> mainCh = { mainL.data(), mainR.data() };
+        std::array<float*, 2> sideCh = { sideL.data(), sideR.data() };
+
+        ProcessContext ctx {
+            .audio = AudioBufferView {
+                .channels = mainCh.data(),
+                .channelCount = 2,
+                .frameCount = 128
+            },
+            .sidechain = AudioBufferView {
+                .channels = sideCh.data(),
+                .channelCount = 2,
+                .frameCount = 128
+            }
+        };
+
+        mbDucking.process(ctx);
+        require(! std::isnan(mainL[0]), "Processed transient output is valid");
+    }
+
+    // =========================================================================
+    // 5. Pro Studio Delivery, Multi-Stem Exporter & AAF/OMF Interchange
+    // =========================================================================
+    {
+        DeliveryTokenContext ctx {
+            .projectName = "MidnightDrive",
+            .trackNumber = 3,
+            .trackName = "LeadVocal",
+            .tempoBpm = 124.0,
+            .sampleRate = 48000.0,
+            .bitDepth = 24,
+            .dateString = "20261118"
+        };
+
+        const auto stemName = ProStudioDeliveryEngine::formatStemFilename(
+            "{Project}_{TrackNumber}_{TrackName}_{BPM}_{SampleRate}_{Date}.wav",
+            ctx);
+
+        require(stemName == "MidnightDrive_03_LeadVocal_124BPM_48k_20261118.wav", "Stem filename tokens formatted correctly");
+
+        // AAF XML interchange
+        std::vector<AafTrackDescriptor> tracks;
+        AafTrackDescriptor trk1 {
+            .trackName = "Kick",
+            .trackIndex = 1,
+            .isStereo = false,
+            .clips = {
+                AafClipDescriptor {
+                    .clipName = "KickTake1",
+                    .sourceFilePath = "/audio/kick.wav",
+                    .timelineStartSamples = 0,
+                    .durationSamples = 48000,
+                    .sourceOffsetSamples = 0,
+                    .fadeInSeconds = 0.005f,
+                    .fadeOutSeconds = 0.005f,
+                    .gainDb = 0.0f,
+                    .pan = 0.0f
+                }
+            }
+        };
+        tracks.push_back(trk1);
+
+        const auto aafXml = ProStudioDeliveryEngine::generateAafXmlDescriptor("MidnightDrive", 48000.0, 124.0, tracks);
+        require(aafXml.find("<InterchangeSession") != std::string::npos, "AAF XML contains root tag");
+        require(aafXml.find("<Track index=\"1\" name=\"Kick\"") != std::string::npos, "AAF XML contains track 1");
+        require(aafXml.find("<Clip name=\"KickTake1\"") != std::string::npos, "AAF XML contains clip");
+
+        // Checksum & Delivery Manifest
+        std::vector<FileChecksumEntry> manifestEntries;
+        std::array<float, 64> dummyBuffer {};
+        dummyBuffer.fill(0.123f);
+        const auto hash = ProStudioDeliveryEngine::computeSha256ForFloats(dummyBuffer.data(), 64);
+        require(! hash.empty(), "Checksum hash generated");
+
+        manifestEntries.push_back(FileChecksumEntry {
+            .fileName = stemName,
+            .fileSizeBytes = 1048576,
+            .sha256Hex = hash,
+            .integratedLufs = -14.2f,
+            .truePeakDb = -1.0f
+        });
+
+        const auto manifestJson = ProStudioDeliveryEngine::generateDeliveryManifestJson("MidnightDrive", "Acme Records", manifestEntries);
+        require(manifestJson.find("\"project\": \"MidnightDrive\"") != std::string::npos, "Manifest JSON contains project");
+        require(manifestJson.find(stemName) != std::string::npos, "Manifest JSON contains stem name");
+    }
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -8140,4 +8371,5 @@ int main()
     testWorkspaceElasticWarpAutomationArpAndEurorackSuite();
     testSpatialTapeVocalGuitarAndFollowGrooveSuite();
     testControlSurfacesModularLinkConductorAndDspSandboxSuite();
+    testSpectralSongwritingMtsTransientAndDeliverySuite();
 }
