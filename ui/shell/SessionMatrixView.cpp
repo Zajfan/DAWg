@@ -95,18 +95,26 @@ void SessionMatrixView::setViewModel(const EditorViewModel& model)
             m_trackSlots[t][0].hasClip = true;
             m_trackSlots[t][0].name = "Groove A";
             m_trackSlots[t][0].color = juce::Colour::fromRGB(45, 120, 185);
+            m_trackSlots[t][0].followActionA = engine::FollowAction::nextClip;
+            m_trackSlots[t][0].loopCount = 2;
 
             m_trackSlots[t][1].hasClip = true;
             m_trackSlots[t][1].name = "Groove B";
             m_trackSlots[t][1].color = juce::Colour::fromRGB(140, 65, 175);
+            m_trackSlots[t][1].followActionA = engine::FollowAction::nextClip;
+            m_trackSlots[t][1].loopCount = 2;
 
             m_trackSlots[t][2].hasClip = true;
             m_trackSlots[t][2].name = "Drop Hook";
             m_trackSlots[t][2].color = juce::Colour::fromRGB(195, 85, 45);
+            m_trackSlots[t][2].followActionA = engine::FollowAction::nextClip;
+            m_trackSlots[t][2].loopCount = 4;
 
             m_trackSlots[t][3].hasClip = (t % 2 == 0);
             m_trackSlots[t][3].name = "Outro Variation";
             m_trackSlots[t][3].color = juce::Colour::fromRGB(50, 145, 95);
+            m_trackSlots[t][3].followActionA = engine::FollowAction::firstClip;
+            m_trackSlots[t][3].loopCount = 2;
         }
     }
 
@@ -119,15 +127,17 @@ void SessionMatrixView::timerCallback()
 
     // Advance playhead progress for active clips & launch queued
     bool needsRepaint = false;
-    for (auto& trackSlots : m_trackSlots)
+    for (std::size_t t = 0; t < m_trackSlots.size(); ++t)
     {
-        for (auto& slot : trackSlots)
+        for (int s = 0; s < kNumScenes; ++s)
         {
+            auto& slot = m_trackSlots[t][static_cast<std::size_t>(s)];
             if (slot.isQueued)
             {
                 slot.isQueued = false;
                 slot.isPlaying = true;
                 slot.playheadProgress = 0.0f;
+                slot.currentLoop = 0;
                 needsRepaint = true;
             }
             else if (slot.isPlaying)
@@ -137,6 +147,45 @@ void SessionMatrixView::timerCallback()
                 if (slot.playheadProgress >= 1.0f)
                 {
                     slot.playheadProgress = 0.0f;
+                    if (m_sceneFollowEnabled)
+                    {
+                        slot.currentLoop++;
+                        if (slot.currentLoop >= slot.loopCount)
+                        {
+                            slot.currentLoop = 0;
+                            if (slot.followActionA != engine::FollowAction::none)
+                            {
+                                const float rnd = static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX);
+                                const auto action = (rnd <= slot.followChanceA) ? slot.followActionA : slot.followActionB;
+                                slot.isPlaying = false;
+                                switch (action)
+                                {
+                                case engine::FollowAction::none:
+                                    break;
+                                case engine::FollowAction::stop:
+                                    break;
+                                case engine::FollowAction::nextClip:
+                                    launchClip(static_cast<int>(t), (s + 1) % kNumScenes);
+                                    break;
+                                case engine::FollowAction::prevClip:
+                                    launchClip(static_cast<int>(t), (s > 0) ? s - 1 : kNumScenes - 1);
+                                    break;
+                                case engine::FollowAction::firstClip:
+                                    launchClip(static_cast<int>(t), 0);
+                                    break;
+                                case engine::FollowAction::lastClip:
+                                    launchClip(static_cast<int>(t), kNumScenes - 1);
+                                    break;
+                                case engine::FollowAction::randomClip:
+                                    launchClip(static_cast<int>(t), std::rand() % kNumScenes);
+                                    break;
+                                case engine::FollowAction::jumpToScene:
+                                    launchClip(static_cast<int>(t), std::clamp(slot.jumpTargetScene, 0, kNumScenes - 1));
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
                 needsRepaint = true;
             }
@@ -152,19 +201,36 @@ void SessionMatrixView::launchScene(int sceneIndex)
     if (sceneIndex < 0 || sceneIndex >= kNumScenes)
         return;
 
+    // Glide Project Tempo to Scene BPM
+    if (m_commandHandler)
+    {
+        const auto& scene = m_scenes[static_cast<std::size_t>(sceneIndex)];
+        m_commandHandler(project::SetProjectTempo {
+            scene.bpm,
+            scene.timeSigNumerator,
+            scene.timeSigDenominator,
+            m_model.project.tempo.metronomeEnabled
+        });
+    }
+
     for (std::size_t t = 0; t < m_trackSlots.size(); ++t)
     {
         // Stop any other playing clip on this track
         for (int s = 0; s < kNumScenes; ++s)
         {
             if (s != sceneIndex)
+            {
                 m_trackSlots[t][static_cast<std::size_t>(s)].isPlaying = false;
+                m_trackSlots[t][static_cast<std::size_t>(s)].currentLoop = 0;
+            }
         }
 
         if (m_trackSlots[t][static_cast<std::size_t>(sceneIndex)].hasClip)
         {
             m_trackSlots[t][static_cast<std::size_t>(sceneIndex)].isPlaying = true;
             m_trackSlots[t][static_cast<std::size_t>(sceneIndex)].isQueued = false;
+            m_trackSlots[t][static_cast<std::size_t>(sceneIndex)].playheadProgress = 0.0f;
+            m_trackSlots[t][static_cast<std::size_t>(sceneIndex)].currentLoop = 0;
         }
     }
     repaint();
@@ -267,6 +333,37 @@ void SessionMatrixView::mouseDown(const juce::MouseEvent& e)
             const auto bounds = getSlotBounds(static_cast<int>(t), s);
             if (bounds.contains(pos))
             {
+                auto& slot = m_trackSlots[t][static_cast<std::size_t>(s)];
+                if (e.mods.isPopupMenu() && slot.hasClip)
+                {
+                    juce::PopupMenu menu;
+                    menu.addItem(1, "Follow Action: None", true, slot.followActionA == engine::FollowAction::none);
+                    menu.addItem(2, "Follow Action: Play Next", true, slot.followActionA == engine::FollowAction::nextClip);
+                    menu.addItem(3, "Follow Action: Play Previous", true, slot.followActionA == engine::FollowAction::prevClip);
+                    menu.addItem(4, "Follow Action: Play First", true, slot.followActionA == engine::FollowAction::firstClip);
+                    menu.addItem(5, "Follow Action: Play Random", true, slot.followActionA == engine::FollowAction::randomClip);
+                    menu.addItem(6, "Follow Action: Jump Target", true, slot.followActionA == engine::FollowAction::jumpToScene);
+                    menu.addSeparator();
+                    menu.addItem(7, "Loop 1x", true, slot.loopCount == 1);
+                    menu.addItem(8, "Loop 2x", true, slot.loopCount == 2);
+                    menu.addItem(9, "Loop 4x", true, slot.loopCount == 4);
+
+                    menu.showMenuAsync(juce::PopupMenu::Options {}, [this, t, s](int res) {
+                        auto& sl = m_trackSlots[t][static_cast<std::size_t>(s)];
+                        if (res == 1) sl.followActionA = engine::FollowAction::none;
+                        else if (res == 2) sl.followActionA = engine::FollowAction::nextClip;
+                        else if (res == 3) sl.followActionA = engine::FollowAction::prevClip;
+                        else if (res == 4) sl.followActionA = engine::FollowAction::firstClip;
+                        else if (res == 5) sl.followActionA = engine::FollowAction::randomClip;
+                        else if (res == 6) sl.followActionA = engine::FollowAction::jumpToScene;
+                        else if (res == 7) sl.loopCount = 1;
+                        else if (res == 8) sl.loopCount = 2;
+                        else if (res == 9) sl.loopCount = 4;
+                        repaint();
+                    });
+                    return;
+                }
+
                 launchClip(static_cast<int>(t), s);
                 return;
             }
@@ -398,6 +495,24 @@ void SessionMatrixView::drawGrid(juce::Graphics& g, juce::Rectangle<int>)
                     g.drawText("LEG", legBounds, juce::Justification::centred);
                 }
 
+                // Follow Action Badge (e.g. [NXT], [PRV], [RND], [JMP])
+                if (slot.followActionA != engine::FollowAction::none)
+                {
+                    const char* faStr = "NXT";
+                    if (slot.followActionA == engine::FollowAction::prevClip) faStr = "PRV";
+                    else if (slot.followActionA == engine::FollowAction::firstClip) faStr = "1ST";
+                    else if (slot.followActionA == engine::FollowAction::lastClip) faStr = "LST";
+                    else if (slot.followActionA == engine::FollowAction::randomClip) faStr = "RND";
+                    else if (slot.followActionA == engine::FollowAction::jumpToScene) faStr = "JMP";
+
+                    auto faBounds = slotRect.removeFromRight(28).reduced(2, 4).removeFromTop(14);
+                    g.setColour(juce::Colour::fromRGB(30, 60, 45));
+                    g.fillRoundedRectangle(faBounds.toFloat(), 2.5f);
+                    g.setColour(juce::Colour::fromRGB(140, 240, 180));
+                    g.setFont(juce::FontOptions(7.5f).withStyle("Bold"));
+                    g.drawText(faStr, faBounds, juce::Justification::centred);
+                }
+
                 // Clip text
                 g.setColour(juce::Colour::fromRGB(240, 245, 250));
                 g.setFont(juce::FontOptions(11.0f).withStyle("Bold"));
@@ -444,14 +559,26 @@ void SessionMatrixView::drawSceneTriggers(juce::Graphics& g, juce::Rectangle<int
         // Play triangle
         g.setColour(juce::Colour::fromRGB(90, 200, 110));
         juce::Path p;
-        p.addTriangle(static_cast<float>(bounds.getX() + 8), static_cast<float>(bounds.getY() + 15),
-                     static_cast<float>(bounds.getX() + 8), static_cast<float>(bounds.getBottom() - 15),
+        p.addTriangle(static_cast<float>(bounds.getX() + 8), static_cast<float>(bounds.getY() + 14),
+                     static_cast<float>(bounds.getX() + 8), static_cast<float>(bounds.getBottom() - 14),
                      static_cast<float>(bounds.getX() + 18), static_cast<float>(bounds.getCentreY()));
         g.fillPath(p);
 
-        g.setColour(juce::Colour::fromRGB(220, 225, 235));
+        // Scene Name & Number
+        const auto& scn = m_scenes[static_cast<std::size_t>(s)];
+        auto textBounds = bounds.withTrimmedLeft(22).reduced(2, 2);
+        g.setColour(juce::Colour::fromRGB(235, 240, 250));
         g.setFont(juce::FontOptions(11.0f).withStyle("Bold"));
-        g.drawText("Scene " + std::to_string(s + 1), bounds.withTrimmedLeft(24), juce::Justification::centredLeft);
+        g.drawText(juce::String(s + 1) + ". " + juce::String(scn.name), textBounds.removeFromTop(18), juce::Justification::centredLeft);
+
+        // BPM & Time Signature Badge
+        g.setColour(juce::Colour::fromRGB(24, 27, 33));
+        auto badge = textBounds.removeFromTop(16);
+        g.fillRoundedRectangle(badge.toFloat(), 2.0f);
+        g.setColour(juce::Colour::fromRGB(255, 180, 50));
+        g.setFont(juce::FontOptions(9.5f).withStyle("Bold"));
+        g.drawText(juce::String(scn.bpm, 1) + " BPM  " + juce::String(scn.timeSigNumerator) + "/" + juce::String(scn.timeSigDenominator),
+                   badge.reduced(4, 0), juce::Justification::centredLeft);
     }
 }
 

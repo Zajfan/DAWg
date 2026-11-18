@@ -1777,6 +1777,58 @@ void testMidiControllerManagerMcuAndLearn()
         // Remove binding
         require(mgr.removeBinding(boundId), "binding successfully removed");
         require(mgr.bindingCount() == 0, "binding count is now 0");
+
+        // 8. Fader Touch & Jog Wheel Acceleration Tiers
+        MidiEvent touchEv {};
+        touchEv.size = 3;
+        touchEv.data[0] = static_cast<std::byte>(0x90);
+        touchEv.data[1] = static_cast<std::byte>(0x68); // Channel 1 fader touch
+        touchEv.data[2] = static_cast<std::byte>(0x7F);
+        auto touchRes = mgr.processEvent(touchEv);
+        require(touchRes.mcuEvent.type == McuType::faderTouch, "MCU parses fader touch");
+        require(touchRes.mcuEvent.trackIndex == 0, "fader touch track 0");
+        require(touchRes.mcuEvent.buttonState, "fader touched state true");
+
+        MidiEvent fastJogEv {};
+        fastJogEv.size = 3;
+        fastJogEv.data[0] = static_cast<std::byte>(0xB0);
+        fastJogEv.data[1] = static_cast<std::byte>(60);
+        fastJogEv.data[2] = static_cast<std::byte>(0x03); // +3 ticks -> 2x tier
+        auto fastJogRes = mgr.processEvent(fastJogEv);
+        require(fastJogRes.mcuEvent.value == 6.0f, "jog wheel tier 2 acceleration (3 * 2 = 6)");
+
+        fastJogEv.data[2] = static_cast<std::byte>(0x06); // +6 ticks -> 4x tier
+        fastJogRes = mgr.processEvent(fastJogEv);
+        require(fastJogRes.mcuEvent.value == 24.0f, "jog wheel tier 3 acceleration (6 * 4 = 24)");
+
+        // 9. Curve Taper & Soft Takeover
+        const auto bId = mgr.addBinding(1, 20, 777, 0.0f, 100.0f, MidiCurveTaper::exponential, true);
+        require(bId > 0, "binding with exponential taper and soft takeover created");
+        mgr.updateTargetValue(777, 90.0f); // Target is high (0.9 norm)
+
+        // Physical hardware sends low value (10 -> ~0.078 norm): should NOT jump because not caught
+        MidiEvent ccJumpEv {};
+        ccJumpEv.size = 3;
+        ccJumpEv.data[0] = static_cast<std::byte>(0xB0);
+        ccJumpEv.data[1] = static_cast<std::byte>(20);
+        ccJumpEv.data[2] = static_cast<std::byte>(10);
+        auto jumpRes = mgr.processEvent(ccJumpEv);
+        require(! jumpRes.learnResult.triggered, "soft takeover rejects jump before pickup");
+
+        // Physical hardware moves close to target (~0.95 -> 120 / 127 = 0.945 norm): catches!
+        ccJumpEv.data[2] = static_cast<std::byte>(120);
+        auto caughtRes = mgr.processEvent(ccJumpEv);
+        require(caughtRes.learnResult.triggered, "soft takeover catches when physical value meets target");
+
+        // 10. OSC Track Macro Protocol
+        const auto oscBytes = OscSurfaceProtocolEngine::buildTrackMacro(1, 3, 0.72f);
+        require(! oscBytes.empty(), "OSC track macro packet generated");
+        OscParsedMessage oscParsed;
+        require(OscSurfaceProtocolEngine::parseMessage(oscBytes, oscParsed), "OSC message parsed");
+        require(oscParsed.type == OscMessageType::trackMacro, "OSC track macro type recognized");
+        require(oscParsed.trackIndex == 1, "OSC track index 1 (track 2)");
+        require(oscParsed.subIndex == 3, "OSC macro index 3 (macro 4)");
+        require(std::abs(oscParsed.floatValue - 0.72f) < 0.001f, "OSC float value matches");
     }
 }
 

@@ -70,6 +70,13 @@ enum class LaunchpadLedMode : std::uint8_t
     pulsing
 };
 
+enum class MidiCurveTaper : std::uint8_t
+{
+    linear = 0,
+    exponential = 1,
+    logarithmic = 2
+};
+
 struct McuEvent
 {
     McuType type {McuType::none};
@@ -88,6 +95,10 @@ struct MidiLearnBinding
     std::uint32_t targetId {0};
     float minValue {0.0f};
     float maxValue {1.0f};
+    MidiCurveTaper taper {MidiCurveTaper::linear};
+    bool softTakeover {false};
+    float currentTargetValue {0.5f};
+    bool isCaught {true};
     bool active {false};
 };
 
@@ -119,16 +130,20 @@ public:
     [[nodiscard]] bool isMcuEnabled() const noexcept { return m_mcuEnabled; }
 
     // MIDI Learn API
-    void startLearn(std::uint32_t targetId, float minValue = 0.0f, float maxValue = 1.0f) noexcept;
+    void startLearn(std::uint32_t targetId, float minValue = 0.0f, float maxValue = 1.0f,
+                    MidiCurveTaper taper = MidiCurveTaper::linear, bool softTakeover = false) noexcept;
     void cancelLearn() noexcept;
     [[nodiscard]] bool isLearning() const noexcept { return m_learningActive; }
     [[nodiscard]] std::uint32_t learningTargetId() const noexcept { return m_learningTargetId; }
 
     [[nodiscard]] std::uint32_t addBinding(std::uint8_t channel, std::uint8_t ccNumber,
                                            std::uint32_t targetId, float minValue = 0.0f,
-                                           float maxValue = 1.0f) noexcept;
+                                           float maxValue = 1.0f,
+                                           MidiCurveTaper taper = MidiCurveTaper::linear,
+                                           bool softTakeover = false) noexcept;
     bool removeBinding(std::uint32_t bindingId) noexcept;
     void clearBindings() noexcept;
+    void updateTargetValue(std::uint32_t targetId, float currentValue) noexcept;
     [[nodiscard]] std::size_t bindingCount() const noexcept;
     [[nodiscard]] const std::array<MidiLearnBinding, maxBindings>& bindings() const noexcept { return m_bindings; }
 
@@ -168,6 +183,8 @@ private:
     std::uint32_t m_learningTargetId {0};
     float m_learningMinValue {0.0f};
     float m_learningMaxValue {1.0f};
+    MidiCurveTaper m_learningTaper {MidiCurveTaper::linear};
+    bool m_learningSoftTakeover {false};
 
     std::uint32_t m_nextBindingId {1};
     std::array<MidiLearnBinding, maxBindings> m_bindings {};

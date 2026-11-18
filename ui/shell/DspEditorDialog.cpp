@@ -1127,6 +1127,33 @@ void DspEditorComponent::mouseDown(const juce::MouseEvent& e)
             }
         }
     }
+    else if (m_kind == DspEditorKind::resonanceSuppressor)
+    {
+        // Click to set suppression depth & sharpness
+        const float normY = 1.0f - std::clamp(e.position.y / static_cast<float>(getHeight()), 0.0f, 1.0f);
+        m_resoDepth = std::clamp(normY, 0.05f, 0.95f);
+        repaint();
+    }
+    else if (m_kind == DspEditorKind::multibandImager)
+    {
+        // Click in right pane: adjust band width
+        if (e.position.x > 190)
+        {
+            const int bandIdx = std::clamp(static_cast<int>((e.position.x - 190) / ((getWidth() - 200) / 4)), 0, 3);
+            const float normY = 1.0f - std::clamp(e.position.y / static_cast<float>(getHeight()), 0.0f, 1.0f);
+            m_imagerWidths[static_cast<std::size_t>(bandIdx)] = std::clamp(normY * 2.0f, 0.0f, 2.0f);
+            repaint();
+        }
+    }
+    else if (m_kind == DspEditorKind::buchlaComplexSynth)
+    {
+        // Click to adjust wavefold drive and symmetry bias
+        const float normX = std::clamp(e.position.x / static_cast<float>(getWidth()), 0.0f, 1.0f);
+        const float normY = (static_cast<float>(getHeight()) * 0.5f - e.position.y) / (static_cast<float>(getHeight()) * 0.5f);
+        m_wavefoldDrive = std::clamp(0.5f + normX * 4.5f, 0.5f, 5.0f);
+        m_wavefoldSymmetry = std::clamp(normY * 0.5f, -0.5f, 0.5f);
+        repaint();
+    }
 }
 
 void DspEditorComponent::mouseDrag(const juce::MouseEvent& e)
@@ -1161,6 +1188,32 @@ void DspEditorComponent::mouseDrag(const juce::MouseEvent& e)
 
         const float normY = (midY - e.position.y) / ((h - 26.0f) * 0.45f);
         m_masterEqBands[bandIdx].gainDb = std::clamp(normY * 18.0f, -18.0f, 18.0f);
+        repaint();
+    }
+    else if (m_kind == DspEditorKind::resonanceSuppressor)
+    {
+        const float normY = 1.0f - std::clamp(e.position.y / static_cast<float>(getHeight()), 0.0f, 1.0f);
+        m_resoDepth = std::clamp(normY, 0.05f, 0.95f);
+        const float normX = std::clamp(e.position.x / static_cast<float>(getWidth()), 0.0f, 1.0f);
+        m_resoSharpness = std::clamp(0.5f + normX * 4.5f, 0.5f, 5.0f);
+        repaint();
+    }
+    else if (m_kind == DspEditorKind::multibandImager)
+    {
+        if (e.position.x > 190)
+        {
+            const int bandIdx = std::clamp(static_cast<int>((e.position.x - 190) / ((getWidth() - 200) / 4)), 0, 3);
+            const float normY = 1.0f - std::clamp(e.position.y / static_cast<float>(getHeight()), 0.0f, 1.0f);
+            m_imagerWidths[static_cast<std::size_t>(bandIdx)] = std::clamp(normY * 2.0f, 0.0f, 2.0f);
+            repaint();
+        }
+    }
+    else if (m_kind == DspEditorKind::buchlaComplexSynth)
+    {
+        const float normX = std::clamp(e.position.x / static_cast<float>(getWidth()), 0.0f, 1.0f);
+        const float normY = (static_cast<float>(getHeight()) * 0.5f - e.position.y) / (static_cast<float>(getHeight()) * 0.5f);
+        m_wavefoldDrive = std::clamp(0.5f + normX * 4.5f, 0.5f, 5.0f);
+        m_wavefoldSymmetry = std::clamp(normY * 0.5f, -0.5f, 0.5f);
         repaint();
     }
 }

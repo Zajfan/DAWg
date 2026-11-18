@@ -37,16 +37,36 @@ public:
         m_activeControllerManager = controllerManager;
     }
 
-    void startLearning(std::uint32_t targetId, engine::MidiControllerManager* controllerManager = nullptr)
+    void startLearning(std::uint32_t targetId, engine::MidiControllerManager* controllerManager = nullptr,
+                       float minVal = 0.0f, float maxVal = 1.0f,
+                       engine::MidiCurveTaper taper = engine::MidiCurveTaper::linear,
+                       bool softTakeover = false)
     {
         m_learningTargetId = targetId;
         if (controllerManager != nullptr)
             m_activeControllerManager = controllerManager;
         if (m_activeControllerManager != nullptr)
         {
-            m_activeControllerManager->startLearn(targetId, 0.0f, 1.0f);
+            m_activeControllerManager->startLearn(targetId, minVal, maxVal, taper, softTakeover);
         }
     }
+
+    void setGlobalLearnMode(bool active) noexcept
+    {
+        m_globalLearnMode = active;
+        if (! active)
+            cancelLearning();
+        if (onLearnModeChanged)
+            onLearnModeChanged(active);
+    }
+
+    [[nodiscard]] bool isGlobalLearnMode() const noexcept
+    {
+        return m_globalLearnMode;
+    }
+
+    std::function<void(bool)> onLearnModeChanged;
+    std::function<void(std::uint32_t, const std::string&)> onBindingLearned;
 
     void cancelLearning()
     {
@@ -55,12 +75,11 @@ public:
             m_activeControllerManager->cancelLearn();
         }
         m_learningTargetId = 0;
-        m_activeControllerManager = nullptr;
     }
 
     [[nodiscard]] bool isLearning() const noexcept
     {
-        return m_learningTargetId != 0;
+        return m_learningTargetId != 0 || m_globalLearnMode;
     }
 
     [[nodiscard]] std::string learningParamName() const
@@ -73,7 +92,10 @@ public:
     {
         if (control.learnedNewBinding)
         {
+            const auto paramName = learningParamName();
             m_learningTargetId = 0;
+            if (onBindingLearned)
+                onBindingLearned(control.learnResult.targetId, paramName);
         }
 
         if (control.learnResult.triggered)
@@ -89,6 +111,7 @@ public:
 private:
     MidiLearnManager() = default;
 
+    bool m_globalLearnMode {false};
     std::uint32_t m_learningTargetId {0};
     engine::MidiControllerManager* m_activeControllerManager {nullptr};
     std::unordered_map<std::uint32_t, ParamCallback> m_callbacks;

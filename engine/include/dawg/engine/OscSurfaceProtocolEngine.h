@@ -20,11 +20,13 @@ enum class OscMessageType : std::uint8_t
     trackMute,
     trackSolo,
     trackArm,
+    trackMacro,
     masterVolume,
     transportPlay,
     transportStop,
     transportRecord,
     transportTempo,
+    transportTimecode,
     clipLaunch,
     sceneLaunch,
     customParameter
@@ -91,6 +93,7 @@ public:
     [[nodiscard]] static std::vector<std::uint8_t> buildTrackMute(std::size_t trackIdx, bool muted);
     [[nodiscard]] static std::vector<std::uint8_t> buildTrackSolo(std::size_t trackIdx, bool soloed);
     [[nodiscard]] static std::vector<std::uint8_t> buildTrackArm(std::size_t trackIdx, bool armed);
+    [[nodiscard]] static std::vector<std::uint8_t> buildTrackMacro(std::size_t trackIdx, std::size_t macroIdx, float val0to1);
     [[nodiscard]] static std::vector<std::uint8_t> buildTransportPlay(bool playing);
     [[nodiscard]] static std::vector<std::uint8_t> buildTransportTempo(float bpm);
     [[nodiscard]] static std::vector<std::uint8_t> buildClipState(std::size_t row, std::size_t col, int state);

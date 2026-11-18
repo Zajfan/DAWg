@@ -47,7 +47,12 @@ std::size_t getPaddedStringLength(const std::uint8_t* data, std::size_t maxLen) 
 
 void routeAddress(OscParsedMessage& msg)
 {
-    const std::string_view addr = msg.address;
+    std::string_view addr = msg.address;
+    if (addr.rfind("/dawg", 0) == 0)
+    {
+        addr = addr.substr(5);
+    }
+
     if (addr.rfind("/track/", 0) == 0)
     {
         // Format: /track/{idx}/{param}
@@ -73,6 +78,16 @@ void routeAddress(OscParsedMessage& msg)
                 msg.type = OscMessageType::trackSolo;
             else if (param == "arm" || param == "rec")
                 msg.type = OscMessageType::trackArm;
+            else if (param.rfind("macro/", 0) == 0)
+            {
+                msg.type = OscMessageType::trackMacro;
+                try {
+                    const auto mIdx = static_cast<std::size_t>(std::stoul(std::string(param.substr(6))));
+                    msg.subIndex = (mIdx > 0) ? mIdx - 1 : 0;
+                } catch (...) {
+                    msg.subIndex = 0;
+                }
+            }
         }
     }
     else if (addr == "/master/volume" || addr == "/master/vol")
@@ -94,6 +109,10 @@ void routeAddress(OscParsedMessage& msg)
     else if (addr == "/transport/tempo" || addr == "/transport/bpm")
     {
         msg.type = OscMessageType::transportTempo;
+    }
+    else if (addr == "/transport/timecode" || addr == "/transport/smpte")
+    {
+        msg.type = OscMessageType::transportTimecode;
     }
     else if (addr.rfind("/clip/", 0) == 0)
     {
@@ -328,6 +347,12 @@ std::vector<std::uint8_t> OscSurfaceProtocolEngine::buildTrackArm(const std::siz
 {
     const std::string addr = "/track/" + std::to_string(trackIdx + 1) + "/arm";
     return encodeInt(addr, armed ? 1 : 0);
+}
+
+std::vector<std::uint8_t> OscSurfaceProtocolEngine::buildTrackMacro(const std::size_t trackIdx, const std::size_t macroIdx, const float val0to1)
+{
+    const std::string addr = "/dawg/track/" + std::to_string(trackIdx + 1) + "/macro/" + std::to_string(macroIdx + 1);
+    return encodeFloat(addr, std::clamp(val0to1, 0.0f, 1.0f));
 }
 
 std::vector<std::uint8_t> OscSurfaceProtocolEngine::buildTransportPlay(const bool playing)

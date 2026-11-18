@@ -32,6 +32,16 @@ struct SessionClipSlot
     engine::FollowAction followActionB {engine::FollowAction::none};
     float followChanceA {1.0f};
     int jumpTargetScene {0};
+    int loopCount {1};
+    int currentLoop {0};
+};
+
+struct SessionSceneInfo
+{
+    double bpm {120.0};
+    std::uint8_t timeSigNumerator {4};
+    std::uint8_t timeSigDenominator {4};
+    std::string name;
 };
 
 class SessionMatrixView final : public juce::Component, private juce::Timer
@@ -75,6 +85,14 @@ private:
     static constexpr int kNumScenes = 6;
     // 2D matrix: [trackIndex][sceneIndex]
     std::vector<std::array<SessionClipSlot, kNumScenes>> m_trackSlots;
+    std::array<SessionSceneInfo, kNumScenes> m_scenes {{
+        {120.0, 4, 4, "Intro"},
+        {124.0, 4, 4, "Build"},
+        {126.0, 4, 4, "Drop A"},
+        {126.0, 4, 4, "Break"},
+        {128.0, 4, 4, "Drop VIP"},
+        {118.0, 4, 4, "Outro"}
+    }};
 
     juce::ComboBox m_quantizeCombo;
     juce::TextButton m_stopAllButton {"Stop All Clips [■]"};
@@ -90,7 +108,7 @@ private:
     bool m_blinkState {false};
     int m_slotWidth {130};
     int m_slotHeight {44};
-    int m_sceneColWidth {90};
+    int m_sceneColWidth {124};
     int m_headerHeight {32};
 };
 

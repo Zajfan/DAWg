@@ -1,18 +1,22 @@
 #include <dawg/engine/MidiControllerManager.h>
 
 #include <algorithm>
+#include <cmath>
 #include <iomanip>
 #include <sstream>
 
 namespace dawg::engine {
 
 void MidiControllerManager::startLearn(const std::uint32_t targetId,
-                                       const float minValue, const float maxValue) noexcept
+                                       const float minValue, const float maxValue,
+                                       const MidiCurveTaper taper, const bool softTakeover) noexcept
 {
     m_learningActive = true;
     m_learningTargetId = targetId;
     m_learningMinValue = minValue;
     m_learningMaxValue = maxValue;
+    m_learningTaper = taper;
+    m_learningSoftTakeover = softTakeover;
 }
 
 void MidiControllerManager::cancelLearn() noexcept
@@ -25,7 +29,9 @@ std::uint32_t MidiControllerManager::addBinding(const std::uint8_t channel,
                                                 const std::uint8_t ccNumber,
                                                 const std::uint32_t targetId,
                                                 const float minValue,
-                                                const float maxValue) noexcept
+                                                const float maxValue,
+                                                const MidiCurveTaper taper,
+                                                const bool softTakeover) noexcept
 {
     // Check if matching binding exists
     for (auto& b : m_bindings)
@@ -35,6 +41,9 @@ std::uint32_t MidiControllerManager::addBinding(const std::uint8_t channel,
             b.targetId = targetId;
             b.minValue = minValue;
             b.maxValue = maxValue;
+            b.taper = taper;
+            b.softTakeover = softTakeover;
+            b.isCaught = ! softTakeover;
             return b.bindingId;
         }
     }
@@ -50,12 +59,26 @@ std::uint32_t MidiControllerManager::addBinding(const std::uint8_t channel,
             b.targetId = targetId;
             b.minValue = minValue;
             b.maxValue = maxValue;
+            b.taper = taper;
+            b.softTakeover = softTakeover;
+            b.isCaught = ! softTakeover;
             b.active = true;
             return b.bindingId;
         }
     }
 
     return 0; // Table full
+}
+
+void MidiControllerManager::updateTargetValue(const std::uint32_t targetId, const float currentValue) noexcept
+{
+    for (auto& b : m_bindings)
+    {
+        if (b.active && b.targetId == targetId)
+        {
+            b.currentTargetValue = currentValue;
+        }
+    }
 }
 
 bool MidiControllerManager::removeBinding(const std::uint32_t bindingId) noexcept
@@ -188,6 +211,17 @@ McuEvent MidiControllerManager::parseMcuEvent(const std::uint8_t statusType,
             };
         }
 
+        // Fader Touch (Notes 104..112 / 0x68..0x70)
+        if (note >= 0x68 && note <= 0x70)
+        {
+            return McuEvent {
+                .type = McuType::faderTouch,
+                .button = McuButton::none,
+                .trackIndex = static_cast<std::uint8_t>(note - 0x68),
+                .buttonState = pressed
+            };
+        }
+
         return {};
     }
 
@@ -207,11 +241,17 @@ McuEvent MidiControllerManager::parseMcuEvent(const std::uint8_t statusType,
             };
         }
 
-        // Jog Wheel (CC 60)
+        // Jog Wheel (CC 60) with acceleration tiers
         if (byte1 == 60)
         {
             const int step = byte2 & 0x3F;
-            const float delta = (byte2 & 0x40) ? -static_cast<float>(step) : static_cast<float>(step);
+            const bool isNegative = (byte2 & 0x40) != 0;
+            float multiplier = 1.0f;
+            if (step > 5)
+                multiplier = 4.0f;
+            else if (step > 2)
+                multiplier = 2.0f;
+            const float delta = (isNegative ? -static_cast<float>(step) : static_cast<float>(step)) * multiplier;
             return McuEvent {
                 .type = McuType::jogWheel,
                 .value = delta
@@ -248,22 +288,50 @@ ProcessedMidiControl MidiControllerManager::processEvent(const MidiEvent& event)
         if (m_learningActive)
         {
             const std::uint32_t bId = addBinding(midiChan, byte1, m_learningTargetId,
-                                                m_learningMinValue, m_learningMaxValue);
+                                                m_learningMinValue, m_learningMaxValue,
+                                                m_learningTaper, m_learningSoftTakeover);
             result.learnedNewBinding = true;
             result.learnedBindingId = bId;
             m_learningActive = false;
         }
 
         // Evaluate against active bindings
-        for (const auto& b : m_bindings)
+        for (auto& b : m_bindings)
         {
             if (b.active && (b.channel == 0 || b.channel == midiChan) && b.ccNumber == byte1)
             {
-                const float norm = static_cast<float>(byte2) / 127.0f;
+                const float rawNorm = static_cast<float>(byte2) / 127.0f;
+                if (b.softTakeover && ! b.isCaught)
+                {
+                    const float targetNorm = (b.maxValue > b.minValue)
+                        ? std::clamp((b.currentTargetValue - b.minValue) / (b.maxValue - b.minValue), 0.0f, 1.0f)
+                        : 0.5f;
+                    if (std::abs(rawNorm - targetNorm) <= 0.06f)
+                    {
+                        b.isCaught = true;
+                    }
+                    else
+                    {
+                        break; // Soft takeover: wait for physical knob to meet target value
+                    }
+                }
+
+                float shapedNorm = rawNorm;
+                if (b.taper == MidiCurveTaper::exponential)
+                {
+                    shapedNorm = rawNorm * rawNorm;
+                }
+                else if (b.taper == MidiCurveTaper::logarithmic)
+                {
+                    shapedNorm = std::sqrt(std::max(0.0f, rawNorm));
+                }
+
+                const float val = b.minValue + shapedNorm * (b.maxValue - b.minValue);
+                b.currentTargetValue = val;
                 result.learnResult = MidiLearnResult {
                     .triggered = true,
                     .targetId = b.targetId,
-                    .value = b.minValue + norm * (b.maxValue - b.minValue)
+                    .value = val
                 };
                 break;
             }
@@ -432,7 +500,8 @@ std::string MidiControllerManager::serializeBindings() const
         {
             ss << b.bindingId << "," << static_cast<int>(b.channel) << ","
                << static_cast<int>(b.ccNumber) << "," << b.targetId << ","
-               << b.minValue << "," << b.maxValue << ";";
+               << b.minValue << "," << b.maxValue << ","
+               << static_cast<int>(b.taper) << "," << (b.softTakeover ? 1 : 0) << ";";
         }
     }
     return ss.str();
@@ -460,6 +529,8 @@ bool MidiControllerManager::deserializeBindings(const std::string& serialized)
         std::uint32_t targetId = 0;
         float minVal = 0.0f;
         float maxVal = 1.0f;
+        MidiCurveTaper taper = MidiCurveTaper::linear;
+        bool softTakeover = false;
 
         if (std::getline(lineStream, token, ',')) bId = static_cast<std::uint32_t>(std::stoul(token));
         if (std::getline(lineStream, token, ',')) ch = std::stoi(token);
@@ -467,9 +538,11 @@ bool MidiControllerManager::deserializeBindings(const std::string& serialized)
         if (std::getline(lineStream, token, ',')) targetId = static_cast<std::uint32_t>(std::stoul(token));
         if (std::getline(lineStream, token, ',')) minVal = std::stof(token);
         if (std::getline(lineStream, token, ',')) maxVal = std::stof(token);
+        if (std::getline(lineStream, token, ',')) taper = static_cast<MidiCurveTaper>(std::stoi(token));
+        if (std::getline(lineStream, token, ',')) softTakeover = (std::stoi(token) != 0);
 
         (void)bId;
-        static_cast<void>(addBinding(static_cast<std::uint8_t>(ch), static_cast<std::uint8_t>(cc), targetId, minVal, maxVal));
+        static_cast<void>(addBinding(static_cast<std::uint8_t>(ch), static_cast<std::uint8_t>(cc), targetId, minVal, maxVal, taper, softTakeover));
     }
     return true;
 }
