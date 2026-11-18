@@ -41,6 +41,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/AnalogLadderRingModSynthNode.cpp
     src/dsp/ArpeggiatorEngine.cpp
     src/dsp/AudioScrubEngine.cpp
+    src/dsp/AudioRestorationSuiteNode.cpp
     src/dsp/AudioTranscriber.cpp
     src/dsp/AudioWarpEngine.cpp
     src/dsp/BinauralSpatialPannerNode.cpp
@@ -55,6 +56,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/DynamicCabinetSimulatorNode.cpp
     src/dsp/DspWireGrid.cpp
     src/dsp/DynamicLinearPhaseEQNode.cpp
+    src/dsp/DynamicLinearPhaseMasteringEQNode.cpp
     src/dsp/GranularCloudNode.cpp
     src/dsp/GranularTextureMorphNode.cpp
     src/dsp/HarmonicAssistant.cpp
@@ -73,6 +75,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/MultiMicDrumDebleedEngine.cpp
     src/dsp/MultiSampleInstrumentNode.cpp
     src/dsp/MultiTrackPhaseAlignerNode.cpp
+    src/dsp/MultitrackDrumReplacerNode.cpp
     src/dsp/MultibandCompressorNode.cpp
     src/dsp/MultibandTransientDuckingNode.cpp
     src/dsp/NeuralAmpModelerNode.cpp
@@ -84,6 +87,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/RayTracingAcousticRoomNode.cpp
     src/dsp/SongwritingChordAssistantEngine.cpp
     src/dsp/SpatialHeadTrackerBridge.cpp
+    src/dsp/SpatialImmersive916Node.cpp
     src/dsp/SpatialObjectPannerNode.cpp
     src/dsp/SpatialSurroundPannerNode.cpp
     src/dsp/SpecializedClipWarpEngine.cpp
@@ -91,6 +95,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/SpectralBalanceAssistant.cpp
     src/SpectralRepairEngine.cpp
     src/dsp/SpectralMorphCrossSynthNode.cpp
+    src/dsp/SpectralMorphResynthesizerNode.cpp
     src/dsp/SpectralResonanceTamerNode.cpp
     src/dsp/SpectralSidechainNode.cpp
     src/dsp/SpectralVocoderNode.cpp

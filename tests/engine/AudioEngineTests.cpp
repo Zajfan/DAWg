@@ -122,6 +122,11 @@
 #include <dawg/engine/dsp/RayTracingAcousticRoomNode.h>
 #include <dawg/engine/dsp/VocalSurgicalDeEsserNode.h>
 #include <dawg/engine/RgbPadMatrixSequencerEngine.h>
+#include <dawg/engine/dsp/AudioRestorationSuiteNode.h>
+#include <dawg/engine/dsp/MultitrackDrumReplacerNode.h>
+#include <dawg/engine/dsp/SpatialImmersive916Node.h>
+#include <dawg/engine/dsp/SpectralMorphResynthesizerNode.h>
+#include <dawg/engine/dsp/DynamicLinearPhaseMasteringEQNode.h>
 #include "../../ui/shell/WorkspaceLayoutManager.h"
 
 #include <array>
@@ -8795,6 +8800,273 @@ void testVectorAnalogAmbisonicsVocalAndRgbSequencerSuite()
         require(ledCount > 0, "LED updates rendered for hardware surface");
     }
 }
+
+void testRestorationDrumTriggerSpatialAtmosSpectralAndDynamicEqSuite()
+{
+    // =========================================================================
+    // 1. Professional Audio Restoration Suite (AudioRestorationSuiteNode)
+    // =========================================================================
+    {
+        dawg::engine::dsp::AudioRestorationSuiteNode restoration;
+        require(restoration.prepare(48000.0, 512, 2), "AudioRestorationSuiteNode prepare successful");
+
+        restoration.setClipThresholdDb(-1.0f);
+        require(restoration.clipThresholdDb() == -1.0f, "Clip threshold set to -1dB");
+        restoration.setDeClipEnabled(true);
+        restoration.setDeClickEnabled(true);
+        restoration.setDeHumEnabled(true);
+        restoration.setMainsFrequency(dawg::engine::dsp::MainsHumFrequency::hum50Hz);
+        restoration.setHumHarmonicsCount(8);
+        require(restoration.humHarmonicsCount() == 8, "Hum harmonics set to 8");
+
+        // 1.1 De-Clipper test
+        std::vector<float> clipL(256);
+        std::vector<float> clipR(256);
+        for (std::size_t i = 0; i < 256; ++i)
+        {
+            // Heavily saturated sine wave that exceeds 1.0
+            const float s = 1.3f * std::sin(static_cast<float>(i) * 0.1f);
+            clipL[i] = std::clamp(s, -1.0f, 1.0f); // Artificial flat top clipping
+            clipR[i] = clipL[i];
+        }
+
+        std::array<float*, 2> channels = {clipL.data(), clipR.data()};
+        dawg::engine::ProcessContext ctx {
+            .audio = dawg::engine::AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 256
+            },
+            .midi = {},
+            .sampleRate = 48000.0,
+            .sidechain = {}
+        };
+
+        restoration.process(ctx);
+        require(restoration.clippedSamplesCount() > 0, "De-clipper detected and reconstructed clipped samples");
+
+        // 1.2 De-Clicker test: inject impulsive clicks
+        clipL[50] = 0.99f;  // Sharp micro-click spike
+        clipL[51] = -0.95f;
+        restoration.process(ctx);
+        require(restoration.repairedClicksCount() > 0, "De-clicker detected and inpainted micro-click");
+
+        // 1.3 Audition Delta mode
+        restoration.setListenMode(dawg::engine::dsp::RestorationListenMode::auditionDelta);
+        restoration.process(ctx);
+        require(std::isfinite(clipL[10]), "Delta mode outputs finite difference signal");
+    }
+
+    // =========================================================================
+    // 2. Multitrack Drum Replacer & Audio-to-MIDI Trigger (MultitrackDrumReplacerNode)
+    // =========================================================================
+    {
+        dawg::engine::dsp::MultitrackDrumReplacerNode drumReplacer;
+        require(drumReplacer.prepare(48000.0, 512, 2), "MultitrackDrumReplacerNode prepare successful");
+
+        drumReplacer.setInstrumentType(dawg::engine::dsp::DrumInstrumentType::snare);
+        require(drumReplacer.instrumentType() == dawg::engine::dsp::DrumInstrumentType::snare, "Snare instrument type set");
+        require(drumReplacer.triggerMidiNote() == 38, "Snare trigger note is MIDI 38");
+
+        drumReplacer.setThresholdDb(-18.0f);
+        drumReplacer.setRetriggerHoldoffMs(25.0f);
+        drumReplacer.setDryWetMix(1.0f); // 100% sample replacement
+
+        // 2.1 Trigger on loud acoustic snare hit
+        std::vector<float> micL(512, 0.0f);
+        std::vector<float> micR(512, 0.0f);
+        // Synthesize acoustic snare transient at sample 32
+        for (std::size_t i = 32; i < 200; ++i)
+        {
+            const float t = static_cast<float>(i - 32) / 48000.0f;
+            micL[i] = 0.8f * std::sin(2.0f * 3.14159f * 220.0f * t) * std::exp(-t * 80.0f);
+            micR[i] = micL[i];
+        }
+
+        std::array<float*, 2> channels = {micL.data(), micR.data()};
+        dawg::engine::ProcessContext ctx {
+            .audio = dawg::engine::AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 512
+            },
+            .midi = {},
+            .sampleRate = 48000.0,
+            .sidechain = {}
+        };
+
+        drumReplacer.process(ctx);
+        require(drumReplacer.triggerCount() == 1, "Drum replacer triggered on acoustic snare hit");
+        require(drumReplacer.lastTriggerVelocity() > 0.3f, "Drum trigger detected hit velocity");
+
+        // 2.2 Bleed rejection test: feed high-frequency 10 kHz cymbal bleed in kick mode
+        drumReplacer.setInstrumentType(dawg::engine::dsp::DrumInstrumentType::kick);
+        std::fill(micL.begin(), micL.end(), 0.0f);
+        for (std::size_t i = 0; i < 512; ++i)
+        {
+            // High frequency cymbal bleed
+            micL[i] = 0.6f * std::sin(static_cast<float>(i) * 1.309f);
+        }
+        std::fill(micR.begin(), micR.end(), 0.0f);
+
+        const auto countBefore = drumReplacer.triggerCount();
+        drumReplacer.process(ctx);
+        require(drumReplacer.triggerCount() == countBefore, "Kick bandpass successfully rejected high frequency cymbal bleed");
+    }
+
+    // =========================================================================
+    // 3. Dolby Atmos 9.1.6 Immersive Bed/Object Engine (SpatialImmersive916Node)
+    // =========================================================================
+    {
+        dawg::engine::dsp::SpatialImmersive916Node spatial916;
+        require(spatial916.prepare(48000.0, 256, 16), "SpatialImmersive916Node prepare successful");
+
+        // 3.1 Positioning & Energy Panning
+        spatial916.setPosition(0.0f, 0.9f, 0.0f); // Center front
+        require(spatial916.positionY() == 0.9f, "Y position set to 0.9f");
+
+        // Center speaker (index 2) should have highest gain
+        const float cGain = spatial916.speakerGain(2);
+        const float lsrGain = spatial916.speakerGain(6); // Left rear
+        require(cGain > lsrGain, "Front center speaker gain is greater than rear surround");
+
+        // 3.2 Trajectory modes
+        spatial916.setTrajectory(dawg::engine::dsp::SpatialTrajectory916::orbit);
+        require(spatial916.trajectory() == dawg::engine::dsp::SpatialTrajectory916::orbit, "Orbit trajectory mode set");
+
+        // 3.3 Test 9.1.6, 7.1.4, 5.1, and Binaural Downmixes
+        std::vector<std::vector<float>> spkBuffers(16, std::vector<float>(256, 0.0f));
+        std::array<float*, 16> spkPtrs {};
+        for (std::size_t i = 0; i < 16; ++i)
+        {
+            spkPtrs[i] = spkBuffers[i].data();
+        }
+        spkBuffers[0][0] = 0.8f; // Input signal on ch0
+        spkBuffers[1][0] = 0.8f;
+
+        dawg::engine::ProcessContext ctx16 {
+            .audio = dawg::engine::AudioBufferView {
+                .channels = spkPtrs.data(),
+                .channelCount = 16,
+                .frameCount = 256
+            },
+            .midi = {},
+            .sampleRate = 48000.0,
+            .sidechain = {}
+        };
+
+        // 9.1.6 mode
+        spatial916.setOutputFormat(dawg::engine::dsp::SpatialOutputFormat::format916);
+        spatial916.process(ctx16);
+        require(std::isfinite(spkBuffers[0][0]) && std::isfinite(spkBuffers[10][0]), "9.1.6 format outputs finite samples");
+
+        // Binaural stereo downmix
+        spatial916.setOutputFormat(dawg::engine::dsp::SpatialOutputFormat::formatBinauralStereo);
+        spatial916.process(ctx16);
+        require(std::isfinite(spkBuffers[0][0]) && std::isfinite(spkBuffers[1][0]), "Binaural stereo fold-down outputs finite audio");
+    }
+
+    // =========================================================================
+    // 4. Spectral Morphing Resynthesizer & Cross-Synthesis Rack (SpectralMorphResynthesizerNode)
+    // =========================================================================
+    {
+        dawg::engine::dsp::SpectralMorphResynthesizerNode spectralMorph;
+        require(spectralMorph.prepare(48000.0, 256, 2), "SpectralMorphResynthesizerNode prepare successful");
+
+        spectralMorph.setCarrierSource(dawg::engine::dsp::SpectralCarrierSource::internalSawPad);
+        require(spectralMorph.carrierSource() == dawg::engine::dsp::SpectralCarrierSource::internalSawPad, "Internal saw pad carrier set");
+        spectralMorph.setMorphFactor(0.6f);
+        require(spectralMorph.morphFactor() == 0.6f, "Morph factor set to 0.6");
+        spectralMorph.setPhaseScramble(0.4f);
+        spectralMorph.setHarmonicSmear(0.25f);
+        spectralMorph.setInharmonicTilt(0.15f);
+
+        std::vector<float> inL(512);
+        std::vector<float> inR(512);
+        for (std::size_t i = 0; i < 512; ++i)
+        {
+            inL[i] = 0.5f * std::sin(static_cast<float>(i) * 0.15f);
+            inR[i] = inL[i];
+        }
+
+        std::array<float*, 2> channels = {inL.data(), inR.data()};
+        dawg::engine::ProcessContext ctx {
+            .audio = dawg::engine::AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 512
+            },
+            .midi = {},
+            .sampleRate = 48000.0,
+            .sidechain = {}
+        };
+
+        spectralMorph.process(ctx);
+        require(std::isfinite(inL[100]), "Spectral resynthesizer produces finite output");
+
+        // Test Spectral Freeze
+        spectralMorph.setSpectralFreeze(true);
+        require(spectralMorph.isSpectralFreeze(), "Spectral freeze enabled");
+        spectralMorph.process(ctx);
+        require(std::isfinite(inL[200]), "Spectral freeze pad continues generating finite audio");
+    }
+
+    // =========================================================================
+    // 5. Dynamic Linear-Phase Mastering EQ (DynamicLinearPhaseMasteringEQNode)
+    // =========================================================================
+    {
+        dawg::engine::dsp::DynamicLinearPhaseMasteringEQNode eq;
+        require(eq.prepare(48000.0, 256, 2), "DynamicLinearPhaseMasteringEQNode prepare successful");
+
+        // 5.1 Dynamic downward compression on Band 1 (250 Hz)
+        auto cfg1 = eq.bandConfig(1);
+        cfg1.mode = dawg::engine::dsp::DynamicEqBandMode::downwardCompress;
+        cfg1.thresholdDb = -20.0f;
+        cfg1.dynamicRangeDb = -6.0f;
+        cfg1.ratio = 4.0f;
+        cfg1.attackMs = 1.0f;
+        eq.setBandConfig(1, cfg1);
+
+        std::vector<float> audioL(1024);
+        std::vector<float> audioR(1024);
+        for (std::size_t i = 0; i < 1024; ++i)
+        {
+            // Loud 250 Hz burst (approx 0 dBFS)
+            audioL[i] = 0.9f * std::sin(static_cast<float>(i) * 0.0327f);
+            audioR[i] = audioL[i];
+        }
+
+        std::array<float*, 2> channels = {audioL.data(), audioR.data()};
+        dawg::engine::ProcessContext ctx {
+            .audio = dawg::engine::AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 1024
+            },
+            .midi = {},
+            .sampleRate = 48000.0,
+            .sidechain = {}
+        };
+
+        eq.process(ctx);
+        require(eq.bandGainOffsetDb(1) < -0.1f, "Dynamic EQ compressed loud 250Hz resonance");
+
+        // 5.2 Sidechain collision unmasking
+        eq.setCollisionUnmaskingEnabled(true);
+        require(eq.isCollisionUnmaskingEnabled(), "Collision unmasking enabled");
+
+        // 5.3 Linear-Phase FIR Mode
+        eq.setPhaseMode(dawg::engine::dsp::DynamicEqPhaseMode::linearPhase);
+        require(eq.phaseMode() == dawg::engine::dsp::DynamicEqPhaseMode::linearPhase, "Linear-phase FIR mode set");
+
+        eq.process(ctx);
+        for (std::size_t i = 0; i < 1024; ++i)
+        {
+            require(std::isfinite(audioL[i]), "Linear-phase EQ output is finite");
+            require(std::isfinite(audioR[i]), "Linear-phase EQ right channel is finite");
+        }
+    }
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -8982,4 +9254,5 @@ int main()
     testSpectralSongwritingMtsTransientAndDeliverySuite();
     testGranularPhysicalWarpVocalAndLoopStationSuite();
     testVectorAnalogAmbisonicsVocalAndRgbSequencerSuite();
+    testRestorationDrumTriggerSpatialAtmosSpectralAndDynamicEqSuite();
 }
