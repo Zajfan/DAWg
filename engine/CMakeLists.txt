@@ -10,6 +10,7 @@ add_library(dawg_engine_core STATIC
     src/DynamicConductorEngine.cpp
     src/DspGraph.cpp
     src/DspPerformanceProfiler.cpp
+    src/GenerativeEuclideanSequencerEngine.cpp
     src/GenerativePerformanceEngine.cpp
     src/GraphHandoff.cpp
     src/HardwareControlSurfaceEngine.cpp
@@ -29,6 +30,7 @@ add_library(dawg_engine_core STATIC
     src/SessionMatrixEngine.cpp
     src/SimdMath.cpp
     src/SmpteTimecode.cpp
+    src/StudioControlRoomMonitorConsole.cpp
     src/TempoMap.cpp
     src/TransportCommandQueue.cpp
     src/WorkStealingScheduler.cpp
@@ -76,7 +78,9 @@ add_library(dawg_engine_core STATIC
     src/dsp/MultiSampleInstrumentNode.cpp
     src/dsp/MultiTrackPhaseAlignerNode.cpp
     src/dsp/MultitrackDrumReplacerNode.cpp
+    src/dsp/MultitrackAudioAlignmentEngine.cpp
     src/dsp/MultibandCompressorNode.cpp
+    src/dsp/MultibandStereoImagerNode.cpp
     src/dsp/MultibandTransientDuckingNode.cpp
     src/dsp/NeuralAmpModelerNode.cpp
     src/dsp/OpticalVariMuCompressorNode.cpp
@@ -109,6 +113,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/TnhcDelayNode.cpp
     src/dsp/TnhcReverbNode.cpp
     src/dsp/TnhcSynthNode.cpp
+    src/dsp/TubeTransformerSaturationNode.cpp
     src/dsp/TransientExciterNode.cpp
     src/dsp/TransientSlicerEngine.cpp
     src/dsp/TransientSplitGranularResynthesizerNode.cpp

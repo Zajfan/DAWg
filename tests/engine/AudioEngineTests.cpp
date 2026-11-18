@@ -127,6 +127,11 @@
 #include <dawg/engine/dsp/SpatialImmersive916Node.h>
 #include <dawg/engine/dsp/SpectralMorphResynthesizerNode.h>
 #include <dawg/engine/dsp/DynamicLinearPhaseMasteringEQNode.h>
+#include <dawg/engine/dsp/TubeTransformerSaturationNode.h>
+#include <dawg/engine/dsp/MultitrackAudioAlignmentEngine.h>
+#include <dawg/engine/GenerativeEuclideanSequencerEngine.h>
+#include <dawg/engine/dsp/MultibandStereoImagerNode.h>
+#include <dawg/engine/StudioControlRoomMonitorConsole.h>
 #include "../../ui/shell/WorkspaceLayoutManager.h"
 
 #include <array>
@@ -9067,6 +9072,310 @@ void testRestorationDrumTriggerSpatialAtmosSpectralAndDynamicEqSuite()
         }
     }
 }
+
+void testTubeAlignmentEuclideanImagerAndMonitorConsoleSuite()
+{
+    // =========================================================================
+    // 1. Vintage Tube & Transformer Saturation Rack
+    // =========================================================================
+    {
+        dawg::engine::dsp::TubeTransformerSaturationNode sat;
+        require(!sat.name().empty(), "Saturation node name");
+        require(sat.prepare(48000.0, 512, 2), "Saturation node prepared");
+
+        // 1.1 Triode 12AX7 Mode
+        sat.setTubeType(dawg::engine::dsp::TubeStageType::triode12AX7);
+        sat.setDriveDb(12.0f);
+        sat.setTubeBias(0.35f);
+        sat.setTransformerCore(dawg::engine::dsp::TransformerCoreType::bypass);
+
+        std::array<float, 512> left {};
+        std::array<float, 512> right {};
+        for (std::size_t i = 0; i < 512; ++i)
+        {
+            left[i] = std::sin(2.0f * std::numbers::pi_v<float> * 1000.0f * static_cast<float>(i) / 48000.0f) * 0.8f;
+            right[i] = left[i];
+        }
+
+        std::array<float*, 2> channels {left.data(), right.data()};
+        dawg::engine::ProcessContext ctx {
+            .audio = dawg::engine::AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 512
+            },
+            .midi = {},
+            .sampleRate = 48000.0,
+            .sidechain = {}
+        };
+
+        sat.process(ctx);
+
+        for (std::size_t i = 0; i < 512; ++i)
+        {
+            require(std::isfinite(left[i]), "Triode saturated output is finite");
+            require(std::isfinite(right[i]), "Triode saturated right output is finite");
+        }
+
+        // 1.2 Pentode EL34 Mode with Sag
+        sat.setTubeType(dawg::engine::dsp::TubeStageType::pentodeEL34);
+        sat.setPowerSag(0.7f);
+        sat.process(ctx);
+        require(sat.tubeType() == dawg::engine::dsp::TubeStageType::pentodeEL34, "Pentode mode active");
+
+        // 1.3 Transformer Iron Mode
+        sat.setTransformerCore(dawg::engine::dsp::TransformerCoreType::steelCore);
+        sat.setTransformerDrive(1.2f);
+        sat.process(ctx);
+        require(sat.transformerCore() == dawg::engine::dsp::TransformerCoreType::steelCore, "Transformer steel mode active");
+
+        // 1.4 Discrete Console Op-Amp Mode
+        sat.setTubeType(dawg::engine::dsp::TubeStageType::consoleOpAmp2520);
+        sat.process(ctx);
+        require(sat.tubeType() == dawg::engine::dsp::TubeStageType::consoleOpAmp2520, "Console Op-Amp mode active");
+    }
+
+    // =========================================================================
+    // 2. Multitrack Audio Alignment & Vocal Time/Phase Sync
+    // =========================================================================
+    {
+        dawg::engine::dsp::MultitrackAudioAlignmentEngine aligner;
+
+        // 2.1 Sub-Sample Multi-Mic Phase Coherence
+        constexpr std::size_t testLen = 1024;
+        std::vector<float> primary(testLen, 0.0f);
+        std::vector<float> secondary(testLen, 0.0f);
+
+        // Generate primary burst
+        for (std::size_t i = 100; i < 300; ++i)
+        {
+            primary[i] = std::sin(static_cast<float>(i - 100) * 0.15f) * std::exp(-static_cast<float>(i - 100) * 0.015f);
+        }
+
+        // Generate secondary delayed by exactly 10 samples and inverted polarity (e.g. bottom snare)
+        constexpr int trueDelay = 10;
+        for (std::size_t i = 100 + trueDelay; i < 300 + trueDelay; ++i)
+        {
+            secondary[i] = -primary[i - trueDelay];
+        }
+
+        const auto phaseResult = aligner.estimatePhaseAlignment(primary.data(), secondary.data(), testLen, 64);
+        require(phaseResult.success, "Phase alignment estimation succeeded");
+        require(phaseResult.polarityInverted, "Detected inverted polarity");
+        require(std::abs(phaseResult.detectedDelaySamples - static_cast<float>(trueDelay)) < 0.5f, "Detected sample delay matches true delay");
+        require(phaseResult.correlationScore > 0.9f, "High correlation score");
+
+        // 2.2 Secondary Mic Fractional Delay Alignment & Polarity Flip
+        std::vector<float> alignedSecondary(testLen, 0.0f);
+        aligner.alignSecondaryMic(secondary.data(), alignedSecondary.data(), testLen, phaseResult.detectedDelaySamples, phaseResult.polarityInverted);
+
+        // Verify aligned secondary has positive in-phase correlation with primary
+        float dotProduct = 0.0f;
+        for (std::size_t i = 100; i < 300; ++i)
+        {
+            dotProduct += primary[i] * alignedSecondary[i];
+        }
+        require(dotProduct > 0.5f, "Aligned secondary is phase-coherent with primary");
+
+        // 2.3 Dynamic Time Warping (DTW) Vocal Alignment
+        std::vector<float> guide(2048, 0.0f);
+        std::vector<float> dub(2048, 0.0f);
+        for (std::size_t i = 200; i < 800; ++i)
+        {
+            guide[i] = 0.5f * std::sin(static_cast<float>(i) * 0.1f);
+        }
+        for (std::size_t i = 300; i < 900; ++i)
+        {
+            dub[i] = 0.5f * std::sin(static_cast<float>(i) * 0.1f);
+        }
+
+        std::vector<float> alignedDub(2048, 0.0f);
+        const auto dtwResult = aligner.alignDubToGuideTrack(guide.data(), guide.size(), dub.data(), dub.size(), alignedDub.data(), alignedDub.size());
+        require(dtwResult.success, "DTW vocal dub alignment succeeded");
+        require(dtwResult.warpPointsCount > 0, "DTW generated warp points");
+    }
+
+    // =========================================================================
+    // 3. Generative Euclidean Sequencer & Markov Progression
+    // =========================================================================
+    {
+        dawg::engine::GenerativeEuclideanSequencerEngine seq;
+
+        // 3.1 Bjorklund Tresillo E(3, 8)
+        const auto tresillo = dawg::engine::GenerativeEuclideanSequencerEngine::computeBjorklundPattern(3, 8);
+        require(tresillo.size() == 8, "Tresillo size 8");
+        // [1, 0, 0, 1, 0, 0, 1, 0]
+        require(tresillo[0] && !tresillo[1] && !tresillo[2] && tresillo[3] && !tresillo[4] && !tresillo[5] && tresillo[6] && !tresillo[7],
+                "Bjorklund correctly computes Cuban Tresillo E(3, 8)");
+
+        // 3.2 Four-on-the-Floor E(4, 16)
+        const auto fourFloor = dawg::engine::GenerativeEuclideanSequencerEngine::computeBjorklundPattern(4, 16);
+        require(fourFloor.size() == 16, "Four on the floor size 16");
+        require(fourFloor[0] && fourFloor[4] && fourFloor[8] && fourFloor[12], "Four on the floor hits every quarter");
+
+        // 3.3 Configure Polymetric Lanes & Ratchets
+        dawg::engine::EuclideanLaneConfig lane0;
+        lane0.steps = 7;
+        lane0.pulses = 3;
+        lane0.note = 36; // C1 Kick
+        lane0.velocity = 0.9f;
+        lane0.active = true;
+        seq.configureLane(0, lane0);
+
+        dawg::engine::EuclideanLaneConfig lane1;
+        lane1.steps = 5;
+        lane1.pulses = 2;
+        lane1.note = 60; // Middle C
+        lane1.ratchet = 2; // 2x ratchets
+        lane1.active = true;
+        seq.configureLane(1, lane1);
+
+        require(seq.lane(0).config.steps == 7, "Lane 0 has 7 polymetric steps");
+        require(seq.lane(1).config.steps == 5, "Lane 1 has 5 polymetric steps");
+
+        // 3.4 Scale Quantization & Markov Chord Generation
+        seq.setRootNote(0); // C
+        seq.setScale(dawg::engine::dsp::MusicalScale::dorian);
+        const uint8_t nextChord = seq.nextMarkovChordDegree(0); // I -> IV/V/ii
+        require(nextChord < 7, "Valid Markov chord degree generated");
+
+        const uint8_t quantized = seq.quantizeToScale(61); // C# -> quantize to D (62) in C Dorian
+        require(quantized == 62 || quantized == 60, "Quantized to valid scale degree");
+
+        // 3.5 Real-time Tick & Event Emission
+        std::array<dawg::engine::MidiEvent, 32> midiOut {};
+        const auto eventsWritten = seq.process(2048, 120.0, 48000.0, midiOut);
+        require(eventsWritten > 0, "Euclidean sequencer emitted MIDI events");
+    }
+
+    // =========================================================================
+    // 4. Mastering Multiband Stereo Imager
+    // =========================================================================
+    {
+        dawg::engine::dsp::MultibandStereoImagerNode imager;
+        require(!imager.name().empty(), "Multiband stereo imager name");
+        require(imager.prepare(48000.0, 512, 2), "Multiband stereo imager prepared");
+
+        // 4.1 Crossover & Band Controls
+        imager.setCrossoverFrequencies(120.0f, 1500.0f, 6000.0f);
+        imager.setBandWidth(0, 0.0f); // Mono sub-bass
+        imager.setBandWidth(2, 2.0f); // 200% High-Mid widened
+        imager.setMonoBassEnabled(true);
+        imager.setMonoBassCutoff(140.0f);
+        imager.setHaasWidenerEnabled(true);
+        imager.setHaasDelayMs(3.0f);
+
+        std::array<float, 512> l {};
+        std::array<float, 512> r {};
+        for (std::size_t i = 0; i < 512; ++i)
+        {
+            l[i] = std::sin(2.0f * std::numbers::pi_v<float> * 80.0f * static_cast<float>(i) / 48000.0f);
+            r[i] = -l[i]; // Out-of-phase low bass input
+        }
+
+        std::array<float*, 2> channels {l.data(), r.data()};
+        dawg::engine::ProcessContext ctx {
+            .audio = dawg::engine::AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 512
+            },
+            .midi = {},
+            .sampleRate = 48000.0,
+            .sidechain = {}
+        };
+
+        imager.process(ctx);
+
+        for (std::size_t i = 0; i < 512; ++i)
+        {
+            require(std::isfinite(l[i]), "Imager output left is finite");
+            require(std::isfinite(r[i]), "Imager output right is finite");
+        }
+
+        require(std::isfinite(imager.correlation()), "Correlation radar is finite");
+        require(std::isfinite(imager.balance()), "Balance radar is finite");
+    }
+
+    // =========================================================================
+    // 5. Studio Control Room Monitor Matrix & Multi-Cue Headphone Station
+    // =========================================================================
+    {
+        dawg::engine::StudioControlRoomMonitorConsole console;
+        console.setSampleRate(48000.0f);
+
+        // 5.1 Speaker Selection & Trim Calibration
+        console.selectSpeaker(dawg::engine::SpeakerPair::NearfieldB);
+        console.setSpeakerTrimDb(dawg::engine::SpeakerPair::NearfieldB, -1.5f);
+        require(console.activeSpeaker() == dawg::engine::SpeakerPair::NearfieldB, "Nearfield B selected");
+        require(console.speakerTrimDb(dawg::engine::SpeakerPair::NearfieldB) == -1.5f, "Trim -1.5 dB verified");
+
+        // 5.2 Audition Modes
+        console.setDim(true);
+        console.setDimAttenuationDb(-20.0f);
+        require(console.isDimmed(), "Dim enabled");
+
+        console.setMono(true);
+        require(console.isMono(), "Mono summing audition enabled");
+
+        console.setTalkbackActive(true);
+        console.setTalkbackDuckingDb(-18.0f);
+        console.setSlateToneActive(true);
+        console.setSlateFrequencyHz(1000.0f);
+
+        std::array<float, 256> masterInL {};
+        std::array<float, 256> masterInR {};
+        std::array<float, 256> talkbackMicIn {};
+        masterInL.fill(0.8f);
+        masterInR.fill(0.4f);
+        talkbackMicIn.fill(0.2f);
+
+        std::array<float, 256> monOutL {};
+        std::array<float, 256> monOutR {};
+
+        std::array<std::array<float, 256>, 4> cueOutL {};
+        std::array<std::array<float, 256>, 4> cueOutR {};
+        std::array<float*, 4> cuePtrsL {cueOutL[0].data(), cueOutL[1].data(), cueOutL[2].data(), cueOutL[3].data()};
+        std::array<float*, 4> cuePtrsR {cueOutR[0].data(), cueOutR[1].data(), cueOutR[2].data(), cueOutR[3].data()};
+
+        console.process(
+            masterInL.data(),
+            masterInR.data(),
+            talkbackMicIn.data(),
+            monOutL.data(),
+            monOutR.data(),
+            cuePtrsL,
+            cuePtrsR,
+            256);
+
+        // Verify monitor mono summing: L and R equal
+        for (std::size_t i = 0; i < 256; ++i)
+        {
+            require(std::abs(monOutL[i] - monOutR[i]) < 1e-5f, "Monitor outputs are mono summed");
+            require(std::isfinite(monOutL[i]), "Monitor output is finite");
+            // Check performer cues received master and talkback/slate
+            require(std::isfinite(cueOutL[0][i]), "Cue 0 output left is finite");
+            require(std::isfinite(cueOutR[0][i]), "Cue 0 output right is finite");
+        }
+
+        // Test Difference audition
+        console.setMono(false);
+        console.setDifference(true);
+        console.process(
+            masterInL.data(),
+            masterInR.data(),
+            nullptr,
+            monOutL.data(),
+            monOutR.data(),
+            cuePtrsL,
+            cuePtrsR,
+            256);
+        for (std::size_t i = 0; i < 256; ++i)
+        {
+            require(std::isfinite(monOutL[i]), "Difference audition output is finite");
+        }
+    }
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -9255,4 +9564,5 @@ int main()
     testGranularPhysicalWarpVocalAndLoopStationSuite();
     testVectorAnalogAmbisonicsVocalAndRgbSequencerSuite();
     testRestorationDrumTriggerSpatialAtmosSpectralAndDynamicEqSuite();
+    testTubeAlignmentEuclideanImagerAndMonitorConsoleSuite();
 }
