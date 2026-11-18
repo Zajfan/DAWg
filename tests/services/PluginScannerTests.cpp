@@ -4,6 +4,10 @@
 #include <dawg/plugins/PluginPresetManager.h>
 #include <dawg/plugins/ClapPluginExporter.h>
 
+#if defined(__unix__) || defined(__APPLE__)
+#include <dlfcn.h>
+#endif
+
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -441,6 +445,32 @@ void testClapPluginExporter()
     assert(ClapPluginExporter::exportClapBundle("dawg.export.resotamer", exportDir));
     assert(std::filesystem::exists(exportDir / "ResoTamer_Dynamic_Resonance_Suppressor.clap" / "Contents" / "Resources" / "manifest.json"));
     std::filesystem::remove_all(exportDir);
+
+#if defined(__unix__) || defined(__APPLE__)
+    // Verify compile-time shared object exports clap_entry
+    const std::vector<std::filesystem::path> candidateSoPaths = {
+        "services/DAWgPlugins.so",
+        "DAWgPlugins.so",
+        "libDAWgPlugins.so",
+        "services/libDAWgPlugins.so"
+    };
+    for (const auto& soPath : candidateSoPaths)
+    {
+        if (std::filesystem::exists(soPath))
+        {
+            void* handle = dlopen(soPath.c_str(), RTLD_NOW | RTLD_LOCAL);
+            if (handle)
+            {
+                const auto* exportedEntry = static_cast<const clap_plugin_entry*>(dlsym(handle, "clap_entry"));
+                assert(exportedEntry != nullptr);
+                assert(exportedEntry->clap_version.major == 1);
+                (void)exportedEntry;
+                dlclose(handle);
+                break;
+            }
+        }
+    }
+#endif
 
     std::cout << "testClapPluginExporter: PASSED\n";
 }

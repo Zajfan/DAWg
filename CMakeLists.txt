@@ -18,6 +18,8 @@ else()
     set(DAWG_SANITIZER_FLAGS "-fsanitize=address,undefined")
 endif()
 
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 add_subdirectory(engine)
 add_subdirectory(project)
 add_subdirectory(services)

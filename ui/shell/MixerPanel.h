@@ -11,17 +11,21 @@
 
 namespace dawg::ui {
 
-class ChannelStripComponent final : public juce::Component
+class ChannelStripComponent final : public juce::Component, private juce::Timer
 {
 public:
     using CommandHandler = std::function<void(project::ProjectCommand)>;
 
     explicit ChannelStripComponent(CommandHandler handler);
+    ~ChannelStripComponent() override;
 
     void updateTrack(const project::Track& track);
     void setGainReduction(float grDb) noexcept { m_gainReductionDb = grDb; repaint(); }
     void paint(juce::Graphics& g) override;
     void resized() override;
+    void mouseDown(const juce::MouseEvent& e) override;
+    void mouseDrag(const juce::MouseEvent& e) override;
+    void mouseUp(const juce::MouseEvent& e) override;
 
     [[nodiscard]] project::TrackId trackId() const noexcept { return m_trackId; }
     [[nodiscard]] int vcaGroup() const noexcept { return std::max(0, m_vcaCombo.getSelectedId() - 1); }
@@ -34,6 +38,8 @@ public:
 
 private:
     void sendGainPan();
+    void timerCallback() override;
+    void drawMacroOverlay(juce::Graphics& g, juce::Rectangle<int> bounds);
 
     CommandHandler m_handler;
     project::TrackId m_trackId {0};
@@ -41,6 +47,13 @@ private:
     float m_gainReductionDb {0.0f};
     int m_preampModel {0};
     bool m_autoGainComp {true};
+
+    std::array<float, 8> m_macros {{0.5f, 0.4f, 0.6f, 0.3f, 0.7f, 0.5f, 0.2f, 0.8f}};
+    float m_macroAnimPhase {0.0f};
+    int m_draggedMacroIdx {-1};
+    juce::Point<int> m_dragStartPos;
+    float m_dragStartVal {0.0f};
+    juce::Rectangle<int> m_macroBounds;
 
     juce::Label m_nameLabel;
     juce::Slider m_panKnob;

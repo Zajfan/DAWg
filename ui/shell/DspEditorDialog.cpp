@@ -30,13 +30,88 @@ DspEditorComponent::DspEditorComponent(DspEditorKind kind, std::string title)
         }
     }
 
+    switch (m_kind)
+    {
+    case DspEditorKind::parametricEq: m_pluginId = "tnhc.parametric_eq"; break;
+    case DspEditorKind::compressor: m_pluginId = "tnhc.studio_compressor"; break;
+    case DspEditorKind::synth: m_pluginId = "tnhc.synth"; break;
+    case DspEditorKind::reverb: m_pluginId = "tnhc.plate_reverb"; break;
+    case DspEditorKind::delay: m_pluginId = "tnhc.stereo_delay"; break;
+    case DspEditorKind::resonanceSuppressor: m_pluginId = "dawg.effect.dynamic_resonance"; break;
+    case DspEditorKind::multibandImager: m_pluginId = "dawg.effect.multiband_imager"; break;
+    case DspEditorKind::linearPhaseEq: m_pluginId = "dawg.effect.linear_phase_eq"; break;
+    case DspEditorKind::buchlaComplexSynth: m_pluginId = "dawg.synth.buchla_complex"; break;
+    }
+
     m_titleLabel.setText(m_title, juce::dontSendNotification);
-    m_titleLabel.setFont(juce::FontOptions(15.0f, juce::Font::bold));
+    m_titleLabel.setFont(juce::FontOptions(13.0f, juce::Font::bold));
     m_titleLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(230, 235, 245));
     addAndMakeVisible(m_titleLabel);
 
+    // Preset Manager & Ribbon
+    m_presetManager = std::make_unique<plugins::PluginPresetManager>();
+
+    m_searchPill.setTextToShowWhenEmpty("Filter...", juce::Colour::fromRGB(110, 120, 140));
+    m_searchPill.setColour(juce::TextEditor::backgroundColourId, juce::Colour::fromRGB(24, 26, 33));
+    m_searchPill.setColour(juce::TextEditor::outlineColourId, juce::Colour::fromRGB(45, 52, 65));
+    m_searchPill.onTextChange = [this] { populatePresets(m_searchPill.getText().toStdString()); };
+    addAndMakeVisible(m_searchPill);
+
+    m_presetCombo.setColour(juce::ComboBox::backgroundColourId, juce::Colour::fromRGB(24, 26, 33));
+    m_presetCombo.setColour(juce::ComboBox::outlineColourId, juce::Colour::fromRGB(45, 52, 65));
+    m_presetCombo.onChange = [this] { selectPreset(m_presetCombo.getSelectedId()); };
+    addAndMakeVisible(m_presetCombo);
+
+    for (int i = 0; i < 5; ++i)
+    {
+        m_starButtons[static_cast<std::size_t>(i)].setButtonText(juce::CharPointer_UTF8("\xe2\x98\x85")); // ★
+        m_starButtons[static_cast<std::size_t>(i)].setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+        m_starButtons[static_cast<std::size_t>(i)].setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(255, 205, 50));
+        m_starButtons[static_cast<std::size_t>(i)].onClick = [this, star = i + 1] { updateStars(star); };
+        addAndMakeVisible(m_starButtons[static_cast<std::size_t>(i)]);
+    }
+
+    m_abToggleBtn.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(32, 38, 48));
+    m_abToggleBtn.setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(140, 200, 255));
+    m_abToggleBtn.onClick = [this] {
+        m_isSlotA = ! m_isSlotA;
+        m_abToggleBtn.setButtonText(m_isSlotA ? "[ A ]" : "[ B ]");
+    };
+    addAndMakeVisible(m_abToggleBtn);
+
+    m_copyAbBtn.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(28, 32, 42));
+    m_copyAbBtn.setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(180, 190, 210));
+    m_copyAbBtn.onClick = [this] {
+        if (m_presetManager)
+        {
+            auto& ab = m_presetManager->getOrAllocABState(m_pluginId);
+            if (m_isSlotA) ab.copyAToB(); else ab.copyBToA();
+        }
+    };
+    addAndMakeVisible(m_copyAbBtn);
+
+    m_savePresetBtn.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(35, 75, 45));
+    m_savePresetBtn.setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(200, 245, 210));
+    m_savePresetBtn.onClick = [this] {
+        if (! m_presetManager) return;
+        plugins::PluginPreset p;
+        p.presetId = "user_" + std::to_string(std::rand() % 10000);
+        p.pluginId = m_pluginId;
+        p.name = "My " + m_title.substr(0, m_title.find(' ')) + " Preset";
+        p.author = "User";
+        p.category = "User Presets";
+        p.tags = {"user", "custom"};
+        p.rating = m_currentRating;
+        m_presetManager->saveUserPreset(p);
+        populatePresets(m_searchPill.getText().toStdString());
+    };
+    addAndMakeVisible(m_savePresetBtn);
+
     m_bypassButton.setColour(juce::ToggleButton::textColourId, juce::Colour::fromRGB(180, 185, 195));
     addAndMakeVisible(m_bypassButton);
+
+    populatePresets();
+    updateStars(5);
 
     startTimerHz(60); // 60 FPS visualizer animation
 }
@@ -127,12 +202,105 @@ void DspEditorComponent::timerCallback()
     repaint();
 }
 
+void DspEditorComponent::populatePresets(const std::string& query)
+{
+    m_presetCombo.clear(juce::dontSendNotification);
+    if (! m_presetManager)
+        return;
+
+    const auto presets = m_presetManager->searchPresets(m_pluginId, query);
+    int id = 1;
+    for (const auto& p : presets)
+    {
+        juce::String label = (p.isFactory ? "[Factory] " : "[User] ") + juce::String(p.name);
+        m_presetCombo.addItem(label, id++);
+    }
+    if (m_presetCombo.getNumItems() > 0 && m_presetCombo.getSelectedId() == 0)
+    {
+        m_presetCombo.setSelectedId(1, juce::dontSendNotification);
+    }
+}
+
+void DspEditorComponent::selectPreset(int index)
+{
+    if (index <= 0 || ! m_presetManager)
+        return;
+
+    const auto presets = m_presetManager->searchPresets(m_pluginId, m_searchPill.getText().toStdString());
+    if (static_cast<std::size_t>(index - 1) < presets.size())
+    {
+        const auto& p = presets[static_cast<std::size_t>(index - 1)];
+        updateStars(p.rating > 0 ? p.rating : 5);
+        if (! p.parameters.empty())
+        {
+            if (m_kind == DspEditorKind::buchlaComplexSynth && p.parameters.size() >= 4)
+            {
+                m_wavefoldDrive = p.parameters[3] * 3.0f;
+                if (p.parameters.size() >= 5)
+                    m_wavefoldSymmetry = p.parameters[4];
+            }
+            else if (m_kind == DspEditorKind::resonanceSuppressor && p.parameters.size() >= 2)
+            {
+                m_resoDepth = p.parameters[0];
+                m_resoSharpness = p.parameters[1];
+            }
+            else if (m_kind == DspEditorKind::multibandImager && p.parameters.size() >= 4)
+            {
+                for (std::size_t b = 0; b < 4 && b < p.parameters.size(); ++b)
+                    m_imagerWidths[b] = p.parameters[b];
+            }
+            else if (m_kind == DspEditorKind::linearPhaseEq && p.parameters.size() >= 6)
+            {
+                for (std::size_t b = 0; b < 6 && b < p.parameters.size(); ++b)
+                    m_masterEqBands[b].gainDb = p.parameters[b];
+            }
+        }
+        repaint();
+    }
+}
+
+void DspEditorComponent::updateStars(int rating)
+{
+    m_currentRating = std::clamp(rating, 1, 5);
+    for (int i = 0; i < 5; ++i)
+    {
+        if (i < m_currentRating)
+            m_starButtons[static_cast<std::size_t>(i)].setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(255, 205, 50));
+        else
+            m_starButtons[static_cast<std::size_t>(i)].setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(75, 80, 95));
+    }
+}
+
 void DspEditorComponent::resized()
 {
     auto area = getLocalBounds().reduced(8);
-    auto header = area.removeFromTop(28);
-    m_titleLabel.setBounds(header.removeFromLeft(header.getWidth() - 90));
-    m_bypassButton.setBounds(header);
+    auto ribbon = area.removeFromTop(26);
+
+    m_titleLabel.setBounds(ribbon.removeFromLeft(125));
+    ribbon.removeFromLeft(4);
+
+    m_searchPill.setBounds(ribbon.removeFromLeft(75).reduced(0, 1));
+    ribbon.removeFromLeft(4);
+
+    m_presetCombo.setBounds(ribbon.removeFromLeft(145).reduced(0, 1));
+    ribbon.removeFromLeft(4);
+
+    // Star rating buttons
+    for (std::size_t i = 0; i < m_starButtons.size(); ++i)
+    {
+        m_starButtons[i].setBounds(ribbon.removeFromLeft(16).reduced(0, 3));
+    }
+    ribbon.removeFromLeft(6);
+
+    m_abToggleBtn.setBounds(ribbon.removeFromLeft(42).reduced(0, 1));
+    ribbon.removeFromLeft(3);
+
+    m_copyAbBtn.setBounds(ribbon.removeFromLeft(40).reduced(0, 1));
+    ribbon.removeFromLeft(3);
+
+    m_savePresetBtn.setBounds(ribbon.removeFromLeft(42).reduced(0, 1));
+
+    m_bypassButton.setBounds(ribbon.removeFromRight(68));
 }
 
 void DspEditorComponent::paint(juce::Graphics& g)
@@ -1024,7 +1192,7 @@ DspEditorWindow::DspEditorWindow(const juce::String& name, DspEditorKind kind, s
     setUsingNativeTitleBar(true);
     setContentOwned(new DspEditorComponent(kind, name.toStdString()), true);
     setResizable(true, false);
-    centreWithSize(520, 320);
+    centreWithSize(660, 380);
     setVisible(true);
 }
 

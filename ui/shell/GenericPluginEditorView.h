@@ -1,8 +1,11 @@
 #pragma once
 
+#include <dawg/plugins/PluginPresetManager.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <array>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -49,8 +52,22 @@ private:
     void rebuildControls();
 
     std::string m_pluginName;
+    std::string m_pluginId;
     std::vector<PluginParameterDesc> m_params;
     OnParameterChanged m_onParamChanged;
+
+    std::unique_ptr<plugins::PluginPresetManager> m_presetManager;
+    juce::ComboBox m_presetCombo;
+    std::array<juce::TextButton, 5> m_starButtons;
+    juce::TextButton m_abToggleBtn {"[ A ]"};
+    juce::TextButton m_copyAbBtn {"A->B"};
+    juce::TextButton m_savePresetBtn {"Save"};
+    int m_currentRating {5};
+    bool m_isSlotA {true};
+
+    void populatePresets(const std::string& query = "");
+    void selectPreset(int index);
+    void updateStars(int rating);
 
     juce::TextEditor m_searchFilter;
     juce::Viewport m_viewport;

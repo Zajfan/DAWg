@@ -175,6 +175,127 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
     m_revButton.setClickingTogglesState(true);
     m_delayButton.setClickingTogglesState(true);
     m_limiterButton.setClickingTogglesState(true);
+
+    startTimerHz(30);
+}
+
+ChannelStripComponent::~ChannelStripComponent()
+{
+    stopTimer();
+}
+
+void ChannelStripComponent::timerCallback()
+{
+    m_macroAnimPhase += 0.07f;
+    if (m_macroAnimPhase > juce::MathConstants<float>::twoPi)
+        m_macroAnimPhase -= juce::MathConstants<float>::twoPi;
+    repaint(m_macroBounds);
+}
+
+void ChannelStripComponent::drawMacroOverlay(juce::Graphics& g, juce::Rectangle<int> bounds)
+{
+    if (bounds.isEmpty())
+        return;
+
+    g.setColour(juce::Colour::fromRGB(24, 26, 33));
+    g.fillRoundedRectangle(bounds.toFloat(), 3.0f);
+    g.setColour(juce::Colour::fromRGB(45, 50, 62));
+    g.drawRoundedRectangle(bounds.toFloat(), 3.0f, 1.0f);
+
+    static const std::array<juce::Colour, 8> macroColors = {
+        juce::Colour(0xff00e5ff), // Cyan
+        juce::Colour(0xffff9100), // Amber
+        juce::Colour(0xffff5252), // Coral
+        juce::Colour(0xffb388ff), // Purple
+        juce::Colour(0xff69f0ae), // Emerald
+        juce::Colour(0xffffd740), // Yellow
+        juce::Colour(0xff448aff), // Sky Blue
+        juce::Colour(0xffff4081)  // Magenta
+    };
+
+    const int colW = bounds.getWidth() / 4;
+    const int rowH = bounds.getHeight() / 2;
+
+    for (std::size_t m = 0; m < 8; ++m)
+    {
+        const int col = static_cast<int>(m % 4);
+        const int row = static_cast<int>(m / 4);
+        juce::Rectangle<int> cell(bounds.getX() + col * colW, bounds.getY() + row * rowH, colW, rowH);
+
+        const float cx = static_cast<float>(cell.getCentreX());
+        const float cy = static_cast<float>(cell.getCentreY());
+        const float radius = static_cast<float>(std::min(colW, rowH)) * 0.35f;
+
+        const float baseVal = m_macros[m];
+        const float modLfo = 0.28f * std::sin(m_macroAnimPhase * 1.5f + static_cast<float>(m) * 0.78f);
+        const float curVal = std::clamp(baseVal + modLfo, 0.0f, 1.0f);
+
+        // Dial base
+        const bool isDragged = (m_draggedMacroIdx == static_cast<int>(m));
+        g.setColour(isDragged ? juce::Colour::fromRGB(35, 42, 55) : juce::Colour::fromRGB(18, 20, 25));
+        g.fillEllipse(cx - radius, cy - radius, radius * 2.0f, radius * 2.0f);
+        g.setColour(isDragged ? macroColors[m] : juce::Colour::fromRGB(40, 45, 55));
+        g.drawEllipse(cx - radius, cy - radius, radius * 2.0f, radius * 2.0f, 1.0f);
+
+        // Arc angles
+        constexpr float startAngle = -2.35619f;
+        constexpr float endAngle = 2.35619f;
+        const float baseAngle = startAngle + baseVal * (endAngle - startAngle);
+        const float curAngle = startAngle + curVal * (endAngle - startAngle);
+
+        juce::Path arc;
+        const float a1 = std::min(baseAngle, curAngle);
+        const float a2 = std::max(baseAngle, curAngle);
+        arc.addCentredArc(cx, cy, radius + 1.6f, radius + 1.6f, 0.0f, a1, a2, true);
+        g.setColour(macroColors[m].withAlpha(0.85f));
+        g.strokePath(arc, juce::PathStrokeType(1.6f));
+
+        // Dial indicator needle
+        const float needleLen = radius * 0.75f;
+        const float nx = cx + std::sin(baseAngle) * needleLen;
+        const float ny = cy - std::cos(baseAngle) * needleLen;
+        g.setColour(juce::Colours::white);
+        g.drawLine(cx, cy, nx, ny, 1.1f);
+    }
+}
+
+void ChannelStripComponent::mouseDown(const juce::MouseEvent& e)
+{
+    if (m_macroBounds.contains(e.getPosition()) && m_macroBounds.getWidth() > 0 && m_macroBounds.getHeight() > 0)
+    {
+        const int colW = std::max(1, m_macroBounds.getWidth() / 4);
+        const int rowH = std::max(1, m_macroBounds.getHeight() / 2);
+        const int col = std::clamp((e.x - m_macroBounds.getX()) / colW, 0, 3);
+        const int row = std::clamp((e.y - m_macroBounds.getY()) / rowH, 0, 1);
+        const int idx = row * 4 + col;
+        if (idx >= 0 && idx < 8)
+        {
+            m_draggedMacroIdx = idx;
+            m_dragStartPos = e.getPosition();
+            m_dragStartVal = m_macros[static_cast<std::size_t>(idx)];
+            repaint(m_macroBounds);
+        }
+    }
+}
+
+void ChannelStripComponent::mouseDrag(const juce::MouseEvent& e)
+{
+    if (m_draggedMacroIdx >= 0 && m_draggedMacroIdx < 8)
+    {
+        const int deltaY = m_dragStartPos.y - e.y;
+        const float nextVal = std::clamp(m_dragStartVal + static_cast<float>(deltaY) * 0.008f, 0.0f, 1.0f);
+        m_macros[static_cast<std::size_t>(m_draggedMacroIdx)] = nextVal;
+        repaint(m_macroBounds);
+    }
+}
+
+void ChannelStripComponent::mouseUp(const juce::MouseEvent&)
+{
+    if (m_draggedMacroIdx >= 0)
+    {
+        m_draggedMacroIdx = -1;
+        repaint(m_macroBounds);
+    }
 }
 
 void ChannelStripComponent::sendGainPan()
@@ -219,6 +340,9 @@ void ChannelStripComponent::paint(juce::Graphics& g)
     g.fillAll(juce::Colour::fromRGB(36, 38, 44));
     g.setColour(juce::Colour::fromRGB(50, 54, 62));
     g.drawRect(getLocalBounds(), 1);
+
+    // 8-Macro Modulation Overlay
+    drawMacroOverlay(g, m_macroBounds);
 
     // Visual Gain Reduction (GR) Overlay
     if (m_gainReductionDb > 0.1f)
@@ -285,6 +409,10 @@ void ChannelStripComponent::resized()
     auto buttonRow2 = area.removeFromTop(20);
     m_phaseButton.setBounds(buttonRow2.removeFromLeft(buttonRow2.getWidth() / 2).reduced(1));
     m_armButton.setBounds(buttonRow2.reduced(1));
+    area.removeFromTop(3);
+
+    // 8-Macro Modulation Mini-Matrix
+    m_macroBounds = area.removeFromTop(26).reduced(1, 0);
     area.removeFromTop(3);
 
     m_fader.setBounds(area);

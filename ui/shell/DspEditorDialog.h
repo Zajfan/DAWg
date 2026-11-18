@@ -1,5 +1,6 @@
 #pragma once
 
+#include <dawg/plugins/PluginPresetManager.h>
 #include <dawg/project/ProjectTypes.h>
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -57,9 +58,25 @@ private:
 
     DspEditorKind m_kind;
     std::string m_title;
+    std::string m_pluginId;
 
     juce::Label m_titleLabel;
     juce::ToggleButton m_bypassButton {"Bypass"};
+
+    // Interactive Preset Browser Ribbon
+    std::unique_ptr<plugins::PluginPresetManager> m_presetManager;
+    juce::TextEditor m_searchPill;
+    juce::ComboBox m_presetCombo;
+    std::array<juce::TextButton, 5> m_starButtons;
+    juce::TextButton m_abToggleBtn {"[ A ]"};
+    juce::TextButton m_copyAbBtn {"A->B"};
+    juce::TextButton m_savePresetBtn {"Save"};
+    int m_currentRating {5};
+    bool m_isSlotA {true};
+
+    void populatePresets(const std::string& query = "");
+    void selectPreset(int index);
+    void updateStars(int rating);
 
     // Parametric EQ state
     struct EqBand

@@ -11,7 +11,7 @@
 
 namespace dawg::ui {
 
-class TimelineView final : public juce::Component
+class TimelineView final : public juce::Component, private juce::Timer
 {
 public:
     using CommandHandler = std::function<void(project::ProjectCommand)>;
@@ -86,12 +86,15 @@ private:
         moveAutomationPoint,
         dragTensionHandle,
         dragWarpMarker,
-        swipeComping
+        swipeComping,
+        adjustMacro
     };
 
+    void timerCallback() override;
     void drawMinimap(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawRuler(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bounds);
+    void drawMacroOverlay(juce::Graphics& g, const project::Track& track, juce::Rectangle<int> bounds);
     void drawAutomationOverlay(juce::Graphics& g, const project::Track& track, int currentY, int laneWidth);
     void drawRazorAndSlipOverlay(juce::Graphics& g);
     void drawPlayhead(juce::Graphics& g, juce::Rectangle<int> bounds);
@@ -143,11 +146,16 @@ private:
 
     double m_samplesPerPixel {256.0};
     int m_scrollOffsetX {0};
-    int m_headerWidth {150};
+    int m_headerWidth {220};
     int m_minimapHeight {22};
     int m_rulerHeight {28};
     int m_trackLaneHeight {64};
     int m_dragInitialTrackHeight {64};
+
+    float m_macroAnimPhase {0.0f};
+    std::unordered_map<project::TrackId, std::array<float, 8>> m_trackMacros;
+    project::TrackId m_activeMacroTrackId {0};
+    int m_activeMacroIndex {-1};
 };
 
 } // namespace dawg::ui

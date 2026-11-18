@@ -46,6 +46,90 @@ TimelineView::TimelineView(Callbacks callbacks, media::WaveformCache* waveformCa
     m_markers.push_back({32 * barSamples, "Bridge", juce::Colour(0xffbc8cff)});
     m_markers.push_back({40 * barSamples, "Chorus 2", juce::Colour(0xffd29922)});
     m_markers.push_back({48 * barSamples, "Outro", juce::Colour(0xfff85149)});
+
+    startTimerHz(30);
+}
+
+void TimelineView::timerCallback()
+{
+    m_macroAnimPhase += 0.08f;
+    if (m_macroAnimPhase > 628.0f)
+        m_macroAnimPhase -= 628.0f;
+
+    // Repaint track headers to animate the colored modulation rings smoothly
+    repaint(0, tracksTopY(), m_headerWidth, getHeight() - tracksTopY());
+}
+
+void TimelineView::drawMacroOverlay(juce::Graphics& g, const project::Track& track, juce::Rectangle<int> bounds)
+{
+    g.setColour(juce::Colour::fromRGB(24, 26, 33));
+    g.fillRoundedRectangle(bounds.toFloat(), 3.0f);
+    g.setColour(juce::Colour::fromRGB(45, 50, 62));
+    g.drawRoundedRectangle(bounds.toFloat(), 3.0f, 1.0f);
+
+    static const std::array<juce::Colour, 8> macroColors = {
+        juce::Colour(0xff00e5ff), // Cyan
+        juce::Colour(0xffff9100), // Amber
+        juce::Colour(0xffff5252), // Coral
+        juce::Colour(0xffb388ff), // Purple
+        juce::Colour(0xff69f0ae), // Emerald
+        juce::Colour(0xffffd740), // Yellow
+        juce::Colour(0xff448aff), // Sky Blue
+        juce::Colour(0xffff4081)  // Magenta
+    };
+
+    auto it = m_trackMacros.find(track.id);
+    if (it == m_trackMacros.end())
+    {
+        it = m_trackMacros.emplace(track.id, std::array<float, 8>{0.5f, 0.4f, 0.6f, 0.3f, 0.7f, 0.5f, 0.2f, 0.8f}).first;
+    }
+    auto& macros = it->second;
+
+    const int colW = bounds.getWidth() / 4;
+    const int rowH = bounds.getHeight() / 2;
+
+    for (std::size_t m = 0; m < 8; ++m)
+    {
+        const int col = static_cast<int>(m % 4);
+        const int row = static_cast<int>(m / 4);
+        juce::Rectangle<int> cell(bounds.getX() + col * colW, bounds.getY() + row * rowH, colW, rowH);
+
+        const float cx = static_cast<float>(cell.getCentreX());
+        const float cy = static_cast<float>(cell.getCentreY());
+        const float radius = static_cast<float>(std::min(colW, rowH)) * 0.36f;
+
+        const float baseVal = macros[m];
+        // Animated modulation offset from LFO / MSEG / Chaos
+        const float modLfo = 0.28f * std::sin(m_macroAnimPhase * 1.5f + static_cast<float>(m) * 0.78f);
+        const float curVal = std::clamp(baseVal + modLfo, 0.0f, 1.0f);
+
+        // Center dial
+        g.setColour(juce::Colour::fromRGB(18, 20, 25));
+        g.fillEllipse(cx - radius, cy - radius, radius * 2.0f, radius * 2.0f);
+        g.setColour(juce::Colour::fromRGB(40, 45, 55));
+        g.drawEllipse(cx - radius, cy - radius, radius * 2.0f, radius * 2.0f, 1.0f);
+
+        // Indicator angle: -135 deg to +135 deg
+        constexpr float startAngle = -2.35619f;
+        constexpr float endAngle = 2.35619f;
+        const float baseAngle = startAngle + baseVal * (endAngle - startAngle);
+        const float curAngle = startAngle + curVal * (endAngle - startAngle);
+
+        // Modulation Arc Ring
+        juce::Path arc;
+        const float a1 = std::min(baseAngle, curAngle);
+        const float a2 = std::max(baseAngle, curAngle);
+        arc.addCentredArc(cx, cy, radius + 2.0f, radius + 2.0f, 0.0f, a1, a2, true);
+        g.setColour(macroColors[m].withAlpha(0.85f));
+        g.strokePath(arc, juce::PathStrokeType(1.8f));
+
+        // Dial indicator needle
+        const float needleLen = radius * 0.75f;
+        const float nx = cx + std::sin(baseAngle) * needleLen;
+        const float ny = cy - std::cos(baseAngle) * needleLen;
+        g.setColour(juce::Colours::white);
+        g.drawLine(cx, cy, nx, ny, 1.2f);
+    }
 }
 
 void TimelineView::addMarker(const std::uint64_t samplePosition, std::string name, const juce::Colour color)
@@ -438,6 +522,10 @@ void TimelineView::drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bo
         g.setColour(juce::Colour::fromRGB(32, 34, 42));
         g.fillRect(headerBounds);
 
+        // Surface 8 Macro Knobs with animated colored modulation rings
+        auto macroArea = headerBounds.removeFromRight(76).reduced(2, 4);
+        drawMacroOverlay(g, track, macroArea);
+
         const bool isFolder = track.isFolder || track.kind == project::TrackKind::folder;
         const bool isChild = (track.parentFolderId != 0);
 
@@ -472,11 +560,11 @@ void TimelineView::drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bo
         g.setColour(juce::Colour::fromRGB(220, 225, 235));
         g.setFont(juce::FontOptions(12.0f, juce::Font::bold));
         g.drawText(track.name, headerBounds.getX() + nameX, headerBounds.getY() + 6,
-                   headerBounds.getWidth() - nameX - 52, m_trackLaneHeight - 12,
-                   juce::Justification::centredLeft);
+                   headerBounds.getWidth() - nameX - 4, m_trackLaneHeight - 26,
+                   juce::Justification::topLeft);
 
         // Takes expand/collapse button
-        juce::Rectangle<int> takesBtnBounds {m_headerWidth - 48, currentY + m_trackLaneHeight - 18, 44, 15};
+        juce::Rectangle<int> takesBtnBounds {headerBounds.getX() + nameX, currentY + m_trackLaneHeight - 18, 48, 15};
         g.setColour(track.takeLanesExpanded ? juce::Colour::fromRGB(45, 95, 140) : juce::Colour::fromRGB(25, 28, 35));
         g.fillRoundedRectangle(takesBtnBounds.toFloat(), 3.0f);
         g.setColour(juce::Colour::fromRGB(60, 68, 85));
@@ -1212,6 +1300,36 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
+    // Check if clicked inside track header Macro overlay
+    if (e.x >= m_headerWidth - 76 && e.x < m_headerWidth && e.y >= tracksTopY())
+    {
+        int ty = tracksTopY();
+        for (const auto& track : m_model.project.tracks)
+        {
+            if (track.parentFolderId != 0)
+            {
+                const auto parentIt = std::find_if(m_model.project.tracks.begin(), m_model.project.tracks.end(),
+                    [&](const auto& t) { return t.id == track.parentFolderId; });
+                if (parentIt != m_model.project.tracks.end() && parentIt->folderCollapsed)
+                    continue;
+            }
+
+            if (e.y >= ty && e.y < ty + m_trackLaneHeight)
+            {
+                const int localX = e.x - (m_headerWidth - 76);
+                const int localY = e.y - (ty + 4);
+                const int col = std::clamp(localX / (76 / 4), 0, 3);
+                const int row = std::clamp(localY / ((m_trackLaneHeight - 8) / 2), 0, 1);
+                m_activeMacroTrackId = track.id;
+                m_activeMacroIndex = row * 4 + col;
+                m_dragMode = DragMode::adjustMacro;
+                m_dragStartPos = e.getPosition();
+                return;
+            }
+            ty += m_trackLaneHeight + (track.takeLanesExpanded ? static_cast<int>(track.takes.size()) * 32 : 0);
+        }
+    }
+
     // Take lane interaction: swipe comping
     {
         int ty = tracksTopY();
@@ -1752,6 +1870,17 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
 
 void TimelineView::mouseDrag(const juce::MouseEvent& e)
 {
+    if (m_dragMode == DragMode::adjustMacro && m_activeMacroTrackId != 0 && m_activeMacroIndex >= 0 && m_activeMacroIndex < 8)
+    {
+        const int deltaY = m_dragStartPos.y - e.y;
+        auto& macros = m_trackMacros[m_activeMacroTrackId];
+        macros[static_cast<std::size_t>(m_activeMacroIndex)] = std::clamp(
+            macros[static_cast<std::size_t>(m_activeMacroIndex)] + static_cast<float>(deltaY) * 0.005f, 0.0f, 1.0f);
+        m_dragStartPos = e.getPosition();
+        repaint(0, tracksTopY(), m_headerWidth, getHeight() - tracksTopY());
+        return;
+    }
+
     if (m_dragMode == DragMode::panMinimap)
     {
         std::uint64_t maxArrangementSamples = 64 * 96000;
@@ -1927,6 +2056,14 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
 
 void TimelineView::mouseUp(const juce::MouseEvent&)
 {
+    if (m_dragMode == DragMode::adjustMacro)
+    {
+        m_dragMode = DragMode::none;
+        m_activeMacroIndex = -1;
+        repaint();
+        return;
+    }
+
     if (m_dragMode == DragMode::swipeComping)
     {
         const auto sStart = std::min(m_compStartSample, m_compEndSample);

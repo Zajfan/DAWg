@@ -37,6 +37,28 @@ target_link_options(dawg_services_commands PUBLIC
     $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
 )
 
+# Standalone CLAP Shared Library (.so) Target for external DAWs (Bitwig, Reaper, Live 12)
+add_library(dawg_clap_plugins SHARED
+    plugins/src/ClapPluginSharedEntry.cpp
+)
+target_include_directories(dawg_clap_plugins PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/plugins/include)
+target_link_libraries(dawg_clap_plugins PRIVATE dawg_services_plugins)
+target_compile_features(dawg_clap_plugins PUBLIC cxx_std_20)
+target_compile_options(dawg_clap_plugins PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4;/WX>
+    $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
+)
+target_link_options(dawg_clap_plugins PUBLIC
+    $<$<AND:$<CXX_COMPILER_ID:GNU,Clang,AppleClang>,$<CONFIG:Debug>>:${DAWG_SANITIZER_FLAGS}>
+)
+set_target_properties(dawg_clap_plugins PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "DAWgPlugins"
+    CXX_VISIBILITY_PRESET default
+    VISIBILITY_INLINES_HIDDEN NO
+)
+
 if(DAWG_BUILD_TESTS)
     enable_testing()
     find_package(Threads REQUIRED)
@@ -51,7 +73,7 @@ if(DAWG_BUILD_TESTS)
     add_test(NAME dawg.project_controller COMMAND dawg_project_controller_tests)
 
     add_executable(dawg_plugin_scanner_tests ../tests/services/PluginScannerTests.cpp)
-    target_link_libraries(dawg_plugin_scanner_tests PRIVATE dawg_services_plugins)
+    target_link_libraries(dawg_plugin_scanner_tests PRIVATE dawg_services_plugins ${CMAKE_DL_LIBS})
     target_compile_features(dawg_plugin_scanner_tests PRIVATE cxx_std_20)
     target_compile_options(dawg_plugin_scanner_tests PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Werror>
