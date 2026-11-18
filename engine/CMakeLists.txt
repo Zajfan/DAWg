@@ -16,6 +16,7 @@ add_library(dawg_engine_core STATIC
     src/HardwareControlSurfaceEngine.cpp
     src/HardwareControlSurfaceManager.cpp
     src/LanMulticastAudioStreamer.cpp
+    src/LtcAudioDecoder.cpp
     src/Metronome.cpp
     src/MidiClockGenerator.cpp
     src/MidiControllerManager.cpp

@@ -35,15 +35,25 @@ private:
 
     private:
         void runRepair();
+        void resetAudio();
+        void toggleAudition();
+
         EditorViewModel m_model;
         juce::ComboBox m_modeSelector;
+        juce::ComboBox m_toolSelector;
         juce::Slider m_attenSlider;
+        juce::Slider m_brushRadiusSlider;
         juce::TextButton m_btnApply {"Apply Spectral Repair"};
+        juce::TextButton m_btnReset {"Reset Audio"};
+        juce::TextButton m_btnPreview {"Audition Preview"};
         juce::Label m_lblStatus;
 
+        std::vector<float> m_audioBuffer;
         std::vector<std::vector<float>> m_spectrogram;
         juce::Rectangle<int> m_selectionRect;
+        std::vector<juce::Point<float>> m_brushPoints;
         bool m_isSelecting {false};
+        bool m_isPlaying {false};
     };
 
     ContentComponent m_content;

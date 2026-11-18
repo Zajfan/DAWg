@@ -135,6 +135,15 @@ private:
     std::array<float, 64> m_spectrumMagnitudes {};
 
     // Resonance Suppressor Visualizer State
+    struct ResoCutNode { float freqHz; float depthDb; float q; bool active; };
+    std::array<ResoCutNode, 5> m_resoNodes {{
+        { 250.0f, -8.0f, 2.0f, true },
+        { 850.0f, -14.0f, 3.5f, true },
+        { 2800.0f, -18.0f, 4.0f, true },
+        { 5500.0f, -12.0f, 3.0f, true },
+        { 9200.0f, -9.0f, 2.2f, true }
+    }};
+    int m_activeResoNode {-1};
     std::array<float, 128> m_resoFftBins {};
     std::array<float, 128> m_resoErbMask {};
     float m_resoDepth {0.65f};
@@ -143,6 +152,10 @@ private:
     // Multiband Imager Visualizer State
     std::array<float, 3> m_imagerCrossovers {{120.0f, 1500.0f, 6000.0f}};
     std::array<float, 4> m_imagerWidths {{0.0f, 1.0f, 1.5f, 1.8f}};
+    std::array<bool, 4> m_imagerSolos {{false, false, false, false}};
+    std::array<bool, 4> m_imagerMutes {{false, false, false, false}};
+    int m_activeCrossoverDivider {-1};
+    int m_activeImagerBand {-1};
     float m_imagerCorrelation {0.85f};
     std::array<juce::Point<float>, 32> m_lissajousPoints {};
 

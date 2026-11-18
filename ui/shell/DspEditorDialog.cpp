@@ -738,6 +738,36 @@ void DspEditorComponent::paintResonanceSuppressor(juce::Graphics& g, juce::Recta
         }
     }
 
+    // Interactive Draggable Resonance Cut Nodes
+    for (std::size_t i = 0; i < m_resoNodes.size(); ++i)
+    {
+        const auto& node = m_resoNodes[i];
+        if (! node.active) continue;
+
+        const float normX = (std::log10(node.freqHz) - std::log10(20.0f)) / (std::log10(20000.0f) - std::log10(20.0f));
+        const float x = bounds.getX() + normX * w;
+        const float normY = (-node.depthDb) / 24.0f; // 0 to 24 dB cut
+        const float y = bounds.getY() + scopeH * std::clamp(normY, 0.1f, 0.9f);
+
+        const bool isSelected = (m_activeResoNode == static_cast<int>(i));
+
+        // Halo outer glow
+        g.setColour(isSelected ? juce::Colour::fromRGBA(255, 90, 90, 80) : juce::Colour::fromRGBA(255, 140, 40, 50));
+        g.fillEllipse(x - 10.0f, y - 10.0f, 20.0f, 20.0f);
+
+        // Core handle
+        g.setColour(isSelected ? juce::Colour::fromRGB(255, 100, 100) : juce::Colour::fromRGB(255, 160, 50));
+        g.fillEllipse(x - 5.0f, y - 5.0f, 10.0f, 10.0f);
+        g.setColour(juce::Colours::white);
+        g.drawEllipse(x - 5.0f, y - 5.0f, 10.0f, 10.0f, 1.2f);
+
+        // Parameter tag
+        const juce::String tag = (node.freqHz >= 1000.0f ? juce::String(node.freqHz / 1000.0f, 1) + "k" : juce::String(static_cast<int>(node.freqHz)))
+            + " | " + juce::String(node.depthDb, 1) + "dB";
+        g.setFont(juce::FontOptions(9.0f));
+        g.drawText(tag, static_cast<int>(x) - 30, static_cast<int>(y) - 18, 60, 12, juce::Justification::centred);
+    }
+
     // Bottom Status Ribbon
     auto ribbon = bounds.removeFromBottom(26);
     g.setColour(juce::Colour::fromRGB(22, 25, 32));
@@ -815,9 +845,28 @@ void DspEditorComponent::paintMultibandImager(juce::Graphics& g, juce::Rectangle
         g.setFont(juce::FontOptions(10.0f));
         g.drawText(bandNames[static_cast<std::size_t>(b)], bandRect.removeFromTop(16), juce::Justification::centred);
 
+        // Solo and Mute button pills
+        auto btnRow = bandRect.removeFromTop(16).reduced(6, 1);
+        const auto soloRect = btnRow.removeFromLeft(btnRow.getWidth() / 2).reduced(1);
+        const auto muteRect = btnRow.reduced(1);
+
+        const bool isSolo = m_imagerSolos[static_cast<std::size_t>(b)];
+        const bool isMute = m_imagerMutes[static_cast<std::size_t>(b)];
+
+        g.setColour(isSolo ? juce::Colour::fromRGB(240, 200, 40) : juce::Colour::fromRGB(40, 45, 55));
+        g.fillRoundedRectangle(soloRect.toFloat(), 2.0f);
+        g.setColour(isSolo ? juce::Colours::black : juce::Colour::fromRGB(180, 190, 205));
+        g.setFont(juce::FontOptions(9.0f).withStyle("Bold"));
+        g.drawText("S", soloRect, juce::Justification::centred);
+
+        g.setColour(isMute ? juce::Colour::fromRGB(220, 60, 60) : juce::Colour::fromRGB(40, 45, 55));
+        g.fillRoundedRectangle(muteRect.toFloat(), 2.0f);
+        g.setColour(isMute ? juce::Colours::white : juce::Colour::fromRGB(180, 190, 205));
+        g.drawText("M", muteRect, juce::Justification::centred);
+
         // Width meter bar
         const float widthPct = m_imagerWidths[static_cast<std::size_t>(b)];
-        auto meterRect = bandRect.reduced(10, 8);
+        auto meterRect = bandRect.reduced(10, 6);
         g.setColour(juce::Colour::fromRGB(35, 40, 50));
         g.fillRoundedRectangle(meterRect.toFloat(), 2.0f);
 
@@ -830,6 +879,26 @@ void DspEditorComponent::paintMultibandImager(juce::Graphics& g, juce::Rectangle
         g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
         g.drawText(juce::String(static_cast<int>(widthPct * 100.0f)) + "%",
                    bandRect.removeFromBottom(16), juce::Justification::centred);
+
+        // Draggable Linkwitz-Riley crossover divider handle
+        if (b < 3)
+        {
+            const float divX = static_cast<float>(bandRect.getRight() + 4);
+            g.setColour(juce::Colour::fromRGB(70, 85, 110));
+            g.drawVerticalLine(static_cast<int>(divX), static_cast<float>(bandsArea.getY() + 4), static_cast<float>(bandsArea.getBottom() - 14));
+
+            const float xoverFreq = m_imagerCrossovers[static_cast<std::size_t>(b)];
+            const juce::String freqStr = (xoverFreq >= 1000.0f)
+                ? juce::String(xoverFreq / 1000.0f, 1) + "k"
+                : juce::String(static_cast<int>(xoverFreq));
+
+            const juce::Rectangle<int> tagRect {static_cast<int>(divX) - 18, bandsArea.getBottom() - 13, 36, 13};
+            g.setColour(juce::Colour::fromRGB(32, 38, 50));
+            g.fillRoundedRectangle(tagRect.toFloat(), 2.0f);
+            g.setColour(juce::Colour::fromRGB(170, 190, 220));
+            g.setFont(juce::FontOptions(8.0f));
+            g.drawText(freqStr, tagRect, juce::Justification::centred);
+        }
     }
 
     // Bottom: Phase Correlation Bar
@@ -1129,19 +1198,70 @@ void DspEditorComponent::mouseDown(const juce::MouseEvent& e)
     }
     else if (m_kind == DspEditorKind::resonanceSuppressor)
     {
-        // Click to set suppression depth & sharpness
-        const float normY = 1.0f - std::clamp(e.position.y / static_cast<float>(getHeight()), 0.0f, 1.0f);
-        m_resoDepth = std::clamp(normY, 0.05f, 0.95f);
+        const float w = static_cast<float>(getWidth());
+        const float scopeH = static_cast<float>(getHeight()) - 30.0f;
+
+        m_activeResoNode = -1;
+        for (std::size_t i = 0; i < m_resoNodes.size(); ++i)
+        {
+            const auto& node = m_resoNodes[i];
+            const float normX = (std::log10(node.freqHz) - std::log10(20.0f)) / (std::log10(20000.0f) - std::log10(20.0f));
+            const float x = normX * w;
+            const float normY = (-node.depthDb) / 24.0f;
+            const float y = scopeH * std::clamp(normY, 0.1f, 0.9f);
+
+            if (std::hypot(e.position.x - x, e.position.y - y) <= 15.0f)
+            {
+                m_activeResoNode = static_cast<int>(i);
+                break;
+            }
+        }
         repaint();
     }
     else if (m_kind == DspEditorKind::multibandImager)
     {
-        // Click in right pane: adjust band width
+        m_activeCrossoverDivider = -1;
+        m_activeImagerBand = -1;
+
         if (e.position.x > 190)
         {
-            const int bandIdx = std::clamp(static_cast<int>((e.position.x - 190) / ((getWidth() - 200) / 4)), 0, 3);
-            const float normY = 1.0f - std::clamp(e.position.y / static_cast<float>(getHeight()), 0.0f, 1.0f);
-            m_imagerWidths[static_cast<std::size_t>(bandIdx)] = std::clamp(normY * 2.0f, 0.0f, 2.0f);
+            const float bandsX = 190.0f;
+            const float bandsW = static_cast<float>(getWidth()) - bandsX - 12.0f;
+            const float bandW = bandsW / 4.0f;
+
+            // Check if clicked near crossover dividers (dividers 0, 1, 2)
+            for (int d = 0; d < 3; ++d)
+            {
+                const float divX = bandsX + static_cast<float>(d + 1) * bandW;
+                if (std::abs(e.position.x - divX) <= 8.0f)
+                {
+                    m_activeCrossoverDivider = d;
+                    return;
+                }
+            }
+
+            const int bandIdx = std::clamp(static_cast<int>((e.position.x - bandsX) / bandW), 0, 3);
+            const float bandLeft = bandsX + static_cast<float>(bandIdx) * bandW;
+
+            // Check if clicked on Solo / Mute pills
+            if (e.position.y >= 26.0f && e.position.y <= 44.0f)
+            {
+                const float relX = e.position.x - bandLeft;
+                if (relX < bandW * 0.5f)
+                {
+                    m_imagerSolos[static_cast<std::size_t>(bandIdx)] = ! m_imagerSolos[static_cast<std::size_t>(bandIdx)];
+                }
+                else
+                {
+                    m_imagerMutes[static_cast<std::size_t>(bandIdx)] = ! m_imagerMutes[static_cast<std::size_t>(bandIdx)];
+                }
+            }
+            else
+            {
+                m_activeImagerBand = bandIdx;
+                const float normY = 1.0f - std::clamp(e.position.y / static_cast<float>(getHeight()), 0.0f, 1.0f);
+                m_imagerWidths[static_cast<std::size_t>(bandIdx)] = std::clamp(normY * 2.0f, 0.0f, 2.0f);
+            }
             repaint();
         }
     }
@@ -1192,19 +1312,42 @@ void DspEditorComponent::mouseDrag(const juce::MouseEvent& e)
     }
     else if (m_kind == DspEditorKind::resonanceSuppressor)
     {
-        const float normY = 1.0f - std::clamp(e.position.y / static_cast<float>(getHeight()), 0.0f, 1.0f);
-        m_resoDepth = std::clamp(normY, 0.05f, 0.95f);
-        const float normX = std::clamp(e.position.x / static_cast<float>(getWidth()), 0.0f, 1.0f);
-        m_resoSharpness = std::clamp(0.5f + normX * 4.5f, 0.5f, 5.0f);
-        repaint();
+        if (m_activeResoNode >= 0 && m_activeResoNode < static_cast<int>(m_resoNodes.size()))
+        {
+            const float w = static_cast<float>(getWidth());
+            const float scopeH = static_cast<float>(getHeight()) - 30.0f;
+
+            const float normX = std::clamp(e.position.x / w, 0.0f, 1.0f);
+            m_resoNodes[static_cast<std::size_t>(m_activeResoNode)].freqHz = 20.0f * std::pow(1000.0f, normX);
+
+            const float normY = std::clamp(e.position.y / scopeH, 0.05f, 0.95f);
+            m_resoNodes[static_cast<std::size_t>(m_activeResoNode)].depthDb = -normY * 24.0f;
+            repaint();
+        }
+        else
+        {
+            const float normY = 1.0f - std::clamp(e.position.y / static_cast<float>(getHeight()), 0.0f, 1.0f);
+            m_resoDepth = std::clamp(normY, 0.05f, 0.95f);
+            const float normX = std::clamp(e.position.x / static_cast<float>(getWidth()), 0.0f, 1.0f);
+            m_resoSharpness = std::clamp(0.5f + normX * 4.5f, 0.5f, 5.0f);
+            repaint();
+        }
     }
     else if (m_kind == DspEditorKind::multibandImager)
     {
-        if (e.position.x > 190)
+        if (m_activeCrossoverDivider >= 0 && m_activeCrossoverDivider < 3)
         {
-            const int bandIdx = std::clamp(static_cast<int>((e.position.x - 190) / ((getWidth() - 200) / 4)), 0, 3);
+            const float bandsX = 190.0f;
+            const float bandsW = static_cast<float>(getWidth()) - bandsX - 12.0f;
+            const float normX = std::clamp((e.position.x - bandsX) / bandsW, 0.05f, 0.95f);
+            const float newFreq = 40.0f * std::pow(500.0f, normX);
+            m_imagerCrossovers[static_cast<std::size_t>(m_activeCrossoverDivider)] = newFreq;
+            repaint();
+        }
+        else if (m_activeImagerBand >= 0 && m_activeImagerBand < 4)
+        {
             const float normY = 1.0f - std::clamp(e.position.y / static_cast<float>(getHeight()), 0.0f, 1.0f);
-            m_imagerWidths[static_cast<std::size_t>(bandIdx)] = std::clamp(normY * 2.0f, 0.0f, 2.0f);
+            m_imagerWidths[static_cast<std::size_t>(m_activeImagerBand)] = std::clamp(normY * 2.0f, 0.0f, 2.0f);
             repaint();
         }
     }
@@ -1230,6 +1373,12 @@ void DspEditorComponent::mouseWheelMove(const juce::MouseEvent&, const juce::Mou
     {
         const auto bandIdx = static_cast<std::size_t>(m_activeMasterEqBand);
         m_masterEqBands[bandIdx].q = std::clamp(m_masterEqBands[bandIdx].q + wheel.deltaY * 0.5f, 0.1f, 10.0f);
+        repaint();
+    }
+    else if (m_kind == DspEditorKind::resonanceSuppressor && m_activeResoNode >= 0 && m_activeResoNode < static_cast<int>(m_resoNodes.size()))
+    {
+        const auto nodeIdx = static_cast<std::size_t>(m_activeResoNode);
+        m_resoNodes[nodeIdx].q = std::clamp(m_resoNodes[nodeIdx].q + wheel.deltaY * 0.5f, 0.5f, 12.0f);
         repaint();
     }
 }

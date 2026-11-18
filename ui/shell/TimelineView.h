@@ -68,7 +68,7 @@ public:
     void jumpToNextMarker();
     void jumpToPrevMarker();
     [[nodiscard]] const std::vector<TimelineMarker>& markers() const noexcept { return m_markers; }
-    [[nodiscard]] int tracksTopY() const noexcept { return m_minimapHeight + m_rulerHeight; }
+    [[nodiscard]] int tracksTopY() const noexcept { return m_minimapHeight + m_rulerHeight + (m_showFilmstrip ? m_filmstripHeight : 0); }
 
 private:
     enum class DragMode
@@ -93,6 +93,7 @@ private:
     void timerCallback() override;
     void drawMinimap(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawRuler(juce::Graphics& g, juce::Rectangle<int> bounds);
+    void drawFilmstrip(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawMacroOverlay(juce::Graphics& g, const project::Track& track, juce::Rectangle<int> bounds);
     void drawAutomationOverlay(juce::Graphics& g, const project::Track& track, int currentY, int laneWidth);
@@ -140,9 +141,11 @@ private:
     juce::TextButton m_autoButton {"Auto: OFF"};
     juce::TextButton m_razorButton {"Razor [S]"};
     juce::TextButton m_macroButton {"Macros: OFF"};
+    juce::TextButton m_filmstripButton {"Filmstrip: OFF"};
     juce::TextButton m_addMarkerButton {"+ Marker"};
     bool m_razorMode {false};
     bool m_showMacros {false};
+    bool m_showFilmstrip {false};
 
     std::vector<TimelineMarker> m_markers;
 
@@ -151,6 +154,7 @@ private:
     int m_headerWidth {220};
     int m_minimapHeight {22};
     int m_rulerHeight {28};
+    int m_filmstripHeight {44};
     int m_trackLaneHeight {64};
     int m_dragInitialTrackHeight {64};
 

@@ -203,4 +203,20 @@ std::string SmpteTimecodeEngine::generateCueSheetReportText(
     return ss.str();
 }
 
+double SmpteTimecodeEngine::calculateTempoForHitPoint(
+    const std::uint64_t startFrame,
+    const std::uint64_t targetHitFrame,
+    const double fps,
+    const double musicalBeats) noexcept
+{
+    if (targetHitFrame <= startFrame || fps <= 0.0 || musicalBeats <= 0.0)
+        return 120.0;
+
+    const double durationSec = static_cast<double>(targetHitFrame - startFrame) / fps;
+    if (durationSec <= 0.001)
+        return 120.0;
+
+    return (musicalBeats * 60.0) / durationSec;
+}
+
 } // namespace dawg::engine

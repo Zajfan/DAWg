@@ -88,6 +88,7 @@
 #include <dawg/engine/SimdMath.h>
 #include <dawg/engine/DspPerformanceProfiler.h>
 #include <dawg/engine/SmpteTimecode.h>
+#include <dawg/engine/LtcAudioDecoder.h>
 #include <dawg/engine/DjCrossfaderEngine.h>
 #include <dawg/engine/SpectralRepairEngine.h>
 #include <dawg/engine/AutomationSubLaneEngine.h>
@@ -7040,6 +7041,72 @@ void testRealtimeProfilingSimdDjCrossfaderSpectralRepairAndSmpteSuite()
 
         const auto txt = SmpteTimecodeEngine::generateCueSheetReportText("Cyberpunk Chase Score", cues);
         require(txt.find("DAWg PRODUCTION CUE SHEET REPORT") != std::string::npos, "Text cue sheet contains title");
+
+        // Hit-point tempo calculator
+        // 24 fps, hit point is at frame 96 (4.0 seconds). We want 8 musical beats to land on the hit.
+        // Tempo = (8 beats * 60) / 4.0 sec = 120.0 BPM
+        const double calculatedBpm = SmpteTimecodeEngine::calculateTempoForHitPoint(0, 96, 24.0, 8.0);
+        require(std::abs(calculatedBpm - 120.0) < 1e-4, "Hit-point tempo calculation lands exact BPM");
+
+        // LTC Audio Decoder
+        LtcAudioDecoder ltcDec(48000.0, SmpteFrameRate::fps24);
+        require(! ltcDec.hasLock(), "LTC decoder initialized without lock");
+
+        // Synthesize LTC signal with 80 bits per frame
+        // Generate an LTC biphase mark audio stream for 1 frame
+        // 24 fps @ 48000 Hz => 2000 samples per frame => 25 samples per bit
+        std::vector<float> ltcSignal;
+        ltcSignal.reserve(4000);
+        float currentPolarity = 1.0f;
+
+        // Construct 80-bit frame (hours=1, mins=2, secs=3, frames=4, sync=0x3FFD)
+        std::array<bool, 80> frameBits {};
+        // frames=4 -> bit 2 is 1 (bits 0..3: 0, 0, 1, 0)
+        frameBits[2] = true;
+        // secs=3 -> bits 16, 17 are 1 (bits 16..19: 1, 1, 0, 0)
+        frameBits[16] = true;
+        frameBits[17] = true;
+        // mins=2 -> bit 33 is 1 (bits 32..35: 0, 1, 0, 0)
+        frameBits[33] = true;
+        // hours=1 -> bit 48 is 1 (bits 48..51: 1, 0, 0, 0)
+        frameBits[48] = true;
+        // sync word 0x3FFD (0011 1111 1111 1101) in bits 64..79
+        constexpr std::uint16_t syncVal = 0x3FFD;
+        for (std::size_t b = 0; b < 16; ++b)
+        {
+            frameBits[64 + b] = ((syncVal >> (15 - b)) & 1) != 0;
+        }
+
+        // Repeat for 2 consecutive frames so transition after bit 79 triggers and decoder locks
+        for (int frame = 0; frame < 2; ++frame)
+        {
+            for (bool bit : frameBits)
+            {
+                currentPolarity = -currentPolarity; // Transition at bit boundary
+                if (bit)
+                {
+                    // '1' bit has middle transition
+                    for (int s = 0; s < 12; ++s) ltcSignal.push_back(currentPolarity * 0.8f);
+                    currentPolarity = -currentPolarity;
+                    for (int s = 0; s < 13; ++s) ltcSignal.push_back(currentPolarity * 0.8f);
+                }
+                else
+                {
+                    // '0' bit has no middle transition
+                    for (int s = 0; s < 25; ++s) ltcSignal.push_back(currentPolarity * 0.8f);
+                }
+            }
+        }
+        // Trailing edge
+        currentPolarity = -currentPolarity;
+        for (int s = 0; s < 25; ++s) ltcSignal.push_back(currentPolarity * 0.8f);
+
+        ltcDec.processAudio(ltcSignal.data(), ltcSignal.size());
+        require(ltcDec.hasLock(), "LTC decoder locked to synthesized LTC audio stream");
+        require(ltcDec.latestTimecode().hours == 1, "Decoded LTC hours = 1");
+        require(ltcDec.latestTimecode().minutes == 2, "Decoded LTC minutes = 2");
+        require(ltcDec.latestTimecode().seconds == 3, "Decoded LTC seconds = 3");
+        require(ltcDec.latestTimecode().frames == 4, "Decoded LTC frames = 4");
     }
 
     // =========================================================================

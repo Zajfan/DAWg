@@ -76,6 +76,13 @@ public:
     [[nodiscard]] static std::string generateCueSheetReportText(
         const std::string& projectTitle,
         const std::vector<CueSheetEntry>& cues);
+
+    /// Calculates required tempo (BPM) so that musicalBeats precisely land on targetHitFrame
+    [[nodiscard]] static double calculateTempoForHitPoint(
+        std::uint64_t startFrame,
+        std::uint64_t targetHitFrame,
+        double fps,
+        double musicalBeats) noexcept;
 };
 
 } // namespace dawg::engine
