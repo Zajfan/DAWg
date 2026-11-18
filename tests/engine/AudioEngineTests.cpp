@@ -112,6 +112,11 @@
 #include <dawg/engine/dsp/MtsEspTuningEngine.h>
 #include <dawg/engine/dsp/MultibandTransientDuckingNode.h>
 #include <dawg/engine/ProStudioDeliveryEngine.h>
+#include <dawg/engine/dsp/GranularTextureMorphNode.h>
+#include <dawg/engine/dsp/AcousticPhysicalModelEngine.h>
+#include <dawg/engine/dsp/SpecializedClipWarpEngine.h>
+#include <dawg/engine/dsp/VocalNoteBlobEditorEngine.h>
+#include <dawg/engine/dsp/LiveLoopStationGlitchNode.h>
 #include "../../ui/shell/WorkspaceLayoutManager.h"
 
 #include <array>
@@ -8187,6 +8192,275 @@ void testSpectralSongwritingMtsTransientAndDeliverySuite()
         require(manifestJson.find(stemName) != std::string::npos, "Manifest JSON contains stem name");
     }
 }
+
+void testGranularPhysicalWarpVocalAndLoopStationSuite()
+{
+    using namespace dawg::engine;
+    using namespace dawg::engine::dsp;
+
+    // =========================================================================
+    // 1. Modern Granular Cloud Sampler & Texture Morph Synthesizer
+    // =========================================================================
+    {
+        GranularTextureMorphNode granular;
+        require(granular.prepare(48000.0, 128, 2), "GranularTextureMorphNode prepared");
+
+        granular.setPositionX(0.45f);
+        granular.setSprayY(0.15f);
+        granular.setGrainLengthMs(40.0f);
+        granular.setGrainDensity(60.0f);
+        granular.setWindowShape(TextureWindowShape::blackman);
+        granular.setReverseProbability(0.2f);
+        granular.setPanSpread(0.7f);
+        granular.setPitchSemitones(0.0f);
+        granular.setShimmerOctaveMix(0.3f);
+
+        require(granular.positionX() == 0.45f, "X position is 0.45");
+        require(granular.sprayY() == 0.15f, "Y spray is 0.15");
+        require(granular.windowShape() == TextureWindowShape::blackman, "Window shape is Blackman");
+        require(granular.sampleBufferFrames() > 0, "Default sample buffer populated");
+
+        std::array<float, 128> outL {};
+        std::array<float, 128> outR {};
+        std::array<float*, 2> channels = { outL.data(), outR.data() };
+        ProcessContext ctx {
+            .audio = AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 128
+            },
+            .sidechain = AudioBufferView {}
+        };
+
+        // Run multiple blocks to allow grains to accumulate
+        for (int b = 0; b < 10; ++b)
+        {
+            granular.process(ctx);
+        }
+
+        require(granular.activeGrainCount() > 0, "Grain pool active with spawned grains");
+        require(! std::isnan(outL[50]), "Granular output is valid float");
+        float energy = 0.0f;
+        for (float s : outL) energy += s * s;
+        require(energy > 0.0001f, "Granular engine produces non-zero acoustic cloud");
+    }
+
+    // =========================================================================
+    // 2. Physical Modeling Resonator & Acoustic String/Membrane Suite
+    // =========================================================================
+    {
+        AcousticPhysicalModelEngine phys;
+        require(phys.prepare(48000.0, 128, 2), "AcousticPhysicalModelEngine prepared");
+
+        std::array<float, 128> outL {};
+        std::array<float, 128> outR {};
+        std::array<float*, 2> channels = { outL.data(), outR.data() };
+        ProcessContext ctx {
+            .audio = AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 128
+            },
+            .sidechain = AudioBufferView {}
+        };
+
+        // 1. Karplus-Strong Extended Waveguide String
+        phys.setModelMode(AcousticModelMode::waveguideString);
+        phys.setStringExciter(StringExciterType::strikeFeltHammer);
+        phys.setFrequencyHz(440.0f);
+        phys.setStringDamping(0.3f);
+        phys.setStringStiffness(0.15f);
+        phys.triggerExcitation(0.9f);
+
+        phys.process(ctx);
+        require(! std::isnan(outL[20]), "Waveguide string output valid");
+        float stringEnergy = 0.0f;
+        for (float s : outL) stringEnergy += s * s;
+        require(stringEnergy > 0.001f, "Waveguide string synthesized energy");
+
+        // 2. 2D Membrane Drum Resonator (Bessel modes)
+        phys.setModelMode(AcousticModelMode::membraneDrum);
+        phys.setMembraneTension(0.7f);
+        phys.setMembraneDecay(300.0f);
+        phys.triggerExcitation(0.85f);
+
+        outL.fill(0.0f);
+        phys.process(ctx);
+        require(! std::isnan(outL[20]), "Membrane drum output valid");
+        float drumEnergy = 0.0f;
+        for (float s : outL) drumEnergy += s * s;
+        require(drumEnergy > 0.001f, "2D Membrane drum synthesized acoustic energy");
+
+        // 3. Acoustic Bore Air Column (Cylinder waveguide with non-linear reed)
+        phys.setModelMode(AcousticModelMode::airColumnBore);
+        phys.setBreathPressure(0.8f);
+        phys.setReedStiffness(0.55f);
+
+        outL.fill(0.0f);
+        phys.process(ctx);
+        require(! std::isnan(outL[20]), "Acoustic bore output valid");
+    }
+
+    // =========================================================================
+    // 3. Specialized Audio Clip Stretch Modes (Beats, Tones, Texture, Complex Pro)
+    // =========================================================================
+    {
+        SpecializedClipWarpEngine warp;
+        require(warp.prepare(48000.0, 128, 2), "SpecializedClipWarpEngine prepared");
+
+        std::array<float, 128> inL {};
+        std::array<float, 128> inR {};
+        inL[0] = 1.0f; // Transient spike
+        std::array<float*, 2> channels = { inL.data(), inR.data() };
+        ProcessContext ctx {
+            .audio = AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 128
+            },
+            .sidechain = AudioBufferView {}
+        };
+
+        // Beats Mode
+        warp.setWarpMode(SpecializedWarpMode::beats);
+        warp.setBeatsTransientSensitivity(0.8f);
+        warp.process(ctx);
+        require(warp.warpMode() == SpecializedWarpMode::beats, "Warp mode is Beats");
+        require(! std::isnan(inL[0]), "Beats mode output valid");
+
+        // Tones Mode (Monophonic pitch contour)
+        warp.setWarpMode(SpecializedWarpMode::tones);
+        warp.setPitchSemitones(5.0f); // 4th up
+        warp.setStretchFactor(1.25f);
+        warp.process(ctx);
+        require(warp.pitchSemitones() == 5.0f, "Pitch transposition is +5 semitones");
+
+        // Texture Mode (Granular with flux)
+        warp.setWarpMode(SpecializedWarpMode::texture);
+        warp.setTextureGrainSizeMs(35.0f);
+        warp.setTextureFlux(0.3f);
+        warp.process(ctx);
+        require(warp.textureGrainSizeMs() == 35.0f, "Texture grain size is 35ms");
+    }
+
+    // =========================================================================
+    // 4. Graphical Vocal Pitch & Note-Blob Editor (Melodyne / VariAudio Style)
+    // =========================================================================
+    {
+        VocalNoteBlobEditorEngine vocalEditor;
+
+        // Synthesize test vocal phrase:
+        // Samples 0..2000: Voiced vowel at 440 Hz (Middle A4)
+        // Samples 2000..2500: Silence gap
+        // Samples 2500..3500: Unvoiced sibilant 's' (high-frequency noise)
+        // Samples 3500..6000: Voiced vowel at 523.25 Hz (C5)
+        std::vector<float> testVocal(6000, 0.0f);
+        constexpr float twoPi = 6.28318530717958647692f;
+        for (std::size_t i = 0; i < 2000; ++i)
+        {
+            testVocal[i] = 0.7f * std::sin(twoPi * 440.0f * (static_cast<float>(i) / 48000.0f));
+        }
+        std::uint32_t rng = 0x12345;
+        for (std::size_t i = 2500; i < 3500; ++i)
+        {
+            rng = rng * 1664525u + 1013904223u;
+            // High frequency alternating noise
+            testVocal[i] = (i % 2 == 0 ? 0.3f : -0.3f) * (static_cast<float>(rng >> 8) / 16777216.0f);
+        }
+        for (std::size_t i = 3500; i < 6000; ++i)
+        {
+            testVocal[i] = 0.6f * std::sin(twoPi * 523.25f * (static_cast<float>(i) / 48000.0f));
+        }
+
+        vocalEditor.analyzeAudio(testVocal.data(), testVocal.size(), 48000.0);
+        require(vocalEditor.blobCount() >= 2, "Extracted note blobs and sibilance from vocal audio");
+
+        // Verify sibilance separation
+        bool foundSibilance = false;
+        bool foundVoiced = false;
+        for (const auto& blob : vocalEditor.blobs())
+        {
+            if (blob.isSibilanceOrBreath) foundSibilance = true;
+            else foundVoiced = true;
+        }
+        require(foundVoiced, "Voiced note blob detected");
+        require(foundSibilance, "Unvoiced sibilance/breath blob detected");
+
+        // Scale snap to C Major
+        vocalEditor.quantizePitchToScale(1.0f, MusicalScale::major, 0);
+
+        // Global sibilance gain reduction (-6dB)
+        vocalEditor.setGlobalSibilanceGainDb(-6.0f);
+        require(vocalEditor.globalSibilanceGainDb() == -6.0f, "Sibilance cut applied");
+
+        std::vector<float> editedAudio(testVocal.size(), 0.0f);
+        vocalEditor.renderEditedAudio(editedAudio.data(), editedAudio.size());
+        require(! std::isnan(editedAudio[500]), "Rendered edited audio is valid");
+    }
+
+    // =========================================================================
+    // 5. Live Loop Performance Station & Real-Time Buffer Glitch FX
+    // =========================================================================
+    {
+        LiveLoopStationGlitchNode loopStation;
+        require(loopStation.prepare(48000.0, 128, 2), "LiveLoopStationGlitchNode prepared");
+
+        // Deck 0: Trigger Rec -> Play
+        require(loopStation.deckState(0) == DeckState::empty, "Deck 0 starts empty");
+        loopStation.triggerDeckAction(0);
+        require(loopStation.deckState(0) == DeckState::recording, "Deck 0 state is recording");
+
+        std::array<float, 128> inL {};
+        std::array<float, 128> inR {};
+        inL.fill(0.5f);
+        inR.fill(0.5f);
+        std::array<float*, 2> channels = { inL.data(), inR.data() };
+        ProcessContext ctx {
+            .audio = AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 128
+            },
+            .sidechain = AudioBufferView {}
+        };
+
+        loopStation.process(ctx);
+        loopStation.triggerDeckAction(0); // Ends recording, starts playing
+        require(loopStation.deckState(0) == DeckState::playing, "Deck 0 state is playing");
+        require(loopStation.deckLoopLength(0) == 128, "Deck 0 captured 128 sample loop");
+
+        // Multiply loop 2x
+        loopStation.multiplyDeck(0, 2);
+        require(loopStation.deckLoopLength(0) == 256, "Deck 0 multiplied to 256 samples");
+
+        // Half speed and reverse flags
+        loopStation.setDeckHalfSpeed(0, true);
+        loopStation.setDeckReverse(0, true);
+
+        // Glitch Beat Repeater
+        loopStation.setTempoBpm(120.0);
+        loopStation.setRepeatDivision(GlitchRepeatDivision::divSixteenth);
+        loopStation.setGlitchEnabled(true);
+        require(loopStation.isGlitchEnabled(), "Glitch beat repeater active");
+
+        inL.fill(0.0f);
+        loopStation.process(ctx);
+        require(! std::isnan(inL[10]), "Glitch output valid");
+
+        // Turntable Tape Stop
+        loopStation.triggerTapeStop(150.0f);
+        require(loopStation.isTapeStopping(), "Tape stop triggered");
+
+        // MIDI Pedal mapping (Note On 37 triggers Deck 1 action)
+        MidiEvent pedalEvent {
+            .frameOffset = 0,
+            .data = {std::byte {0x90}, std::byte {37}, std::byte {100}},
+            .size = 3
+        };
+        loopStation.handleMidiEvent(pedalEvent);
+        require(loopStation.deckState(1) == DeckState::recording, "MIDI pedal triggered Deck 1 recording");
+    }
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -8372,4 +8646,5 @@ int main()
     testSpatialTapeVocalGuitarAndFollowGrooveSuite();
     testControlSurfacesModularLinkConductorAndDspSandboxSuite();
     testSpectralSongwritingMtsTransientAndDeliverySuite();
+    testGranularPhysicalWarpVocalAndLoopStationSuite();
 }

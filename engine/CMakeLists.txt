@@ -34,6 +34,7 @@ add_library(dawg_engine_core STATIC
     src/WsolaTimeStretcher.cpp
     src/clap/ClapPluginNode.cpp
     src/dsp/AcousticDrumBleedCancellationNode.cpp
+    src/dsp/AcousticPhysicalModelEngine.cpp
     src/dsp/AmbisonicsProcessorNode.cpp
     src/dsp/AnalogLadderRingModSynthNode.cpp
     src/dsp/ArpeggiatorEngine.cpp
@@ -53,10 +54,12 @@ add_library(dawg_engine_core STATIC
     src/dsp/DspWireGrid.cpp
     src/dsp/DynamicLinearPhaseEQNode.cpp
     src/dsp/GranularCloudNode.cpp
+    src/dsp/GranularTextureMorphNode.cpp
     src/dsp/HarmonicAssistant.cpp
     src/dsp/HarmonizerVocoderNode.cpp
     src/dsp/LiveDspScriptSandboxNode.cpp
     src/dsp/LiveLooperNode.cpp
+    src/dsp/LiveLoopStationGlitchNode.cpp
     src/dsp/MasterTapeVinylCuttingNode.cpp
     src/dsp/MasteringMeterNode.cpp
     src/dsp/MasteringStemExportEngine.cpp
@@ -80,6 +83,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/SpatialHeadTrackerBridge.cpp
     src/dsp/SpatialObjectPannerNode.cpp
     src/dsp/SpatialSurroundPannerNode.cpp
+    src/dsp/SpecializedClipWarpEngine.cpp
     src/dsp/SpectralAdditiveResynthesisNode.cpp
     src/dsp/SpectralBalanceAssistant.cpp
     src/SpectralRepairEngine.cpp
@@ -103,6 +107,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/VintageTapeMachineNode.cpp
     src/dsp/VocalHarmonyEngine.cpp
     src/dsp/VocalPitchCorrectorNode.cpp
+    src/dsp/VocalNoteBlobEditorEngine.cpp
     src/dsp/WavetableSynthNode.cpp
     src/plugins/AraPluginBridge.cpp
     src/plugins/PluginCrashSupervisor.cpp
