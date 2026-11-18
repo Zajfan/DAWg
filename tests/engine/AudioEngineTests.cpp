@@ -117,6 +117,11 @@
 #include <dawg/engine/dsp/SpecializedClipWarpEngine.h>
 #include <dawg/engine/dsp/VocalNoteBlobEditorEngine.h>
 #include <dawg/engine/dsp/LiveLoopStationGlitchNode.h>
+#include <dawg/engine/dsp/VectorWaveSequencerNode.h>
+#include <dawg/engine/dsp/AnalogDegraderSuiteNode.h>
+#include <dawg/engine/dsp/RayTracingAcousticRoomNode.h>
+#include <dawg/engine/dsp/VocalSurgicalDeEsserNode.h>
+#include <dawg/engine/RgbPadMatrixSequencerEngine.h>
 #include "../../ui/shell/WorkspaceLayoutManager.h"
 
 #include <array>
@@ -8461,6 +8466,335 @@ void testGranularPhysicalWarpVocalAndLoopStationSuite()
         require(loopStation.deckState(1) == DeckState::recording, "MIDI pedal triggered Deck 1 recording");
     }
 }
+
+void testVectorAnalogAmbisonicsVocalAndRgbSequencerSuite()
+{
+    // =========================================================================
+    // 1. Vector & Multi-Dimensional Wave-Sequencing Synth (VectorWaveSequencerNode)
+    // =========================================================================
+    {
+        dawg::engine::dsp::VectorWaveSequencerNode synth;
+        require(synth.prepare(48000.0, 512, 2), "VectorWaveSequencerNode prepare successful");
+
+        // 1.1 Bilinear weights at corners and center
+        float wA = 0.0f, wB = 0.0f, wC = 0.0f, wD = 0.0f;
+        dawg::engine::dsp::VectorWaveSequencerNode::computeWeights(0.0f, 0.0f, wA, wB, wC, wD);
+        require(std::abs(wA - 0.25f) < 1e-4f, "Center quadrant A weight = 0.25");
+        require(std::abs(wB - 0.25f) < 1e-4f, "Center quadrant B weight = 0.25");
+        require(std::abs(wC - 0.25f) < 1e-4f, "Center quadrant C weight = 0.25");
+        require(std::abs(wD - 0.25f) < 1e-4f, "Center quadrant D weight = 0.25");
+        require(std::abs((wA + wB + wC + wD) - 1.0f) < 1e-4f, "Sum of weights is exactly 1.0");
+
+        // Top-Right corner (B)
+        dawg::engine::dsp::VectorWaveSequencerNode::computeWeights(1.0f, 1.0f, wA, wB, wC, wD);
+        require(std::abs(wB - 1.0f) < 1e-4f, "Top-Right quadrant B is 1.0");
+        require(std::abs(wA) < 1e-4f && std::abs(wC) < 1e-4f && std::abs(wD) < 1e-4f, "Other quadrants are 0.0");
+
+        // 1.2 Trajectory modes
+        synth.setTrajectoryMode(dawg::engine::dsp::VectorTrajectoryMode::orbit);
+        require(synth.trajectoryMode() == dawg::engine::dsp::VectorTrajectoryMode::orbit, "Orbit trajectory mode set");
+        synth.setTrajectoryRateHz(1.0f);
+        synth.setTrajectoryDepth(0.9f);
+
+        // 1.3 Step Sequencer configuration
+        synth.setSequencerEnabled(true);
+        require(synth.isSequencerEnabled(), "Step sequencer enabled");
+        synth.setStepCount(4);
+        require(synth.stepCount() == 4, "Step sequencer 4 steps");
+
+        dawg::engine::dsp::VectorStep s0 {};
+        s0.active = true;
+        s0.durationBeats = 0.25f;
+        s0.semitoneOffset = 0.0f;
+        s0.cutoffOffsetHz = 500.0f;
+        s0.waveSource = dawg::engine::dsp::VectorWaveSource::virtualAnalogSaw;
+        synth.setStep(0, s0);
+
+        dawg::engine::dsp::VectorStep s1 {};
+        s1.active = true;
+        s1.durationBeats = 0.25f;
+        s1.semitoneOffset = 7.0f; // Perfect 5th
+        s1.cutoffOffsetHz = -200.0f;
+        s1.waveSource = dawg::engine::dsp::VectorWaveSource::frequencyModulation;
+        synth.setStep(1, s1);
+
+        // 1.4 MIDI Note On and Voice Synthesis
+        synth.noteOn(60, 0.85f);
+        require(synth.activeVoiceCount() == 1, "Active voice count = 1 after NoteOn");
+
+        std::vector<float> leftOut(256, 0.0f);
+        std::vector<float> rightOut(256, 0.0f);
+        std::array<float*, 2> channels = {leftOut.data(), rightOut.data()};
+        dawg::engine::ProcessContext ctx {
+            .audio = dawg::engine::AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 256
+            },
+            .midi = {},
+            .sampleRate = 48000.0,
+            .sidechain = {}
+        };
+
+        synth.process(ctx);
+
+        float maxL = 0.0f;
+        for (std::size_t i = 0; i < 256; ++i)
+        {
+            require(std::isfinite(leftOut[i]), "Vector synth left is finite");
+            require(std::isfinite(rightOut[i]), "Vector synth right is finite");
+            maxL = std::max(maxL, std::abs(leftOut[i]));
+        }
+        require(maxL > 0.01f, "Vector synth generates audible waveform");
+
+        // Note off and release
+        synth.noteOff(60);
+        // Process multiple blocks to complete release
+        for (int b = 0; b < 100; ++b)
+        {
+            synth.process(ctx);
+        }
+        require(synth.activeVoiceCount() == 0, "Voice released and deactivated");
+    }
+
+    // =========================================================================
+    // 2. Analog Tape, Cassette & Vinyl Degrader Suite (AnalogDegraderSuiteNode)
+    // =========================================================================
+    {
+        dawg::engine::dsp::AnalogDegraderSuiteNode degrader;
+        require(degrader.prepare(48000.0, 512, 2), "AnalogDegraderSuiteNode prepare successful");
+
+        // 2.1 Profile selection
+        degrader.setProfile(dawg::engine::dsp::DegraderProfile::microcassette);
+        require(degrader.profile() == dawg::engine::dsp::DegraderProfile::microcassette, "Microcassette profile set");
+
+        degrader.setProfile(dawg::engine::dsp::DegraderProfile::vinyl_33);
+        require(degrader.profile() == dawg::engine::dsp::DegraderProfile::vinyl_33, "Vinyl 33 RPM profile set");
+        degrader.setWarpWowDepth(0.3f);
+        degrader.setRadialArmPosition(0.9f); // Inner groove
+        degrader.setMonoBassEnabled(true);
+        require(degrader.isMonoBassEnabled(), "Mono bass enabled");
+
+        // 2.2 Azimuth Misalignment testing
+        degrader.setProfile(dawg::engine::dsp::DegraderProfile::typeI_Ferric);
+        degrader.setAzimuthTiltMicros(40.0f); // 40 microseconds tilt
+        require(degrader.azimuthTiltMicros() == 40.0f, "Azimuth tilt 40us set");
+
+        std::vector<float> inL(256);
+        std::vector<float> inR(256);
+        for (std::size_t i = 0; i < 256; ++i)
+        {
+            // 5 kHz sine wave in phase
+            const float s = std::sin(static_cast<float>(i) * 0.654f);
+            inL[i] = s;
+            inR[i] = s;
+        }
+
+        std::array<float*, 2> channels = {inL.data(), inR.data()};
+        dawg::engine::ProcessContext ctx {
+            .audio = dawg::engine::AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 256
+            },
+            .midi = {},
+            .sampleRate = 48000.0,
+            .sidechain = {}
+        };
+
+        degrader.process(ctx);
+
+        bool hasChannelDifference = false;
+        for (std::size_t i = 50; i < 256; ++i)
+        {
+            require(std::isfinite(inL[i]), "Degrader L output is finite");
+            require(std::isfinite(inR[i]), "Degrader R output is finite");
+            if (std::abs(inL[i] - inR[i]) > 0.05f)
+            {
+                hasChannelDifference = true;
+            }
+        }
+        require(hasChannelDifference, "Azimuth micro-delay produced phase divergence between Left and Right");
+    }
+
+    // =========================================================================
+    // 3. 3D Ambisonics & Ray-Tracing Acoustic Room Modeler (RayTracingAcousticRoomNode)
+    // =========================================================================
+    {
+        dawg::engine::dsp::RayTracingAcousticRoomNode room;
+        require(room.prepare(48000.0, 512, 4), "RayTracingAcousticRoomNode prepare successful");
+
+        room.setRoomDimensions(10.0f, 7.5f, 3.5f);
+        require(room.roomLength() == 10.0f, "Room length 10m set");
+        require(room.roomWidth() == 7.5f, "Room width 7.5m set");
+        require(room.roomHeight() == 3.5f, "Room height 3.5m set");
+
+        room.setSourcePosition(2.0f, 2.0f, 1.5f);
+        room.setListenerPosition(2.5f, 2.0f, 1.5f);
+        room.setWallMaterial(dawg::engine::dsp::RoomMaterial::polishedWood);
+        require(room.wallMaterial() == dawg::engine::dsp::RoomMaterial::polishedWood, "Polished wood set");
+
+        // 3.1 Test Binaural Stereo Mode
+        room.setOutputMode(dawg::engine::dsp::RoomOutputMode::binauralStereo);
+        std::vector<float> chL(1024, 0.0f);
+        std::vector<float> chR(1024, 0.0f);
+        chL[0] = 1.0f; // Single impulse
+        chR[0] = 1.0f;
+
+        std::array<float*, 2> stereoChans = {chL.data(), chR.data()};
+        dawg::engine::ProcessContext ctxStereo {
+            .audio = dawg::engine::AudioBufferView {
+                .channels = stereoChans.data(),
+                .channelCount = 2,
+                .frameCount = 1024
+            },
+            .midi = {},
+            .sampleRate = 48000.0,
+            .sidechain = {}
+        };
+
+        room.process(ctxStereo);
+
+        float binPeak = 0.0f;
+        for (std::size_t i = 0; i < 1024; ++i)
+        {
+            require(std::isfinite(chL[i]), "Binaural left is finite");
+            require(std::isfinite(chR[i]), "Binaural right is finite");
+            binPeak = std::max(binPeak, std::max(std::abs(chL[i]), std::abs(chR[i])));
+        }
+        require(binPeak > 0.001f, "Binaural room reflections produced non-zero output");
+
+        // 3.2 Test 4-Channel B-Format Mode (W, X, Y, Z)
+        room.setOutputMode(dawg::engine::dsp::RoomOutputMode::bFormat4Channel);
+        std::vector<float> bW(1024, 0.0f);
+        std::vector<float> bX(1024, 0.0f);
+        std::vector<float> bY(1024, 0.0f);
+        std::vector<float> bZ(1024, 0.0f);
+        bW[0] = 1.0f;
+
+        std::array<float*, 4> quadChans = {bW.data(), bX.data(), bY.data(), bZ.data()};
+        dawg::engine::ProcessContext ctxQuad {
+            .audio = dawg::engine::AudioBufferView {
+                .channels = quadChans.data(),
+                .channelCount = 4,
+                .frameCount = 1024
+            },
+            .midi = {},
+            .sampleRate = 48000.0,
+            .sidechain = {}
+        };
+
+        room.process(ctxQuad);
+        require(std::isfinite(bW[100]) && std::isfinite(bX[100]) && std::isfinite(bY[100]) && std::isfinite(bZ[100]),
+                "B-format channels are finite");
+    }
+
+    // =========================================================================
+    // 4. Vocal Surgical Suite: Split-Band De-Esser & Breath Attenuator (VocalSurgicalDeEsserNode)
+    // =========================================================================
+    {
+        dawg::engine::dsp::VocalSurgicalDeEsserNode deEsser;
+        require(deEsser.prepare(48000.0, 512, 2), "VocalSurgicalDeEsserNode prepare successful");
+
+        deEsser.setCrossoverFrequency(6000.0f);
+        require(deEsser.crossoverFrequency() == 6000.0f, "Crossover freq set to 6kHz");
+        deEsser.setThresholdDb(-24.0f);
+        deEsser.setDeEsserRatio(6.0f);
+        deEsser.setMode(dawg::engine::dsp::DeEsserMode::splitBand);
+
+        // 4.1 Test sibilance burst reduction
+        std::vector<float> sibilantL(512);
+        std::vector<float> sibilantR(512);
+        for (std::size_t i = 0; i < 512; ++i)
+        {
+            // Intense 8 kHz burst (well above 6 kHz crossover and -24 dB threshold)
+            const float sib = 0.5f * std::sin(static_cast<float>(i) * 1.047f);
+            sibilantL[i] = sib;
+            sibilantR[i] = sib;
+        }
+
+        std::array<float*, 2> channels = {sibilantL.data(), sibilantR.data()};
+        dawg::engine::ProcessContext ctx {
+            .audio = dawg::engine::AudioBufferView {
+                .channels = channels.data(),
+                .channelCount = 2,
+                .frameCount = 512
+            },
+            .midi = {},
+            .sampleRate = 48000.0,
+            .sidechain = {}
+        };
+
+        deEsser.process(ctx);
+        require(deEsser.currentGainReductionDb() > 0.5f, "De-esser detected 8kHz burst and applied gain reduction");
+
+        // 4.2 Test Formant & Throat Modeler
+        deEsser.setFormantShiftSemitones(4.0f);
+        deEsser.setThroatLengthScale(1.15f);
+        deEsser.setFormantMix(0.5f);
+        require(deEsser.formantShiftSemitones() == 4.0f, "Formant shift +4 semitones");
+        require(deEsser.throatLengthScale() == 1.15f, "Throat scale 1.15");
+
+        deEsser.process(ctx);
+        require(std::isfinite(sibilantL[100]), "Processed formant vocal is finite");
+    }
+
+    // =========================================================================
+    // 5. Ableton Push & Launchpad RGB Matrix Sequencer (RgbPadMatrixSequencerEngine)
+    // =========================================================================
+    {
+        dawg::engine::RgbPadMatrixSequencerEngine matrix;
+
+        // 5.1 Push 2 layout mapping
+        matrix.setControllerType(dawg::engine::ControllerGridType::push2);
+        require(matrix.padToMidiNote(0, 0) == 36, "Push pad (0,0) is MIDI note 36");
+        require(matrix.padToMidiNote(7, 7) == 99, "Push pad (7,7) is MIDI note 99");
+
+        std::size_t r = 0, c = 0;
+        require(matrix.midiNoteToPad(36, r, c) && r == 0 && c == 0, "Push note 36 maps to pad (0,0)");
+
+        // 5.2 Launchpad Pro/X layout mapping
+        matrix.setControllerType(dawg::engine::ControllerGridType::launchpadProX);
+        require(matrix.padToMidiNote(0, 0) == 11, "Launchpad pad (0,0) is note 11");
+        require(matrix.padToMidiNote(7, 7) == 88, "Launchpad pad (7,7) is note 88");
+
+        // 5.3 Melodic In-Key Scale Mapping
+        matrix.setViewMode(dawg::engine::GridPadViewMode::inKeyMelody);
+        matrix.setRootNote(0); // C
+        matrix.setScaleType(dawg::engine::MelodicScaleType::naturalMinor);
+        matrix.setBaseOctave(3);
+
+        const int rootNote = matrix.padToMelodicNote(0, 0);
+        require(rootNote == 36, "Bottom-Left pad is C2 (MIDI note 36)");
+        require(matrix.isRootNote(rootNote), "C2 identified as root note");
+        require(matrix.isNoteInScale(rootNote), "C2 identified as in scale");
+        require(!matrix.isNoteInScale(37), "C#2 identified as out of C natural minor scale");
+
+        // 5.4 Hardware Step Sequencer Mode
+        matrix.setViewMode(dawg::engine::GridPadViewMode::stepSequencer);
+        matrix.setStepSequencerLength(16);
+        require(matrix.stepSequencerLength() == 16, "Step sequencer 16 steps");
+
+        // Simulate physical pad press on step 3 (row 0, col 3 -> note 14 on Launchpad)
+        dawg::engine::MidiEvent padPress {
+            .frameOffset = 0,
+            .data = {std::byte {0x90}, std::byte {14}, std::byte {110}},
+            .size = 3
+        };
+        const auto res = matrix.processMidiIn(padPress);
+        require(res.handled, "Pad press handled by matrix engine");
+        require(res.padRow == 0 && res.padCol == 3, "Pad press located at row 0, col 3");
+        require(matrix.step(3).active, "Step 3 toggled active on pad press");
+
+        // 5.5 Bidirectional LED updates
+        matrix.setStepPlayhead(3);
+        require(matrix.stepPlayhead() == 3, "Playhead at step 3");
+
+        std::array<dawg::engine::MidiEvent, 64> ledOut {};
+        const auto ledCount = matrix.renderLedUpdates(ledOut.data(), ledOut.size(), 0.5, 1.0);
+        require(ledCount > 0, "LED updates rendered for hardware surface");
+    }
+}
 }
 
 #if defined(__SANITIZE_THREAD__)
@@ -8647,4 +8981,5 @@ int main()
     testControlSurfacesModularLinkConductorAndDspSandboxSuite();
     testSpectralSongwritingMtsTransientAndDeliverySuite();
     testGranularPhysicalWarpVocalAndLoopStationSuite();
+    testVectorAnalogAmbisonicsVocalAndRgbSequencerSuite();
 }

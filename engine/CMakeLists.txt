@@ -25,6 +25,7 @@ add_library(dawg_engine_core STATIC
     src/ProStudioDeliveryEngine.cpp
     src/RecordRingBuffer.cpp
     src/RenderSnapshotPublisher.cpp
+    src/RgbPadMatrixSequencerEngine.cpp
     src/SessionMatrixEngine.cpp
     src/SimdMath.cpp
     src/SmpteTimecode.cpp
@@ -36,6 +37,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/AcousticDrumBleedCancellationNode.cpp
     src/dsp/AcousticPhysicalModelEngine.cpp
     src/dsp/AmbisonicsProcessorNode.cpp
+    src/dsp/AnalogDegraderSuiteNode.cpp
     src/dsp/AnalogLadderRingModSynthNode.cpp
     src/dsp/ArpeggiatorEngine.cpp
     src/dsp/AudioScrubEngine.cpp
@@ -79,6 +81,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/PhysicalModelingSynthNode.cpp
     src/dsp/PolymetricSequencerEngine.cpp
     src/dsp/PolyphaseOversampler.cpp
+    src/dsp/RayTracingAcousticRoomNode.cpp
     src/dsp/SongwritingChordAssistantEngine.cpp
     src/dsp/SpatialHeadTrackerBridge.cpp
     src/dsp/SpatialObjectPannerNode.cpp
@@ -104,10 +107,12 @@ add_library(dawg_engine_core STATIC
     src/dsp/TransientExciterNode.cpp
     src/dsp/TransientSlicerEngine.cpp
     src/dsp/TransientSplitGranularResynthesizerNode.cpp
+    src/dsp/VectorWaveSequencerNode.cpp
     src/dsp/VintageTapeMachineNode.cpp
     src/dsp/VocalHarmonyEngine.cpp
     src/dsp/VocalPitchCorrectorNode.cpp
     src/dsp/VocalNoteBlobEditorEngine.cpp
+    src/dsp/VocalSurgicalDeEsserNode.cpp
     src/dsp/WavetableSynthNode.cpp
     src/plugins/AraPluginBridge.cpp
     src/plugins/PluginCrashSupervisor.cpp
