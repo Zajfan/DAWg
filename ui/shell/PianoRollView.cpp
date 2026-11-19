@@ -151,7 +151,7 @@ PianoRollView::PianoRollView(CommandHandler handler, AuditionCallback auditionCb
 
             const auto chords = engine::dsp::PolymetricSequencerEngine::generateMarkovChords(root, scale, 4, 0.2f);
             const double bpm = std::max(20.0, m_model.project.tempo.bpm);
-            constexpr double sr = 48000.0;
+            const double sr = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
             const double barSamples = (60.0 / bpm) * sr * 4.0; // 1 bar per chord
 
             for (std::size_t ci = 0; ci < chords.size(); ++ci)
@@ -190,7 +190,7 @@ PianoRollView::PianoRollView(CommandHandler handler, AuditionCallback auditionCb
 
             prng = prng * 1664525u + 1013904223u;
             const float timingJitterMs = (static_cast<float>(prng >> 16) / 65536.0f) * 16.0f - 8.0f; // +/- 8ms
-            constexpr double sr = 48000.0;
+            const double sr = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
             const auto jitterSamples = static_cast<std::int64_t>((timingJitterMs * 0.001f) * sr);
 
             prng = prng * 1664525u + 1013904223u;

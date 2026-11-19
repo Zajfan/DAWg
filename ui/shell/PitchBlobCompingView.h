@@ -2,6 +2,7 @@
 
 #include "EditorViewModel.h"
 
+#include <dawg/project/ProjectCommand.h>
 #include <dawg/project/TakeLaneComping.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -17,12 +18,14 @@ namespace dawg::ui {
 class PitchBlobCompingView final : public juce::Component, private juce::Timer
 {
 public:
+    using CommandHandler = std::function<void(project::ProjectCommand)>;
     using NoteModifiedCallback = std::function<void(std::size_t blobIdx, int semiShift, float centsOffset)>;
 
-    PitchBlobCompingView();
+    explicit PitchBlobCompingView(CommandHandler handler = nullptr);
     ~PitchBlobCompingView() override;
 
     void setViewModel(const EditorViewModel& model);
+    void setCommandHandler(CommandHandler handler) noexcept { m_commandHandler = std::move(handler); }
     void setNoteModifiedCallback(NoteModifiedCallback cb) noexcept { m_noteCallback = std::move(cb); }
     void loadVocalStem(const float* samples, std::size_t sampleCount, double sampleRate);
 
@@ -49,6 +52,7 @@ private:
     [[nodiscard]] float yToMidiNote(float y, juce::Rectangle<int> canvasBounds) const noexcept;
 
     EditorViewModel m_model;
+    CommandHandler m_commandHandler;
     NoteModifiedCallback m_noteCallback;
 
     project::PitchBlobEditor m_pitchEditor;

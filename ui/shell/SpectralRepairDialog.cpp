@@ -123,7 +123,7 @@ void SpectralRepairDialog::ContentComponent::resetAudio()
 {
     // Synthesize reference musical signal with 1kHz tone, 60Hz hum, and transient clicks
     m_audioBuffer.assign(48000, 0.0f);
-    constexpr double sr = 48000.0;
+    const double sr = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
     for (std::size_t i = 0; i < m_audioBuffer.size(); ++i)
     {
         const double t = static_cast<double>(i) / sr;
@@ -169,7 +169,7 @@ void SpectralRepairDialog::ContentComponent::runRepair()
     else if (modeId == 3) repairMode = engine::SpectralRepairMode::deHum50Hz;
     else if (modeId == 4) repairMode = engine::SpectralRepairMode::deHum60Hz;
 
-    constexpr double sr = 48000.0;
+    const double sr = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
     const double totalDurationSec = static_cast<double>(m_audioBuffer.size()) / sr;
 
     engine::SpectralRegion region;

@@ -109,17 +109,17 @@ VideoPlaybackWindow::ContentComponent::ContentComponent(const EditorViewModel& m
 void VideoPlaybackWindow::ContentComponent::setViewModel(const EditorViewModel& model)
 {
     m_model = model;
-    constexpr double sr = 48000.0;
+    const double sr = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
     const auto curSample = static_cast<std::uint64_t>(std::max<std::int64_t>(0, m_model.playbackPosition));
 
     // Calculate SMPTE timecode (1 hour nominal timeline start offset standard for film reels)
-    constexpr std::int64_t oneHourOffsetSamples = 48000 * 3600;
+    const std::int64_t oneHourOffsetSamples = static_cast<std::int64_t>(sr * 3600.0);
     const auto tc = engine::SmpteTimecodeEngine::sampleToTimecode(curSample, sr, m_frameRate, oneHourOffsetSamples);
     const auto tcStr = engine::SmpteTimecodeEngine::formatTimecode(tc, true);
     m_lblTimecode.setText(tcStr, juce::dontSendNotification);
 
     const double fps = engine::SmpteTimecodeEngine::getFramesPerSecond(m_frameRate);
-    const auto totalFrames = static_cast<std::uint64_t>((static_cast<double>(curSample + oneHourOffsetSamples) / sr) * fps);
+    const auto totalFrames = static_cast<std::uint64_t>((static_cast<double>(curSample + static_cast<std::uint64_t>(std::max<std::int64_t>(0, oneHourOffsetSamples))) / sr) * fps);
     m_lblFrameNumber.setText("Frame: " + juce::String(totalFrames) + "  |  Time: " + juce::String(static_cast<double>(curSample) / sr, 2) + "s", juce::dontSendNotification);
 
     m_lblSyncStatus.setText(m_model.playing ? "[PLAY] RUNNING (SAMPLE-ACCURATE SYNC)" : "[STOP] PARKED (FRAME-ACCURATE SCRUB)", juce::dontSendNotification);

@@ -4,8 +4,20 @@
 
 namespace dawg::ui {
 
-PitchBlobCompingView::PitchBlobCompingView()
+PitchBlobCompingView::PitchBlobCompingView(CommandHandler handler)
+    : m_commandHandler(std::move(handler))
 {
+    // Seed initial mock takes for interactive comping workflow
+    project::AudioClip c1 {}; c1.id = 1; c1.startSample = 0; c1.lengthSamples = 96000;
+    project::AudioClip c2 {}; c2.id = 2; c2.startSample = 0; c2.lengthSamples = 96000;
+    project::AudioClip c3 {}; c3.id = 3; c3.startSample = 0; c3.lengthSamples = 96000;
+    m_compManager.addTake(c1, "Take 1", "#335577");
+    m_compManager.addTake(c2, "Take 2", "#4477aa");
+    m_compManager.addTake(c3, "Take 3", "#3388bb");
+    m_compManager.selectCompSlice(1, 0, 24000);
+    m_compManager.selectCompSlice(2, 24000, 60000);
+    m_compManager.selectCompSlice(3, 60000, 96000);
+
     m_scaleCombo.addItem("Scale: Major", 1);
     m_scaleCombo.addItem("Scale: Natural Minor", 2);
     m_scaleCombo.addItem("Scale: Dorian", 3);
@@ -50,6 +62,19 @@ PitchBlobCompingView::PitchBlobCompingView()
     addAndMakeVisible(m_toggleLanesButton);
 
     m_flattenCompButton.onClick = [this] {
+        if (! m_model.project.tracks.empty() && m_commandHandler)
+        {
+            const auto targetTrackId = m_model.project.tracks.front().id;
+            const auto newClip = m_compManager.flattenAndMergeComp(0, 1, "Vocal Master Comp");
+            if (newClip.lengthSamples > 0)
+            {
+                auto c = newClip;
+                c.trackId = targetTrackId;
+                if (! m_model.project.assets.empty())
+                    c.assetId = m_model.project.assets.front().id;
+                m_commandHandler(project::AddAudioClip { c });
+            }
+        }
         repaint();
     };
     addAndMakeVisible(m_flattenCompButton);

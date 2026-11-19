@@ -260,6 +260,7 @@ MainEditorView::MainEditorView(EditorViewModel model,
     , m_spatialRadarView()
     , m_wireGridView()
     , m_masteringSuiteView()
+    , m_pitchBlobView(m_commandHandler)
     , m_dualDockSplitter(DragSplitterBar::Orientation::vertical, [this](const int delta) {
         if (m_dualDockEnabled)
         {

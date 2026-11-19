@@ -561,8 +561,8 @@ void TimelineView::drawFilmstrip(juce::Graphics& g, juce::Rectangle<int> bounds)
     constexpr int frameHeight = 32;
     const int numFrames = std::max(1, bounds.getWidth() / frameWidth);
 
-    constexpr double sr = 48000.0;
-    constexpr std::int64_t oneHourOffsetSamples = 48000 * 3600;
+    const double sr = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
+    const std::int64_t oneHourOffsetSamples = static_cast<std::int64_t>(sr * 3600.0);
 
     for (int f = 0; f < numFrames; ++f)
     {
@@ -1681,7 +1681,7 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                 {
                     // WSOLA BPM Auto-fit: snap loop length to nearest whole bar
                     const double bpm = m_model.project.tempo.bpm > 0.0 ? m_model.project.tempo.bpm : 120.0;
-                    constexpr double sr = 48000.0;
+                    const double sr = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
                     const double barSamples = (sr * 60.0 * 4.0) / bpm;
                     for (auto& c : m_model.project.clips)
                     {
@@ -1776,13 +1776,14 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                         m_callbacks.commandHandler(project::AddAudioTrack { "Other (Stem)" });
 
                         const auto baseTrackId = static_cast<project::TrackId>(m_model.project.tracks.size() + 1);
-                        const auto baseClipId = static_cast<project::ClipId>(m_model.project.clips.size() + 200);
 
                         for (std::size_t sIdx = 0; sIdx < 4; ++sIdx)
                         {
                             project::AudioClip stemClip;
-                            stemClip.id = static_cast<project::ClipId>(baseClipId + static_cast<project::ClipId>(sIdx));
+                            stemClip.id = 0;
                             stemClip.trackId = static_cast<project::TrackId>(baseTrackId + static_cast<project::TrackId>(sIdx));
+                            stemClip.assetId = targetClip->assetId;
+                            stemClip.sourceOffset = targetClip->sourceOffset;
                             stemClip.startSample = targetClip->startSample;
                             stemClip.lengthSamples = targetClip->lengthSamples;
                             stemClip.gainLinear = 1.0f;
@@ -1801,7 +1802,7 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                             // Synthesize transient signal or extract from audio
                             const std::size_t testLen = std::min<std::size_t>(static_cast<std::size_t>(c.lengthSamples), 96000);
                             std::vector<float> audioData(testLen > 0 ? testLen : 96000, 0.0f);
-                            const double sr = 48000.0;
+                            const double sr = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
                             const double stepSamples = (sr * 60.0 / bpm) / 4.0;
                             for (std::size_t s = 0; s < audioData.size(); s += static_cast<std::size_t>(stepSamples))
                             {
@@ -1835,7 +1836,7 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                 {
                     // Detect Transients & Add Warp Markers
                     const double bpm = m_model.project.tempo.bpm > 0.0 ? m_model.project.tempo.bpm : 120.0;
-                    constexpr double sr = 48000.0;
+                    const double sr = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
                     const double stepSamples = (sr * 60.0 / bpm) * 0.25; // 16th note default resolution
                     for (auto& c : m_model.project.clips)
                     {
@@ -1864,7 +1865,7 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                 {
                     // Elastic Quantize Warp Markers (1/16 or 1/8)
                     const double bpm = m_model.project.tempo.bpm > 0.0 ? m_model.project.tempo.bpm : 120.0;
-                    constexpr double sr = 48000.0;
+                    const double sr = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
                     const double gridFactor = (result == 9) ? 0.25 : 0.5; // 1/16 vs 1/8
                     const double gridSamples = (sr * 60.0 / bpm) * gridFactor;
 
@@ -1907,7 +1908,7 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                             // Synthesize or extract audio buffer for transient slicing
                             const std::size_t sliceAudioLen = std::min<std::size_t>(static_cast<std::size_t>(c.lengthSamples), 96000);
                             std::vector<float> audioData(sliceAudioLen > 0 ? sliceAudioLen : 96000, 0.0f);
-                            constexpr double sr = 48000.0;
+                            const double sr = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
                             const double bpm = m_model.project.tempo.bpm > 0.0 ? m_model.project.tempo.bpm : 120.0;
                             const double stepSamples = (sr * 60.0 / bpm) / 4.0;
                             for (std::size_t s = 0; s < audioData.size(); s += static_cast<std::size_t>(stepSamples))
@@ -1947,8 +1948,8 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                 {
                     // Extract Groove Template
                     const double bpm = m_model.project.tempo.bpm > 0.0 ? m_model.project.tempo.bpm : 120.0;
-                    constexpr double sr = 48000.0;
-                    std::vector<float> audioData(48000, 0.0f);
+                    const double sr = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
+                    std::vector<float> audioData(static_cast<std::size_t>(sr), 0.0f);
                     const auto groove = engine::dsp::TransientSlicerEngine::extractGrooveTemplate(audioData.data(), audioData.size(), sr, bpm);
                     juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon, "Groove Extracted",
                         "Extracted groove: " + juce::String(groove.name) + " (" + juce::String(static_cast<int>(groove.swingPercentage)) + "% swing)");

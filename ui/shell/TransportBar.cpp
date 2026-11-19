@@ -73,8 +73,9 @@ TransportBar::TransportBar(Callbacks callbacks)
 
         if (m_callbacks.commandHandler)
         {
+            const auto sampleRate = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
             const auto inSample = m_model.project.punch.punchInSample;
-            const auto outSample = m_model.project.punch.punchOutSample > inSample ? m_model.project.punch.punchOutSample : (inSample + 48000 * 4);
+            const auto outSample = m_model.project.punch.punchOutSample > inSample ? m_model.project.punch.punchOutSample : (inSample + static_cast<std::uint64_t>(sampleRate * 4.0));
             m_callbacks.commandHandler(project::SetProjectPunch {
                 .enabled = m_punchActive,
                 .punchInSample = inSample,
@@ -328,8 +329,9 @@ void TransportBar::updateButtons()
     if (m_punchActive)
     {
         m_punchButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xffd29922));
-        const double inSec = static_cast<double>(m_model.project.punch.punchInSample) / 48000.0;
-        const double outSec = static_cast<double>(m_model.project.punch.punchOutSample) / 48000.0;
+        const double sr = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
+        const double inSec = static_cast<double>(m_model.project.punch.punchInSample) / sr;
+        const double outSec = static_cast<double>(m_model.project.punch.punchOutSample) / sr;
         m_punchRangeBadge.setText(juce::String(inSec, 1) + "s - " + juce::String(outSec, 1) + "s", juce::dontSendNotification);
         m_punchRangeBadge.setVisible(true);
     }

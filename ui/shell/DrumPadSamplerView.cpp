@@ -19,17 +19,32 @@ DrumPadSamplerView::DrumPadSamplerView(CommandHandler handler, AuditionCallback 
     addAndMakeVisible(m_titleLabel);
 
     m_sliceButton.onClick = [this] {
-        // Create synthetic loop or open file chooser to auto-slice
-        std::vector<float> syntheticBreak(48000 * 2, 0.0f);
-        for (int t = 0; t < 16; ++t)
-        {
-            const std::size_t onset = static_cast<std::size_t>(t * 6000);
-            for (std::size_t j = 0; j < 300 && (onset + j) < syntheticBreak.size(); ++j)
-                syntheticBreak[onset + j] = 0.9f * std::sin(static_cast<float>(j) * 0.15f);
-        }
-        m_sampler.sliceSampleAcrossPads(syntheticBreak.data(), syntheticBreak.size(), 48000.0, 16);
-        updateControlsForSelectedPad();
-        repaint();
+        m_fileChooser = std::make_unique<juce::FileChooser>(
+            "Choose Drum Break / Loop to Auto-Slice Across 16 Pads",
+            juce::File {}, "*.wav;*.aif;*.aiff;*.flac;*.mp3");
+        m_fileChooser->launchAsync(
+            juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+            [this](const juce::FileChooser& chooser) {
+                const auto selected = chooser.getResult();
+                if (selected.existsAsFile())
+                {
+                    sliceAudioFileAcrossPads(selected);
+                }
+                else
+                {
+                    // Fallback to synthetic breakbeat if user cancels file chooser
+                    std::vector<float> syntheticBreak(48000 * 2, 0.0f);
+                    for (int t = 0; t < 16; ++t)
+                    {
+                        const std::size_t onset = static_cast<std::size_t>(t * 6000);
+                        for (std::size_t j = 0; j < 300 && (onset + j) < syntheticBreak.size(); ++j)
+                            syntheticBreak[onset + j] = 0.9f * std::sin(static_cast<float>(j) * 0.15f);
+                    }
+                    m_sampler.sliceSampleAcrossPads(syntheticBreak.data(), syntheticBreak.size(), 48000.0, 16);
+                    updateControlsForSelectedPad();
+                    repaint();
+                }
+            });
     };
     m_sliceButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(45, 95, 145));
     addAndMakeVisible(m_sliceButton);
@@ -239,6 +254,30 @@ void DrumPadSamplerView::loadSampleFileIntoPad(const juce::File& file, const std
         reader->read(channels, 2, 0, static_cast<int>(numSamples));
         m_sampler.loadSampleIntoPad(padIdx, std::move(l), std::move(r), file.getFileNameWithoutExtension().toStdString());
         m_selectedPad = padIdx;
+        updateControlsForSelectedPad();
+        repaint();
+    }
+}
+
+void DrumPadSamplerView::sliceAudioFileAcrossPads(const juce::File& file)
+{
+    if (! file.existsAsFile())
+        return;
+
+    juce::AudioFormatManager formatManager;
+    formatManager.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
+
+    if (reader)
+    {
+        const auto numSamples = static_cast<std::size_t>(reader->lengthInSamples);
+        if (numSamples < 1000)
+            return;
+
+        std::vector<float> mono(numSamples);
+        float* channels[1] = { mono.data() };
+        reader->read(channels, 1, 0, static_cast<int>(numSamples));
+        m_sampler.sliceSampleAcrossPads(mono.data(), numSamples, reader->sampleRate, 16);
         updateControlsForSelectedPad();
         repaint();
     }
