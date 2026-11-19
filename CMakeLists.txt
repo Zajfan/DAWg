@@ -210,6 +210,8 @@ set(DAWG_OWN_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/TrackInspectorView.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/DeviceRackView.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/VirusTiPolarEditorView.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/Juno106EditorView.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/OmniFmEditorView.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/shell/CommandPaletteOverlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/platform/juce/window/WindowRegistry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/platform/juce/window/ManagedWindow.cpp

@@ -66,6 +66,10 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/SpectralRepairDialog.h
     ../../ui/shell/VirusTiPolarEditorView.cpp
     ../../ui/shell/VirusTiPolarEditorView.h
+    ../../ui/shell/Juno106EditorView.cpp
+    ../../ui/shell/Juno106EditorView.h
+    ../../ui/shell/OmniFmEditorView.cpp
+    ../../ui/shell/OmniFmEditorView.h
     ../../ui/shell/CommandPaletteOverlay.cpp
     ../../ui/shell/CommandPaletteOverlay.h
     ../../ui/shell/DragSplitterBar.h

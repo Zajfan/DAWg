@@ -165,6 +165,38 @@ A modular West-Coast synthesis engine featuring:
 - **Non-Linear Diode Wavefolder**: Dynamically folds waveform crests inward to generate metallic, rich upper harmonics.
 - **Vactrol Low Pass Gate (LPG)**: Opto-coupler decay simulation for organic wooden plucks and percussive bongs.
 
+### Roland Juno-106 Polyphonic Analog Synth
+Modeled on the legendary 1984 Japanese polyphonic synthesizer with a bespoke matte charcoal aluminum front panel, Roland orange/blue accent striping, and tactile vertical sliders.
+- **6-Voice Polyphony**: Authentic voice allocation with automatic voice stealing.
+- **DCO (Digitally Controlled Oscillator)**:
+  - 16', 8', 4' octave range selection.
+  - Sawtooth and Pulse waves with manual or LFO pulse-width modulation (PWM).
+  - Sub-oscillator (-1 octave square) and analog white noise generator.
+- **Stepped HPF**: 4-position high-pass filter (0 = Bass boost, 1 = Flat, 2 = Medium cut, 3 = High cut).
+- **VCF (IR3109 Resonant Ladder Filter)**: 24 dB/oct low-pass filter with self-oscillation and key-follow tracking.
+- **Dual Bucket-Brigade Device (BBD) Chorus**:
+  - Chorus I (subtle stereo spread, 0.4 Hz).
+  - Chorus II (deep analog swirl, 0.6 Hz).
+  - Secret I+II mode (fast 8.2 Hz rotary vibrato swirl).
+  - Authentic analog BBD clock noise simulation.
+- **Factory Presets**: "Juno Lush Strings", "80s Poly Brass", "Rubber Bassline", "Chorused Pluck", "Analog PWM Pad", "Space Hover Leslie".
+
+### Yamaha OmniFM 6-Operator Synthesizer
+A cutting-edge 6-operator frequency modulation synthesizer (DX7 / Sytrus tier) with dark teal aluminum chassis and mint-green LCD matrix:
+- **32 Classic Algorithms**: Full routing flexibility from pure cascade to additive carriers.
+- **Per-Operator Controls**: Sine, Triangle, Saw, Square, Absolute Sine waveforms; harmonic frequency ratios (0.25 to 32.0); fine detune; multi-stage envelope.
+- **Feedback Loop**: Self-modulation on Operator 6 for metallic textures and growling basslines.
+- **Factory Presets**: "Solid DX7 Electric Piano", "Lately / Solid FM Bass", "Tubular Bell Chime", "Glass Mallet Marimba", "Aggressive FM Growl", "Digital Harp Pluck".
+
+### SoundFont / Multi-Sample Instrument Player
+High-fidelity multi-velocity sample playback engine for acoustic instruments:
+- Built-in multi-sample banks: "Acoustic Concert Grand", "Studio Upright Bass", "Symphonic Strings", "Orchestral Warm Brass".
+- ADSR envelope and 24 dB resonant filter.
+
+### Synthesized Factory Drum Kit
+Integrated directly into DAWg for instant zero-dependency beatmaking:
+- 808 Sub Boom Kick, 909 Punch Studio Kick, 808 Crisp Snare, 808 Triple Flam Clap, Trap Tight Closed Hat, Trap Sizzle Open Hat, Analog Wood Rimshot, Classic 808 Cowbell.
+
 ### Drum Pad Sampler & Wavetable Engines
 - **16-Pad MPC-Style Drum Sampler**: Layer velocity-switched samples with round-robin playback and choke groups.
 - **Vector Wave Sequencer**: Morph continuously between 4 wavetables using a 2D joystick pad.

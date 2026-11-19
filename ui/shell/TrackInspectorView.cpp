@@ -377,6 +377,9 @@ void TrackInspectorView::showAddDspMenu()
     menu.addItem(10, "MasterPhase Dynamic EQ");
     menu.addItem(11, "Complex 259 Synth");
     menu.addItem(12, "Access Virus TI Polar Synth");
+    menu.addItem(13, "Roland Juno-106 Analog Synth");
+    menu.addItem(14, "Yamaha OmniFM 6-Op Synth");
+    menu.addItem(15, "SoundFont / Multi-Sample Player");
 
     menu.showMenuAsync(juce::PopupMenu::Options {}, [this, trkId = *m_selectedTrackId](int res) {
         if (res <= 0 || ! m_commandHandler) return;
@@ -393,6 +396,9 @@ void TrackInspectorView::showAddDspMenu()
         else if (res == 10) { type = project::DspNodeType::linearPhaseMasteringEq; name = "MasterPhase EQ"; }
         else if (res == 11) { type = project::DspNodeType::buchlaComplexSynth; name = "Complex 259 Synth"; }
         else if (res == 12) { type = project::DspNodeType::virusTiPolarSynth; name = "Access Virus TI Polar"; }
+        else if (res == 13) { type = project::DspNodeType::juno106Synth; name = "Roland Juno-106"; }
+        else if (res == 14) { type = project::DspNodeType::omniFmSynth; name = "Yamaha OmniFM"; }
+        else if (res == 15) { type = project::DspNodeType::soundFontPlayer; name = "SoundFont Player"; }
 
         const auto* trk = findTrackInModel(m_model, trkId);
         const auto slot = static_cast<std::uint32_t>(trk != nullptr ? trk->inserts.size() : 0);

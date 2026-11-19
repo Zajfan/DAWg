@@ -4,6 +4,8 @@
 #include "SpectralRepairDialog.h"
 #include "VideoPlaybackWindow.h"
 #include "VirusTiPolarEditorView.h"
+#include "Juno106EditorView.h"
+#include "OmniFmEditorView.h"
 #include "WorkspaceLayoutManager.h"
 #include <dawg/engine/SmpteTimecode.h>
 #include <dawg/plugins/NativePluginCatalog.h>
@@ -163,6 +165,15 @@ MainEditorView::MainEditorView(EditorViewModel model,
             case project::DspNodeType::buchlaComplexSynth: kind = DspEditorKind::buchlaComplexSynth; break;
             case project::DspNodeType::virusTiPolarSynth:
                 VirusTiPolarWindow::open();
+                return;
+            case project::DspNodeType::juno106Synth:
+                Juno106Window::open();
+                return;
+            case project::DspNodeType::omniFmSynth:
+                OmniFmWindow::open();
+                return;
+            case project::DspNodeType::soundFontPlayer:
+                DspEditorWindow::open(DspEditorKind::synth, trk->name);
                 return;
             case project::DspNodeType::brickwallLimiter:
             case project::DspNodeType::clapPlugin:
@@ -522,6 +533,12 @@ MainEditorView::MainEditorView(EditorViewModel model,
                 nodeType = project::DspNodeType::rayTracingReverb;
             else if (plugin.id == "dawg.synth.virus_ti_polar")
                 nodeType = project::DspNodeType::virusTiPolarSynth;
+            else if (plugin.id == "dawg.synth.juno_106")
+                nodeType = project::DspNodeType::juno106Synth;
+            else if (plugin.id == "dawg.synth.omni_fm")
+                nodeType = project::DspNodeType::omniFmSynth;
+            else if (plugin.id == "dawg.synth.soundfont_player")
+                nodeType = project::DspNodeType::soundFontPlayer;
 
             m_commandHandler(project::AddTrackInsert {
                 targetTrack.id,

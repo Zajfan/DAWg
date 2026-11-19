@@ -1,6 +1,8 @@
 #include "DeviceRackView.h"
 #include "DspEditorDialog.h"
 #include "VirusTiPolarEditorView.h"
+#include "Juno106EditorView.h"
+#include "OmniFmEditorView.h"
 
 #include <algorithm>
 
@@ -87,6 +89,9 @@ DeviceCardComponent::DeviceCardComponent(
     case project::DspNodeType::physicalModelSynth:
     case project::DspNodeType::granularCloud:
     case project::DspNodeType::virusTiPolarSynth:
+    case project::DspNodeType::juno106Synth:
+    case project::DspNodeType::omniFmSynth:
+    case project::DspNodeType::soundFontPlayer:
         paramDefs = { {"Cutoff", 20.0, 20000.0, 2500.0}, {"Reso", 0.0, 100.0, 30.0}, {"Attack", 1.0, 1000.0, 15.0}, {"Release", 10.0, 3000.0, 400.0} };
         break;
     case project::DspNodeType::resonanceSuppressor:
@@ -292,6 +297,15 @@ void DeviceRackView::rebuildRack()
             case project::DspNodeType::virusTiPolarSynth:
                 VirusTiPolarWindow::open();
                 return;
+            case project::DspNodeType::juno106Synth:
+                Juno106Window::open();
+                return;
+            case project::DspNodeType::omniFmSynth:
+                OmniFmWindow::open();
+                return;
+            case project::DspNodeType::soundFontPlayer:
+                kind = DspEditorKind::synth;
+                break;
             }
             DspEditorWindow::open(kind, name);
         };

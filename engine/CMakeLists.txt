@@ -126,6 +126,10 @@ add_library(dawg_engine_core STATIC
     src/dsp/VectorWaveSequencerNode.cpp
     src/dsp/VintageTapeMachineNode.cpp
     src/dsp/VirusTiPolarSynthNode.cpp
+    src/dsp/Juno106SynthNode.cpp
+    src/dsp/OmniFmSynthNode.cpp
+    src/dsp/FactoryDrumKit.cpp
+    src/dsp/SoundFontPlayerNode.cpp
     src/dsp/VocalHarmonyEngine.cpp
     src/dsp/VocalPitchCorrectorNode.cpp
     src/dsp/VocalNoteBlobEditorEngine.cpp

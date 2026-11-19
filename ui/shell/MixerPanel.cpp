@@ -1,6 +1,8 @@
 #include "MixerPanel.h"
 #include "DspEditorDialog.h"
 #include "VirusTiPolarEditorView.h"
+#include "Juno106EditorView.h"
+#include "OmniFmEditorView.h"
 
 #include <algorithm>
 #include <cmath>
@@ -61,6 +63,8 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
         menu.addItem(8, "Stereo Delay");
         menu.addItem(9, "Preamp: SSL 4k Line");
         menu.addItem(11, "Access Virus TI Polar Synth");
+        menu.addItem(12, "Roland Juno-106 Analog Synth");
+        menu.addItem(13, "Yamaha OmniFM 6-Op Synth");
         menu.addSeparator();
         menu.addItem(10, "Sidechain Listen", true, m_sidechainListen);
 
@@ -118,6 +122,16 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
                 m_slotNames[0] = "VIRUS";
                 m_slotButtons[0].setButtonText("VIRUS");
                 VirusTiPolarWindow::open();
+            }
+            else if (result == 12) {
+                m_slotNames[0] = "JUNO";
+                m_slotButtons[0].setButtonText("JUNO");
+                Juno106Window::open();
+            }
+            else if (result == 13) {
+                m_slotNames[0] = "OMNIFM";
+                m_slotButtons[0].setButtonText("OMNIFM");
+                OmniFmWindow::open();
             }
             repaint();
         });
@@ -207,6 +221,8 @@ void ChannelStripComponent::openInsertEditor(std::size_t slotIdx)
     else if (name == "REV") DspEditorWindow::open(DspEditorKind::reverb, trkName);
     else if (name == "DLY") DspEditorWindow::open(DspEditorKind::delay, trkName);
     else if (name == "VIRUS") VirusTiPolarWindow::open();
+    else if (name == "JUNO") Juno106Window::open();
+    else if (name == "OMNIFM") OmniFmWindow::open();
     else DspEditorWindow::open(DspEditorKind::parametricEq, trkName);
 }
 

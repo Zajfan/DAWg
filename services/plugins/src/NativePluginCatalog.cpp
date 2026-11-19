@@ -18,6 +18,9 @@
 #include <dawg/engine/dsp/TubeTransformerSaturationNode.h>
 #include <dawg/engine/dsp/VectorWaveSequencerNode.h>
 #include <dawg/engine/dsp/VirusTiPolarSynthNode.h>
+#include <dawg/engine/dsp/Juno106SynthNode.h>
+#include <dawg/engine/dsp/OmniFmSynthNode.h>
+#include <dawg/engine/dsp/SoundFontPlayerNode.h>
 
 #include <algorithm>
 
@@ -55,6 +58,76 @@ const std::vector<NativePluginDef>& NativePluginCatalog::allPlugins()
             .presets = {
                 {"Polar Hypersaw Lead", {9.0f, 0.42f, 0.90f, 4800.0f, 2.4f, 2200.0f, 0.35f, 0.35f, 0.28f}},
                 {"Cyberpunk Reese Bass", {7.0f, 0.55f, 0.60f, 850.0f, 1.8f, 450.0f, 0.65f, 0.15f, 0.10f}}
+            }
+        },
+        {
+            .descriptor = {
+                .id = "dawg.synth.juno_106",
+                .name = "Roland Juno-106 Analog Poly Synth",
+                .vendor = "The No-hands Company",
+                .version = "1.0.0",
+                .path = "",
+                .format = PluginFormat::native,
+                .category = PluginCategory::instrument,
+                .isInstrument = true,
+                .isSandboxed = false
+            },
+            .parameters = {
+                {0, "VCF Cutoff", 10.0f, 20000.0f, 3200.0f, "Hz"},
+                {1, "VCF Reso", 0.0f, 1.0f, 0.40f, "%"},
+                {2, "Sub Level", 0.0f, 1.0f, 0.35f, "%"},
+                {3, "PWM Amount", 0.0f, 1.0f, 0.60f, "%"},
+                {4, "Chorus Mode", 0.0f, 3.0f, 1.0f, "idx"}
+            },
+            .presets = {
+                {"Juno Lush Strings", {2800.0f, 0.30f, 0.35f, 0.60f, 1.0f}},
+                {"80s Poly Brass", {1600.0f, 0.45f, 0.20f, 0.40f, 2.0f}}
+            }
+        },
+        {
+            .descriptor = {
+                .id = "dawg.synth.omni_fm",
+                .name = "Yamaha OmniFM 6-Operator Synth",
+                .vendor = "The No-hands Company",
+                .version = "1.0.0",
+                .path = "",
+                .format = PluginFormat::native,
+                .category = PluginCategory::instrument,
+                .isInstrument = true,
+                .isSandboxed = false
+            },
+            .parameters = {
+                {0, "Algorithm", 1.0f, 32.0f, 16.0f, "idx"},
+                {1, "Feedback", 0.0f, 1.0f, 0.45f, "%"},
+                {2, "Op 1 Level", 0.0f, 1.0f, 0.90f, "%"},
+                {3, "Op 2 Level", 0.0f, 1.0f, 0.65f, "%"},
+                {4, "Op 3 Level", 0.0f, 1.0f, 0.75f, "%"}
+            },
+            .presets = {
+                {"Solid DX7 Electric Piano", {16.0f, 0.45f, 0.90f, 0.65f, 0.75f}},
+                {"Lately / Solid FM Bass", {1.0f, 0.65f, 0.95f, 0.80f, 0.70f}}
+            }
+        },
+        {
+            .descriptor = {
+                .id = "dawg.synth.soundfont_player",
+                .name = "SoundFont / Multi-Sample Player",
+                .vendor = "The No-hands Company",
+                .version = "1.0.0",
+                .path = "",
+                .format = PluginFormat::native,
+                .category = PluginCategory::instrument,
+                .isInstrument = true,
+                .isSandboxed = false
+            },
+            .parameters = {
+                {0, "Attack", 1.0f, 1000.0f, 5.0f, "ms"},
+                {1, "Release", 10.0f, 3000.0f, 500.0f, "ms"},
+                {2, "Filter Cutoff", 20.0f, 20000.0f, 14000.0f, "Hz"}
+            },
+            .presets = {
+                {"Acoustic Concert Grand", {5.0f, 500.0f, 14000.0f}},
+                {"Studio Upright Bass", {2.0f, 250.0f, 4500.0f}}
             }
         },
         {
@@ -503,6 +576,12 @@ std::unique_ptr<engine::ProcessorNode> NativePluginCatalog::createNode(std::stri
     // Synths
     if (id == "dawg.synth.virus_ti_polar")
         return std::make_unique<engine::VirusTiPolarSynthNode>();
+    if (id == "dawg.synth.juno_106")
+        return std::make_unique<engine::Juno106SynthNode>();
+    if (id == "dawg.synth.omni_fm")
+        return std::make_unique<engine::OmniFmSynthNode>();
+    if (id == "dawg.synth.soundfont_player")
+        return std::make_unique<engine::SoundFontPlayerNode>();
     if (id == "dawg.synth.buchla_complex")
         return std::make_unique<engine::dsp::ComplexOscillatorWavefolderNode>();
     if (id == "dawg.synth.vector_sequencer")

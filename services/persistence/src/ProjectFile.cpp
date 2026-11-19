@@ -247,6 +247,9 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
                 else if (typeStr == "analogDegrader") desc.type = project::DspNodeType::analogDegrader;
                 else if (typeStr == "rayTracingReverb") desc.type = project::DspNodeType::rayTracingReverb;
                 else if (typeStr == "virusTiPolarSynth") desc.type = project::DspNodeType::virusTiPolarSynth;
+                else if (typeStr == "juno106Synth") desc.type = project::DspNodeType::juno106Synth;
+                else if (typeStr == "omniFmSynth") desc.type = project::DspNodeType::omniFmSynth;
+                else if (typeStr == "soundFontPlayer") desc.type = project::DspNodeType::soundFontPlayer;
                 desc.bypassed = ins.at("bypassed").get<bool>();
                 desc.name = ins.at("name").get<std::string>();
                 if (ins.contains("pluginId")) desc.pluginId = ins.at("pluginId").get<std::string>();
@@ -599,6 +602,9 @@ std::expected<void, ProjectFileError> saveProject(
                         case project::DspNodeType::analogDegrader: typeStr = "analogDegrader"; break;
                         case project::DspNodeType::rayTracingReverb: typeStr = "rayTracingReverb"; break;
                         case project::DspNodeType::virusTiPolarSynth: typeStr = "virusTiPolarSynth"; break;
+                        case project::DspNodeType::juno106Synth: typeStr = "juno106Synth"; break;
+                        case project::DspNodeType::omniFmSynth: typeStr = "omniFmSynth"; break;
+                        case project::DspNodeType::soundFontPlayer: typeStr = "soundFontPlayer"; break;
                         }
                         Json insJson = {
                             {"slotIndex", ins.slotIndex},
