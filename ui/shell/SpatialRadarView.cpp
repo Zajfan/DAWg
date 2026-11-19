@@ -93,30 +93,37 @@ void SpatialRadarView::setSpatialFormat(SpatialFormat format) noexcept
 void SpatialRadarView::setViewModel(const EditorViewModel& model)
 {
     // Synchronize tracks with radar objects
-    if (! model.project.tracks.empty())
+    // 1. Remove deleted tracks
+    m_objects.erase(
+        std::remove_if(m_objects.begin(), m_objects.end(),
+            [&](const SpatialTrackObject& o) {
+                return std::none_of(model.project.tracks.begin(), model.project.tracks.end(),
+                    [&](const auto& t) { return t.id == o.trackId; });
+            }),
+        m_objects.end());
+
+    // 2. Add or update existing tracks
+    for (std::size_t i = 0; i < model.project.tracks.size(); ++i)
     {
-        for (const auto& track : model.project.tracks)
+        const auto& track = model.project.tracks[i];
+        auto it = std::find_if(m_objects.begin(), m_objects.end(),
+                               [id = track.id](const SpatialTrackObject& o) { return o.trackId == id; });
+        if (it == m_objects.end())
         {
-            auto it = std::find_if(m_objects.begin(), m_objects.end(),
-                                   [id = track.id](const SpatialTrackObject& o) { return o.trackId == id; });
-            if (it == m_objects.end())
-            {
-                // Assign new track puck
-                const float defaultAz = (static_cast<float>(m_objects.size() % 6) - 2.5f) * 35.0f;
-                m_objects.push_back({
-                    track.id,
-                    track.name,
-                    juce::Colour::fromHSV(std::fmod(static_cast<float>(m_objects.size()) * 0.23f, 1.0f), 0.75f, 0.9f, 1.0f),
-                    defaultAz,
-                    0.0f,
-                    1.5f + static_cast<float>(m_objects.size() % 4) * 0.5f,
-                    0.0f
-                });
-            }
-            else
-            {
-                it->name = track.name;
-            }
+            const float defaultAz = track.pan * 90.0f;
+            m_objects.push_back({
+                track.id,
+                track.name.empty() ? ("Track " + juce::String(track.id)).toStdString() : track.name,
+                juce::Colour::fromHSV(std::fmod(static_cast<float>(i) * 0.23f, 1.0f), 0.75f, 0.9f, 1.0f),
+                defaultAz,
+                0.0f,
+                1.5f + static_cast<float>(i % 4) * 0.5f,
+                0.0f
+            });
+        }
+        else
+        {
+            it->name = track.name.empty() ? ("Track " + juce::String(track.id)).toStdString() : track.name;
         }
     }
     repaint();

@@ -235,7 +235,11 @@ void ClapParameterEditorWindow::open(
     auto* win = new ClapParameterEditorWindow(
         juce::String(pluginName) + " - CLAP Host",
         std::move(comp),
-        std::move(onClose));
+        [pluginName, userOnClose = std::move(onClose)] {
+            s_activeClapWindows.erase(pluginName);
+            if (userOnClose)
+                userOnClose();
+        });
     s_activeClapWindows[pluginName] = win;
 }
 

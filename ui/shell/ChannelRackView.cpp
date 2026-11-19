@@ -233,6 +233,16 @@ void ChannelRackView::timerCallback()
     {
         if (m_lastPlayedStep != -1)
         {
+            if (m_auditionCallback && m_lastPlayedStep >= 0 && m_lastPlayedStep < m_numSteps)
+            {
+                for (const auto& ch : m_channels)
+                {
+                    if (ch.steps[static_cast<std::size_t>(m_lastPlayedStep)])
+                    {
+                        m_auditionCallback(ch.rootPitch, 0, false);
+                    }
+                }
+            }
             m_lastPlayedStep = -1;
             repaint();
         }
@@ -247,6 +257,17 @@ void ChannelRackView::timerCallback()
     const int currentStep = static_cast<int>(std::floor(static_cast<double>(std::max<std::int64_t>(0, m_model.playbackPosition)) / samplesPerStep)) % m_numSteps;
     if (currentStep != m_lastPlayedStep)
     {
+        if (m_auditionCallback && m_lastPlayedStep >= 0 && m_lastPlayedStep < m_numSteps)
+        {
+            for (const auto& ch : m_channels)
+            {
+                if (ch.steps[static_cast<std::size_t>(m_lastPlayedStep)])
+                {
+                    m_auditionCallback(ch.rootPitch, 0, false);
+                }
+            }
+        }
+
         m_lastPlayedStep = currentStep;
         if (m_auditionCallback && currentStep >= 0 && currentStep < m_numSteps)
         {
@@ -278,7 +299,6 @@ void ChannelRackView::showChannelContextMenu(int channelIndex)
     if (channelIndex < 0 || static_cast<std::size_t>(channelIndex) >= m_channels.size())
         return;
 
-    auto& ch = m_channels[static_cast<std::size_t>(channelIndex)];
     juce::PopupMenu menu;
     menu.addItem(1, "Piano roll");
     menu.addItem(2, "Load Sample...");
@@ -288,7 +308,11 @@ void ChannelRackView::showChannelContextMenu(int channelIndex)
     menu.addItem(5, "Clone Channel");
     menu.addItem(6, "Delete Channel");
 
-    menu.showMenuAsync(juce::PopupMenu::Options {}, [this, channelIndex, &ch](int result) {
+    menu.showMenuAsync(juce::PopupMenu::Options {}, [this, channelIndex](int result) {
+        if (channelIndex < 0 || static_cast<std::size_t>(channelIndex) >= m_channels.size())
+            return;
+
+        auto& ch = m_channels[static_cast<std::size_t>(channelIndex)];
         if (result == 1)
         {
             if (m_openPianoRollCb)
@@ -304,7 +328,7 @@ void ChannelRackView::showChannelContextMenu(int channelIndex)
             chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                 [this, channelIndex, chooser](const juce::FileChooser& fc) {
                     const auto file = fc.getResult();
-                    if (file.existsAsFile() && channelIndex < static_cast<int>(m_channels.size()))
+                    if (file.existsAsFile() && channelIndex >= 0 && channelIndex < static_cast<int>(m_channels.size()))
                     {
                         auto& channel = m_channels[static_cast<std::size_t>(channelIndex)];
                         channel.samplePath = file.getFullPathName().toStdString();
@@ -315,7 +339,6 @@ void ChannelRackView::showChannelContextMenu(int channelIndex)
         }
         else if (result == 3)
         {
-            // Find max mixer track
             int maxTrack = 1;
             for (const auto& row : m_channels)
                 maxTrack = std::max(maxTrack, row.mixerTrack);
@@ -329,7 +352,7 @@ void ChannelRackView::showChannelContextMenu(int channelIndex)
             alert->addButton("OK", 1, juce::KeyPress(juce::KeyPress::returnKey));
             alert->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
             alert->enterModalState(true, juce::ModalCallbackFunction::create([this, channelIndex, alert](int res) {
-                if (res == 1 && channelIndex < static_cast<int>(m_channels.size()))
+                if (res == 1 && channelIndex >= 0 && channelIndex < static_cast<int>(m_channels.size()))
                 {
                     const auto newName = alert->getTextEditorContents("name").trim().toStdString();
                     if (! newName.empty())

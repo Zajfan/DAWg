@@ -262,8 +262,30 @@ MainEditorView::MainEditorView(EditorViewModel model,
     , m_channelRackView(m_commandHandler, m_transportCallbacks.audition)
     , m_drumSamplerView(m_commandHandler, m_transportCallbacks.audition)
     , m_routingMatrixView(m_commandHandler, nullptr)
-    , m_modulationRackView()
-    , m_spatialRadarView()
+    , m_modulationRackView(m_commandHandler)
+    , m_spatialRadarView([this](std::uint64_t trackId, float az, [[maybe_unused]] float el, [[maybe_unused]] float dist) {
+        if (m_commandHandler)
+        {
+            float currentGain = 1.0f;
+            bool currentPhase = false;
+            for (const auto& t : m_model.project.tracks)
+            {
+                if (t.id == trackId)
+                {
+                    currentGain = t.gainLinear;
+                    currentPhase = t.phaseInvert;
+                    break;
+                }
+            }
+            const float pan = std::clamp(az / 90.0f, -1.0f, 1.0f);
+            m_commandHandler(project::SetTrackGainPan {
+                .id = trackId,
+                .gainLinear = currentGain,
+                .pan = pan,
+                .phaseInvert = currentPhase
+            });
+        }
+    })
     , m_wireGridView()
     , m_masteringSuiteView()
     , m_pitchBlobView(m_commandHandler)

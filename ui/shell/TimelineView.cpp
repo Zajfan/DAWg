@@ -1570,6 +1570,7 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                         m_dragMode = DragMode::moveAutomationPoint;
                         m_dragAutomationLaneId = trackLane->id;
                         m_dragAutomationPointId = pt.id;
+                        m_dragInitialTension = pt.curveTension;
                         m_dragStartPos = e.getPosition();
                         return;
                     }
@@ -2217,7 +2218,7 @@ void TimelineView::mouseDrag(const juce::MouseEvent& e)
         if (m_callbacks.commandHandler && m_dragAutomationLaneId != 0 && m_dragAutomationPointId != 0)
         {
             m_callbacks.commandHandler(project::MoveAutomationPoint {
-                m_dragAutomationLaneId, m_dragAutomationPointId, newSample, newVal, 0.0f
+                m_dragAutomationLaneId, m_dragAutomationPointId, newSample, newVal, m_dragInitialTension
             });
         }
         return;
@@ -2400,6 +2401,39 @@ void TimelineView::mouseUp(const juce::MouseEvent&)
             }
         }
         m_dragMode = DragMode::none;
+        repaint();
+        return;
+    }
+
+    if (m_dragMode == DragMode::dragTensionHandle)
+    {
+        if (m_callbacks.commandHandler && m_dragAutomationLaneId != 0 && m_dragAutomationPointId != 0)
+        {
+            for (const auto& lane : m_model.project.automationLanes)
+            {
+                if (lane.id == m_dragAutomationLaneId)
+                {
+                    for (const auto& pt : lane.points)
+                    {
+                        if (pt.id == m_dragAutomationPointId)
+                        {
+                            m_callbacks.commandHandler(project::MoveAutomationPoint {
+                                m_dragAutomationLaneId,
+                                m_dragAutomationPointId,
+                                pt.samplePosition,
+                                pt.value,
+                                pt.curveTension
+                            });
+                            break;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        m_dragMode = DragMode::none;
+        m_dragAutomationLaneId = 0;
+        m_dragAutomationPointId = 0;
         repaint();
         return;
     }
