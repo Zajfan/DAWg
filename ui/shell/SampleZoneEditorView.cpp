@@ -275,8 +275,9 @@ void SampleZoneEditorView::mouseDown(const juce::MouseEvent& e)
 
     if (keyboardArea.contains(e.getPosition())) {
         const auto note = xToNote(e.x, canvas);
+        m_auditioningPitch = note;
         if (m_auditionCb) {
-            m_auditionCb(note, 100);
+            m_auditionCb(note, 100, true);
         }
         return;
     }
@@ -296,8 +297,11 @@ void SampleZoneEditorView::mouseDown(const juce::MouseEvent& e)
             }
         }
 
-        if (m_selectedZoneIdx >= 0 && m_auditionCb) {
-            m_auditionCb(note, vel);
+        if (m_selectedZoneIdx >= 0) {
+            m_auditioningPitch = note;
+            if (m_auditionCb) {
+                m_auditionCb(note, vel, true);
+            }
         }
         repaint();
     }
@@ -325,6 +329,12 @@ void SampleZoneEditorView::mouseDrag(const juce::MouseEvent& e)
 void SampleZoneEditorView::mouseUp(const juce::MouseEvent&)
 {
     m_isDraggingZone = false;
+    if (m_auditioningPitch.has_value()) {
+        if (m_auditionCb) {
+            m_auditionCb(*m_auditioningPitch, 0, false);
+        }
+        m_auditioningPitch.reset();
+    }
 }
 
 } // namespace dawg::ui

@@ -4,6 +4,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <functional>
+#include <optional>
 #include <vector>
 
 namespace dawg::ui {
@@ -11,7 +12,7 @@ namespace dawg::ui {
 class SampleZoneEditorView final : public juce::Component
 {
 public:
-    using AuditionCallback = std::function<void(std::uint8_t note, std::uint8_t vel)>;
+    using AuditionCallback = std::function<void(std::uint8_t note, std::uint8_t vel, bool isNoteOn)>;
 
     explicit SampleZoneEditorView(AuditionCallback auditionCb = nullptr);
     ~SampleZoneEditorView() override = default;
@@ -37,6 +38,7 @@ private:
     [[nodiscard]] std::uint8_t yToVel(int y, juce::Rectangle<int> canvas) const noexcept;
 
     AuditionCallback m_auditionCb;
+    std::optional<std::uint8_t> m_auditioningPitch;
     std::vector<engine::dsp::MultiSampleRegion> m_regions;
     int m_selectedZoneIdx {-1};
     bool m_isDraggingZone {false};

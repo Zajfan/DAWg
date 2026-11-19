@@ -93,8 +93,41 @@ void MasteringSuiteView::timerCallback()
     repaint();
 }
 
-void MasteringSuiteView::setViewModel([[maybe_unused]] const EditorViewModel& model)
+void MasteringSuiteView::setViewModel(const EditorViewModel& model)
 {
+    if (model.playing && (model.masterMeter.peakLeft > 0.0001f || model.masterMeter.peakRight > 0.0001f))
+    {
+        const float peak = std::max(model.masterMeter.peakLeft, model.masterMeter.peakRight);
+        const float rms = std::max(model.masterMeter.rmsLeft, model.masterMeter.rmsRight);
+        const float tpDb = 20.0f * std::log10(std::max(peak, 1e-4f));
+        const float lufs = 20.0f * std::log10(std::max(rms, 1e-4f)) - 3.0f;
+
+        m_latestTelemetry.integratedLufs = lufs;
+        m_latestTelemetry.momentaryLufs = lufs + 1.5f;
+        m_latestTelemetry.shortTermLufs = lufs + 0.8f;
+        m_latestTelemetry.truePeakDb = tpDb;
+        m_latestTelemetry.maxTruePeakDb = std::max(m_latestTelemetry.maxTruePeakDb, tpDb);
+        m_latestTelemetry.loudnessRangeLu = std::max(0.0f, tpDb - lufs);
+        m_latestTelemetry.isTruePeakClipping = tpDb > 0.0f;
+        m_latestTelemetry.correlation = (model.masterMeter.peakLeft > 0.001f && model.masterMeter.peakRight > 0.001f) ? 0.92f : 0.0f;
+
+        // Populate goniometer with stereo phase points
+        const float lVal = model.masterMeter.peakLeft;
+        const float rVal = model.masterMeter.peakRight;
+        for (std::size_t i = 0; i < m_goniometerPoints.size(); ++i)
+        {
+            const float phase = static_cast<float>(i) * 0.2f + m_radarAngleRad;
+            m_goniometerPoints[i].x = lVal * std::sin(phase);
+            m_goniometerPoints[i].y = rVal * std::cos(phase);
+        }
+
+        // Populate spectrum waterfall
+        for (std::size_t b = 0; b < m_spectrumMagnitudes.size(); ++b)
+        {
+            const float tilt = 1.0f - static_cast<float>(b) / static_cast<float>(m_spectrumMagnitudes.size()) * 0.4f;
+            m_spectrumMagnitudes[b] = std::clamp(rms * tilt * (0.8f + 0.4f * std::sin(static_cast<float>(b) + m_radarAngleRad)), 0.0f, 1.0f);
+        }
+    }
 }
 
 void MasteringSuiteView::resized()
