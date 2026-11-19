@@ -35,7 +35,18 @@ DrumPadSamplerView::DrumPadSamplerView(CommandHandler handler, AuditionCallback 
     addAndMakeVisible(m_sliceButton);
 
     m_loadSampleButton.onClick = [this] {
-        // Populate standard sample
+        m_fileChooser = std::make_unique<juce::FileChooser>(
+            "Load Sample for Pad " + juce::String(m_selectedPad + 1),
+            juce::File {}, "*.wav;*.aif;*.aiff;*.flac;*.mp3");
+        m_fileChooser->launchAsync(
+            juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+            [this](const juce::FileChooser& chooser) {
+                const auto selected = chooser.getResult();
+                if (selected.existsAsFile())
+                {
+                    loadSampleFileIntoPad(selected, m_selectedPad);
+                }
+            });
     };
     m_loadSampleButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(38, 41, 48));
     addAndMakeVisible(m_loadSampleButton);
@@ -210,6 +221,29 @@ bool DrumPadSamplerView::isInterestedInFileDrag(const juce::StringArray& files)
     return false;
 }
 
+void DrumPadSamplerView::loadSampleFileIntoPad(const juce::File& file, const std::size_t padIdx)
+{
+    if (padIdx >= 16 || ! file.existsAsFile())
+        return;
+
+    juce::AudioFormatManager formatManager;
+    formatManager.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
+
+    if (reader)
+    {
+        const auto numSamples = static_cast<std::size_t>(reader->lengthInSamples);
+        std::vector<float> l(numSamples);
+        std::vector<float> r(numSamples);
+        float* channels[2] = { l.data(), r.data() };
+        reader->read(channels, 2, 0, static_cast<int>(numSamples));
+        m_sampler.loadSampleIntoPad(padIdx, std::move(l), std::move(r), file.getFileNameWithoutExtension().toStdString());
+        m_selectedPad = padIdx;
+        updateControlsForSelectedPad();
+        repaint();
+    }
+}
+
 void DrumPadSamplerView::filesDropped(const juce::StringArray& files, int x, int y)
 {
     if (files.isEmpty())
@@ -219,22 +253,7 @@ void DrumPadSamplerView::filesDropped(const juce::StringArray& files, int x, int
     const auto targetPad = (pad >= 0) ? static_cast<std::size_t>(pad) : m_selectedPad;
 
     const juce::File f(files[0]);
-    juce::AudioFormatManager formatManager;
-    formatManager.registerBasicFormats();
-    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(f));
-
-    if (reader)
-    {
-        const auto numSamples = static_cast<std::size_t>(reader->lengthInSamples);
-        std::vector<float> l(numSamples);
-        std::vector<float> r(numSamples);
-        float* channels[2] = { l.data(), r.data() };
-        reader->read(channels, 2, 0, static_cast<int>(numSamples));
-        m_sampler.loadSampleIntoPad(targetPad, std::move(l), std::move(r), f.getFileNameWithoutExtension().toStdString());
-        m_selectedPad = targetPad;
-        updateControlsForSelectedPad();
-        repaint();
-    }
+    loadSampleFileIntoPad(f, targetPad);
 }
 
 int DrumPadSamplerView::getPadAt(juce::Point<int> pos) const noexcept

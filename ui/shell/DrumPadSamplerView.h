@@ -40,6 +40,7 @@ public:
 
     void triggerPad(std::size_t padIdx, float velocity);
     void sliceAudioFileAcrossPads(const juce::File& file);
+    void loadSampleFileIntoPad(const juce::File& file, std::size_t padIdx);
 
     [[nodiscard]] engine::DrumPadSamplerNode& samplerNode() noexcept { return m_sampler; }
 
@@ -57,6 +58,7 @@ private:
     AuditionCallback m_auditionCallback;
     EditorViewModel m_model;
     engine::DrumPadSamplerNode m_sampler;
+    std::unique_ptr<juce::FileChooser> m_fileChooser;
 
     std::size_t m_selectedPad {0};
     std::array<float, 16> m_padLitGlow {};

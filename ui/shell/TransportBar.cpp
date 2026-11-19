@@ -220,7 +220,7 @@ void TransportBar::setViewModel(const EditorViewModel& model)
     updateButtons();
 
     // Calculate Bar.Beat.Tick and Seconds
-    const double sampleRate = 48000.0;
+    const double sampleRate = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
     const double posSec = static_cast<double>(m_model.playbackPosition) / sampleRate;
     const int totalSeconds = static_cast<int>(std::max(0.0, posSec));
     const int minutes = totalSeconds / 60;

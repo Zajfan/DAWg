@@ -50,6 +50,7 @@ public:
         const std::filesystem::path& projectDirectory);
 
     [[nodiscard]] const std::vector<AudioPoolItem>& poolItems() const noexcept { return m_items; }
+    [[nodiscard]] const std::filesystem::path& projectDirectory() const noexcept { return m_projectDirectory; }
     [[nodiscard]] std::size_t missingAssetCount() const noexcept;
     [[nodiscard]] std::size_t totalAssetCount() const noexcept { return m_items.size(); }
     [[nodiscard]] std::uint64_t totalPoolBytes() const noexcept;

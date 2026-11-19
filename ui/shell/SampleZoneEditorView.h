@@ -46,6 +46,7 @@ private:
     juce::TextButton m_loadSfzButton {"Load SFZ"};
     juce::Label m_infoLabel;
     juce::ComboBox m_articulationCombo;
+    std::unique_ptr<juce::FileChooser> m_fileChooser;
 
     int m_toolbarHeight {28};
     int m_rulerWidth {36};

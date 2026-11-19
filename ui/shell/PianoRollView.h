@@ -22,6 +22,8 @@ public:
     void setViewModel(const EditorViewModel& model);
     void setActiveClipId(std::optional<project::MidiClipId> clipId);
     [[nodiscard]] std::optional<project::MidiClipId> activeClipId() const noexcept { return m_activeClipId; }
+    void setSelectedTrackId(project::TrackId trkId);
+    [[nodiscard]] std::optional<project::TrackId> selectedTrackId() const noexcept { return m_selectedTrackId; }
     void setAuditionCallback(AuditionCallback cb) noexcept { m_auditionCallback = std::move(cb); }
 
     void paint(juce::Graphics& g) override;
@@ -91,6 +93,7 @@ private:
     AuditionCallback m_auditionCallback;
     EditorViewModel m_model;
     std::optional<project::MidiClipId> m_activeClipId;
+    std::optional<project::TrackId> m_selectedTrackId;
     std::optional<std::uint8_t> m_auditioningPitch;
     int m_virtualKeyboardOctave {4};
 

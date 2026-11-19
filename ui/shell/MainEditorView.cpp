@@ -137,6 +137,8 @@ MainEditorView::MainEditorView(EditorViewModel model,
             m_selectedTrackId = trkId;
             m_trackInspector.setSelectedTrackId(trkId);
             m_deviceRackView.setSelectedTrackId(trkId);
+            m_channelRackView.setSelectedTrackId(trkId);
+            m_pianoRollView.setSelectedTrackId(trkId);
             if (m_transportCallbacks.trackSelected)
                 m_transportCallbacks.trackSelected(trkId);
         }

@@ -256,6 +256,21 @@ void PianoRollView::setActiveClipId(const std::optional<project::MidiClipId> cli
     repaint();
 }
 
+void PianoRollView::setSelectedTrackId(const project::TrackId trkId)
+{
+    m_selectedTrackId = trkId;
+    for (const auto& clip : m_model.project.midiClips)
+    {
+        if (clip.trackId == trkId)
+        {
+            m_activeClipId = clip.id;
+            m_selectedNoteIds.clear();
+            repaint();
+            return;
+        }
+    }
+}
+
 const project::MidiClip* PianoRollView::findActiveClip() const noexcept
 {
     if (! m_activeClipId.has_value())
@@ -277,7 +292,7 @@ bool PianoRollView::isNoteSelected(const project::NoteId id) const noexcept
 double PianoRollView::gridIntervalSamples() const noexcept
 {
     const double bpm = std::max(20.0, m_model.project.tempo.bpm);
-    constexpr double sampleRate = 48000.0;
+    const double sampleRate = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
     const double samplesPerBeat = (60.0 / bpm) * sampleRate;
 
     switch (m_grid)
@@ -502,7 +517,7 @@ void PianoRollView::drawGrid(juce::Graphics& g, const juce::Rectangle<int> bound
     }
 
     const double bpm = std::max(20.0, m_model.project.tempo.bpm);
-    constexpr double sampleRate = 48000.0;
+    const double sampleRate = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
     const double samplesPerBeat = (60.0 / bpm) * sampleRate;
     const double interval = gridIntervalSamples();
 
@@ -966,7 +981,7 @@ void PianoRollView::mouseDown(const juce::MouseEvent& e)
 
     // Double-click on empty grid: create note
     const auto* clip = findActiveClip();
-    if (e.getNumberOfClicks() >= 2 && clip != nullptr && m_handler)
+    if (e.getNumberOfClicks() >= 2 && m_handler)
     {
         const auto pitch = pixelToPitch(e.y);
         const auto startSample = static_cast<std::uint64_t>(snapSample(pixelToSample(e.x)));
@@ -978,7 +993,26 @@ void PianoRollView::mouseDown(const juce::MouseEvent& e)
             .startSample = startSample,
             .lengthSamples = len
         };
-        m_handler(project::AddMidiNote {clip->id, newNote});
+
+        if (clip != nullptr)
+        {
+            m_handler(project::AddMidiNote {clip->id, newNote});
+        }
+        else if (! m_model.project.tracks.empty())
+        {
+            const auto targetTrackId = m_selectedTrackId.value_or(m_model.project.tracks.front().id);
+            const auto clipLen = static_cast<std::uint64_t>(std::max<std::int64_t>(192000, static_cast<std::int64_t>(startSample + len * 4)));
+            m_handler(project::AddMidiClip {
+                .clip = project::MidiClip {
+                    .id = 0,
+                    .trackId = targetTrackId,
+                    .startSample = 0,
+                    .lengthSamples = clipLen,
+                    .notes = { newNote }
+                }
+            });
+        }
+
         if (m_auditionCallback)
             m_auditionCallback(pitch, 100, true);
         return;

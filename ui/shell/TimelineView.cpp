@@ -257,7 +257,7 @@ std::int64_t TimelineView::snapSample(const std::int64_t sample) const noexcept
         return std::max<std::int64_t>(0, sample);
 
     const double bpm = std::max(20.0, m_model.project.tempo.bpm);
-    constexpr double sampleRate = 48000.0;
+    const double sampleRate = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
     const double samplesPerBeat = (60.0 / bpm) * sampleRate;
     const int beatsPerBar = std::max<uint8_t>(1, m_model.project.tempo.timeSigNumerator);
     const double samplesPerBar = samplesPerBeat * static_cast<double>(beatsPerBar);
@@ -453,7 +453,7 @@ void TimelineView::drawRuler(juce::Graphics& g, juce::Rectangle<int> bounds)
     g.drawVerticalLine(m_headerWidth, static_cast<float>(bounds.getY()), static_cast<float>(bounds.getBottom()));
     g.drawHorizontalLine(bounds.getBottom() - 1, 0.0f, static_cast<float>(getWidth()));
 
-    const double sampleRate = 48000.0;
+    const double sampleRate = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
     const double bpm = std::max(20.0, m_model.project.tempo.bpm);
     const double samplesPerBeat = (60.0 / bpm) * sampleRate;
     const int beatsPerBar = std::max<uint8_t>(1, m_model.project.tempo.timeSigNumerator);

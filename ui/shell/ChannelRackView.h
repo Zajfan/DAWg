@@ -55,6 +55,7 @@ public:
     void clearAllSteps();
     void addChannel(const std::string& name, std::uint8_t rootPitch, int mixerTrack);
     void setNumSteps(int steps);
+    void setSelectedTrackId(project::TrackId trkId) { m_selectedTrackId = trkId; }
 
     [[nodiscard]] int currentPlayStep() const noexcept { return m_lastPlayedStep; }
     [[nodiscard]] int numSteps() const noexcept { return m_numSteps; }
@@ -99,6 +100,7 @@ private:
     // Bottom bar controls
     juce::TextButton m_addChannelButton {"+"};
 
+    std::optional<project::TrackId> m_selectedTrackId;
     int m_headerHeight {34};
     int m_bottomBarHeight {26};
     int m_rowHeight {28};

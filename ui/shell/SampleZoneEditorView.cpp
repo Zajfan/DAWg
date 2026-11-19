@@ -77,8 +77,8 @@ SampleZoneEditorView::SampleZoneEditorView(AuditionCallback auditionCb)
 
     m_loadSfzButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(50, 90, 140));
     m_loadSfzButton.onClick = [this] {
-        juce::FileChooser chooser("Select SFZ Instrument File", {}, "*.sfz");
-        chooser.launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        m_fileChooser = std::make_unique<juce::FileChooser>("Select SFZ Instrument File", juce::File {}, "*.sfz");
+        m_fileChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
             [this](const juce::FileChooser& fc) {
                 const auto file = fc.getResult();
                 if (file.existsAsFile()) {

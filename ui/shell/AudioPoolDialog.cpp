@@ -49,7 +49,14 @@ AudioPoolComponent::AudioPoolComponent(persistence::AudioPoolManager& poolManage
     addAndMakeVisible(m_purgeButton);
 
     m_consolidateButton.onClick = [this] {
+        const auto targetDir = m_poolManager.projectDirectory().empty()
+            ? (std::filesystem::current_path() / "audio")
+            : (m_poolManager.projectDirectory() / "audio");
+        project::ProjectSnapshot dummySnap {};
+        m_poolManager.consolidatePool(targetDir, dummySnap);
         refreshPoolView();
+        if (m_onProjectChanged)
+            m_onProjectChanged();
     };
     addAndMakeVisible(m_consolidateButton);
 

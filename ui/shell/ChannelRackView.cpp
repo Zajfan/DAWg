@@ -178,7 +178,18 @@ void ChannelRackView::commitPatternToTimeline()
     const double samplesPerBeat = (sampleRate * 60.0) / bpm;
     const auto stepLength = static_cast<std::uint64_t>(std::max(1.0, std::round(samplesPerBeat / 4.0)));
     const auto patternLength = stepLength * static_cast<std::uint64_t>(m_numSteps);
-    const auto targetTrackId = m_model.project.tracks.front().id;
+    auto targetTrackId = m_model.project.tracks.front().id;
+    if (m_selectedTrackId.has_value())
+    {
+        for (const auto& t : m_model.project.tracks)
+        {
+            if (t.id == *m_selectedTrackId)
+            {
+                targetTrackId = t.id;
+                break;
+            }
+        }
+    }
 
     std::vector<project::MidiNote> notes;
     for (const auto& ch : m_channels)
