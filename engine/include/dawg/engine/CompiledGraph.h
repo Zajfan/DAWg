@@ -1,5 +1,6 @@
 #pragma once
 
+#include <dawg/engine/AutomationCurveEvaluator.h>
 #include <dawg/engine/LoopRegion.h>
 #include <dawg/engine/PlaybackRingBuffer.h>
 
@@ -73,6 +74,16 @@ struct CompiledMidiClip
     std::vector<CompiledMidiNote> notes {};
 };
 
+struct CompiledAutomationLane
+{
+    std::uint64_t id {};
+    std::uint8_t targetKind {}; // 0 = trackVolume, 1 = trackPan, 2 = trackSend, 3 = dspParameter
+    std::uint64_t trackId {};
+    std::uint32_t slotIndex {};
+    std::uint32_t parameterIndex {};
+    std::vector<CurvePoint> points {};
+};
+
 struct CompiledGraph
 {
     std::uint64_t generation {};
@@ -84,6 +95,7 @@ struct CompiledGraph
     std::vector<CompiledTrack> tracks;
     std::vector<CompiledClip> clips;
     std::vector<CompiledMidiClip> midiClips {};
+    std::vector<CompiledAutomationLane> automationLanes {};
 
     // Intrusive link used exclusively by GraphHandoff's lock-free retired stack
     // so retiring an active graph on the audio thread never allocates or frees.

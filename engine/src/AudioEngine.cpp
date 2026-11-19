@@ -293,6 +293,8 @@ bool AudioEngine::prepare(const EngineConfig& config) noexcept
         m_scratchRight.assign(config.maximumBlockSize, 0.0f);
         m_trackScratchLeft.assign(config.maximumBlockSize, 0.0f);
         m_trackScratchRight.assign(config.maximumBlockSize, 0.0f);
+        m_volumeAutomationScratch.assign(config.maximumBlockSize, 1.0f);
+        m_panAutomationScratch.assign(config.maximumBlockSize, 0.0f);
     }
     catch (...)
     {
@@ -301,6 +303,8 @@ bool AudioEngine::prepare(const EngineConfig& config) noexcept
         m_scratchRight.clear();
         m_trackScratchLeft.clear();
         m_trackScratchRight.clear();
+        m_volumeAutomationScratch.clear();
+        m_panAutomationScratch.clear();
         m_prepared = false;
         return false;
     }
@@ -678,7 +682,35 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
                     }
                 }
 
-                // 4b. Route track aux sends
+                // 4b. Evaluate volume and pan automation lanes if present
+                bool hasVolAuto = false;
+                bool hasPanAuto = false;
+                for (const auto& lane : compiledGraph->automationLanes)
+                {
+                    if (lane.trackId == track.trackId)
+                    {
+                        if (lane.targetKind == 0 && ! lane.points.empty()) // trackVolume
+                        {
+                            AutomationCurveEvaluator::evaluateBlock(
+                                lane.points,
+                                sliceStartSample,
+                                std::span<float>(m_volumeAutomationScratch.data(), sliceFrames),
+                                track.gainLinear);
+                            hasVolAuto = true;
+                        }
+                        else if (lane.targetKind == 1 && ! lane.points.empty()) // trackPan
+                        {
+                            AutomationCurveEvaluator::evaluateBlock(
+                                lane.points,
+                                sliceStartSample,
+                                std::span<float>(m_panAutomationScratch.data(), sliceFrames),
+                                track.pan);
+                            hasPanAuto = true;
+                        }
+                    }
+                }
+
+                // 4c. Route track aux sends
                 for (const auto& send : track.sends)
                 {
                     if (send.levelLinear > 0.0001f)
@@ -686,9 +718,10 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
                         auto* targetRuntime = findTrackRuntime(send.targetTrackId);
                         if (targetRuntime != nullptr && targetRuntime->inputBufferLeft.size() >= sliceFrames)
                         {
-                            const float sGain = send.levelLinear * (send.preFader ? 1.0f : track.gainLinear);
                             for (std::size_t f = 0; f < sliceFrames; ++f)
                             {
+                                const float trkGain = hasVolAuto ? m_volumeAutomationScratch[f] : track.gainLinear;
+                                const float sGain = send.levelLinear * (send.preFader ? 1.0f : trkGain);
                                 targetRuntime->inputBufferLeft[f] += m_trackScratchLeft[f] * sGain;
                                 targetRuntime->inputBufferRight[f] += m_trackScratchRight[f] * sGain;
                             }
@@ -698,34 +731,66 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
 
                 // 5. Apply track volume, pan law, phase invert, and accumulate into master output
                 const float trackPolarity = track.phaseInvert ? -1.0f : 1.0f;
-                const float trackScale = track.gainLinear * trackPolarity;
-                const auto panGains = equalPowerPanGains(track.pan);
-                const float trackLeftGain = trackScale * panGains.left;
-                const float trackRightGain = trackScale * panGains.right;
-
-                if (output.channelCount == 1 && output.channels[0] != nullptr)
+                if (! hasVolAuto && ! hasPanAuto)
                 {
-                    for (std::size_t f = 0; f < sliceFrames; ++f)
-                        output.channels[0][destOffset + f] += 0.5f * (m_trackScratchLeft[f] + m_trackScratchRight[f]) * trackScale;
+                    const float trackScale = track.gainLinear * trackPolarity;
+                    const auto panGains = equalPowerPanGains(track.pan);
+                    const float trackLeftGain = trackScale * panGains.left;
+                    const float trackRightGain = trackScale * panGains.right;
+
+                    if (output.channelCount == 1 && output.channels[0] != nullptr)
+                    {
+                        for (std::size_t f = 0; f < sliceFrames; ++f)
+                            output.channels[0][destOffset + f] += 0.5f * (m_trackScratchLeft[f] + m_trackScratchRight[f]) * trackScale;
+                    }
+                    else
+                    {
+                        if (output.channelCount >= 1 && output.channels[0] != nullptr)
+                        {
+                            for (std::size_t f = 0; f < sliceFrames; ++f)
+                                output.channels[0][destOffset + f] += m_trackScratchLeft[f] * trackLeftGain;
+                        }
+                        if (output.channelCount >= 2 && output.channels[1] != nullptr)
+                        {
+                            for (std::size_t f = 0; f < sliceFrames; ++f)
+                                output.channels[1][destOffset + f] += m_trackScratchRight[f] * trackRightGain;
+                        }
+                        for (std::size_t ch = 2; ch < output.channelCount; ++ch)
+                        {
+                            if (output.channels[ch] != nullptr)
+                            {
+                                for (std::size_t f = 0; f < sliceFrames; ++f)
+                                    output.channels[ch][destOffset + f] += 0.5f * (m_trackScratchLeft[f] + m_trackScratchRight[f]) * trackScale;
+                            }
+                        }
+                    }
                 }
                 else
                 {
-                    if (output.channelCount >= 1 && output.channels[0] != nullptr)
+                    for (std::size_t f = 0; f < sliceFrames; ++f)
                     {
-                        for (std::size_t f = 0; f < sliceFrames; ++f)
-                            output.channels[0][destOffset + f] += m_trackScratchLeft[f] * trackLeftGain;
-                    }
-                    if (output.channelCount >= 2 && output.channels[1] != nullptr)
-                    {
-                        for (std::size_t f = 0; f < sliceFrames; ++f)
-                            output.channels[1][destOffset + f] += m_trackScratchRight[f] * trackRightGain;
-                    }
-                    for (std::size_t ch = 2; ch < output.channelCount; ++ch)
-                    {
-                        if (output.channels[ch] != nullptr)
+                        const float vol = hasVolAuto ? m_volumeAutomationScratch[f] : track.gainLinear;
+                        const float curPan = hasPanAuto ? m_panAutomationScratch[f] : track.pan;
+                        const float trackScale = vol * trackPolarity;
+                        const auto panGains = equalPowerPanGains(curPan);
+                        const float trackLeftGain = trackScale * panGains.left;
+                        const float trackRightGain = trackScale * panGains.right;
+
+                        if (output.channelCount == 1 && output.channels[0] != nullptr)
                         {
-                            for (std::size_t f = 0; f < sliceFrames; ++f)
-                                output.channels[ch][destOffset + f] += 0.5f * (m_trackScratchLeft[f] + m_trackScratchRight[f]) * trackScale;
+                            output.channels[0][destOffset + f] += 0.5f * (m_trackScratchLeft[f] + m_trackScratchRight[f]) * trackScale;
+                        }
+                        else
+                        {
+                            if (output.channelCount >= 1 && output.channels[0] != nullptr)
+                                output.channels[0][destOffset + f] += m_trackScratchLeft[f] * trackLeftGain;
+                            if (output.channelCount >= 2 && output.channels[1] != nullptr)
+                                output.channels[1][destOffset + f] += m_trackScratchRight[f] * trackRightGain;
+                            for (std::size_t ch = 2; ch < output.channelCount; ++ch)
+                            {
+                                if (output.channels[ch] != nullptr)
+                                    output.channels[ch][destOffset + f] += 0.5f * (m_trackScratchLeft[f] + m_trackScratchRight[f]) * trackScale;
+                            }
                         }
                     }
                 }

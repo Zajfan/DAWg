@@ -1532,6 +1532,81 @@ void testAutomationCurveEvaluatorAndBezierTension()
     }
 }
 
+void testAudioEngineAutomationCurvePlayback()
+{
+    using namespace dawg::engine;
+
+    AudioEngine engine;
+    require(engine.prepare({.sampleRate = 48000.0, .maximumBlockSize = 256, .outputChannels = 2}), "prepare engine");
+
+    PlaybackRingBuffer ring;
+    require(ring.prepare(1, 512), "ring buffer prepare");
+    std::array<float, 256> ones {};
+    std::fill(ones.begin(), ones.end(), 1.0f);
+    const std::array<const float*, 1> planes {ones.data()};
+    require(ring.write(0, planes, 256) == 256, "write ring");
+
+    auto graph = std::make_unique<CompiledGraph>();
+    graph->generation = 1;
+    graph->tracks.push_back(CompiledTrack {
+        .trackId = 1,
+        .muted = false,
+        .solo = false,
+        .phaseInvert = false,
+        .gainLinear = 1.0f,
+        .pan = 0.0f,
+        .clipOffset = 0,
+        .clipCount = 1
+    });
+    graph->clips.push_back(CompiledClip {
+        .clipId = 1,
+        .assetId = 1,
+        .buffer = &ring,
+        .startSample = 0,
+        .lengthSamples = 256,
+        .sourceOffset = 0,
+        .channelCount = 1,
+        .gainLinear = 1.0f
+    });
+
+    // Add volume automation lane ramping from 0.0 to 1.0 across 256 samples
+    CompiledAutomationLane volLane {
+        .id = 10,
+        .targetKind = 0, // trackVolume
+        .trackId = 1,
+        .slotIndex = 0,
+        .parameterIndex = 0,
+        .points = {
+            CurvePoint {.samplePosition = 0, .value = 0.0f, .curveTension = 0.0f},
+            CurvePoint {.samplePosition = 256, .value = 1.0f, .curveTension = 0.0f}
+        }
+    };
+    graph->automationLanes.push_back(std::move(volLane));
+
+    engine.publishCompiledGraph(std::move(graph));
+    require(engine.enqueueCommand({EngineCommandType::play, 0}), "play command");
+
+    std::array<float, 128> outL {};
+    std::array<float, 128> outR {};
+    std::array<float*, 2> outPlanes {outL.data(), outR.data()};
+
+    // Render first block (samples 0..127)
+    {
+        ScopedAllocationGuard guard;
+        engine.process(AudioBufferView {outPlanes.data(), 2, 128}, {}, {});
+    }
+
+    require(outL[0] < 0.01f, "volume automation starts at 0");
+    require(outL[127] > 0.45f && outL[127] < 0.55f, "volume automation reaches midpoint at sample 128");
+
+    // Render second block (samples 128..255)
+    {
+        ScopedAllocationGuard guard;
+        engine.process(AudioBufferView {outPlanes.data(), 2, 128}, {}, {});
+    }
+    require(outL[127] > 0.95f, "volume automation reaches end value 1.0 at sample 256");
+}
+
 void testWsolaTimeStretchingAndPitchPreservation()
 {
     using namespace dawg::engine;
@@ -10070,6 +10145,7 @@ int main()
     testTnhcSynthNodePolyphonyAndMidi();
     testClapPluginNodeHostingPdcAndCrashImmunity();
     testAutomationCurveEvaluatorAndBezierTension();
+    testAudioEngineAutomationCurvePlayback();
     testWsolaTimeStretchingAndPitchPreservation();
     testMpePolyphonicExpressionAndSynthModulation();
     testMidiControllerManagerMcuAndLearn();

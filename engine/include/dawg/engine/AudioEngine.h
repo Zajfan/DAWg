@@ -137,6 +137,8 @@ private:
     TempoMap m_tempoMap;
     std::vector<float> m_trackScratchLeft;
     std::vector<float> m_trackScratchRight;
+    std::vector<float> m_volumeAutomationScratch;
+    std::vector<float> m_panAutomationScratch;
     std::array<MidiEvent, 128> m_midiScratchEvents {};
     std::atomic<std::uint64_t> m_selectedTrackId {0};
 

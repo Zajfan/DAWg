@@ -188,6 +188,33 @@ std::unique_ptr<const engine::CompiledGraph> GraphCompiler::compile(
         graph->midiClips.push_back(std::move(cmClip));
     }
 
+    graph->automationLanes.reserve(snapshot.automationLanes.size());
+    for (const auto& lane : snapshot.automationLanes)
+    {
+        engine::CompiledAutomationLane cLane {
+            .id = lane.id,
+            .targetKind = static_cast<std::uint8_t>(lane.target.kind),
+            .trackId = lane.target.trackId,
+            .slotIndex = lane.target.slotIndex,
+            .parameterIndex = lane.target.parameterIndex,
+            .points = {}
+        };
+        cLane.points.reserve(lane.points.size());
+        for (const auto& pt : lane.points)
+        {
+            cLane.points.push_back(engine::CurvePoint {
+                .samplePosition = pt.samplePosition,
+                .value = pt.value,
+                .curveTension = pt.curveTension
+            });
+        }
+        std::sort(cLane.points.begin(), cLane.points.end(),
+                  [](const engine::CurvePoint& a, const engine::CurvePoint& b) noexcept {
+                      return a.samplePosition < b.samplePosition;
+                  });
+        graph->automationLanes.push_back(std::move(cLane));
+    }
+
     return graph;
 }
 
