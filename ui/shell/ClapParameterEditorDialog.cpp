@@ -220,14 +220,23 @@ void ClapParameterEditorWindow::open(
     ClapParameterEditorComponent::RestartCallback restartCb,
     std::function<void()> onClose)
 {
+    static std::map<std::string, juce::Component::SafePointer<ClapParameterEditorWindow>> s_activeClapWindows;
+    auto it = s_activeClapWindows.find(pluginName);
+    if (it != s_activeClapWindows.end() && it->second != nullptr)
+    {
+        it->second->toFront(true);
+        return;
+    }
+
     auto comp = std::make_unique<ClapParameterEditorComponent>(
         pluginName, pluginVendor, std::move(params), isCrashed,
         std::move(paramChangeCb), std::move(restartCb));
 
-    new ClapParameterEditorWindow(
+    auto* win = new ClapParameterEditorWindow(
         juce::String(pluginName) + " - CLAP Host",
         std::move(comp),
         std::move(onClose));
+    s_activeClapWindows[pluginName] = win;
 }
 
 } // namespace dawg::ui

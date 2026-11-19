@@ -1407,6 +1407,14 @@ void DspEditorWindow::closeButtonPressed()
 
 void DspEditorWindow::open(DspEditorKind kind, const std::string& trackName, std::function<void()> onClose)
 {
+    static std::array<juce::Component::SafePointer<DspEditorWindow>, 9> s_activeWindows;
+    const auto kindIdx = static_cast<std::size_t>(kind);
+    if (kindIdx < s_activeWindows.size() && s_activeWindows[kindIdx] != nullptr)
+    {
+        s_activeWindows[kindIdx]->toFront(true);
+        return;
+    }
+
     juce::String title;
     switch (kind)
     {
@@ -1421,7 +1429,11 @@ void DspEditorWindow::open(DspEditorKind kind, const std::string& trackName, std
     case DspEditorKind::buchlaComplexSynth: title = "Complex 259 West-Coast Synth - " + juce::String(trackName); break;
     }
 
-    new DspEditorWindow(title, kind, std::move(onClose));
+    auto* win = new DspEditorWindow(title, kind, std::move(onClose));
+    if (kindIdx < s_activeWindows.size())
+    {
+        s_activeWindows[kindIdx] = win;
+    }
 }
 
 } // namespace dawg::ui

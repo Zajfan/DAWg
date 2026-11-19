@@ -237,7 +237,13 @@ void HardwareControlSurfaceWindow::closeButtonPressed()
 
 void HardwareControlSurfaceWindow::open(engine::HardwareControlSurfaceManager& manager)
 {
-    new HardwareControlSurfaceWindow(manager);
+    static juce::Component::SafePointer<HardwareControlSurfaceWindow> s_instance;
+    if (s_instance != nullptr)
+    {
+        s_instance->toFront(true);
+        return;
+    }
+    s_instance = new HardwareControlSurfaceWindow(manager);
 }
 
 } // namespace dawg::ui

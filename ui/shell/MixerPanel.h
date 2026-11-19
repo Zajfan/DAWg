@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EditorViewModel.h"
+#include "TrackInspectorView.h"
 
 #include <dawg/project/ProjectCommand.h>
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -57,8 +58,8 @@ private:
     juce::Rectangle<int> m_macroBounds;
 
     juce::Label m_nameLabel;
-    juce::Slider m_panKnob;
-    juce::Slider m_fader;
+    MidiLearnableSlider m_panKnob;
+    MidiLearnableSlider m_fader;
     juce::ComboBox m_panLawCombo;
     juce::ComboBox m_vcaCombo;
     juce::TextButton m_muteButton {"M"};

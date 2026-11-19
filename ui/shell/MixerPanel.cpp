@@ -1,4 +1,5 @@
 #include "MixerPanel.h"
+#include "MidiLearnManager.h"
 #include "DspEditorDialog.h"
 #include "VirusTiPolarEditorView.h"
 #include "Juno106EditorView.h"
@@ -20,17 +21,67 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
     m_nameLabel.setFont(juce::FontOptions(12.0f, juce::Font::bold));
     addAndMakeVisible(m_nameLabel);
 
-    m_panKnob.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    m_panKnob.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
-    m_panKnob.setRange(-1.0, 1.0, 0.01);
-    m_panKnob.setValue(0.0, juce::dontSendNotification);
-    addAndMakeVisible(m_panKnob);
-
     m_fader.setSliderStyle(juce::Slider::LinearVertical);
     m_fader.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 48, 16);
     m_fader.setRange(0.0, 2.0, 0.01);
     m_fader.setValue(1.0, juce::dontSendNotification);
+    m_fader.onContextMenu = [this](const juce::MouseEvent&) {
+        if (m_trackId == 0) return;
+        juce::PopupMenu menu;
+        menu.addItem(1, "Learn MIDI CC (Volume)");
+        menu.addItem(2, "Reset to 0 dB (1.0)");
+        menu.showMenuAsync(juce::PopupMenu::Options {}, [this](int result) {
+            if (result == 1)
+            {
+                const std::uint32_t targetId = static_cast<std::uint32_t>(m_trackId * 10 + 1);
+                MidiLearnManager::instance().registerParameter(
+                    targetId,
+                    m_nameLabel.getText().toStdString() + " Volume",
+                    [this](float normVal) {
+                        const float linear = normVal * 1.414f;
+                        m_fader.setValue(linear, juce::sendNotification);
+                    }
+                );
+                MidiLearnManager::instance().startLearning(targetId);
+            }
+            else if (result == 2)
+            {
+                m_fader.setValue(1.0, juce::sendNotification);
+            }
+        });
+    };
     addAndMakeVisible(m_fader);
+
+    m_panKnob.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    m_panKnob.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    m_panKnob.setRange(-1.0, 1.0, 0.01);
+    m_panKnob.setValue(0.0, juce::dontSendNotification);
+    m_panKnob.onContextMenu = [this](const juce::MouseEvent&) {
+        if (m_trackId == 0) return;
+        juce::PopupMenu menu;
+        menu.addItem(1, "Learn MIDI CC (Pan)");
+        menu.addItem(2, "Reset to Center (0.0)");
+        menu.showMenuAsync(juce::PopupMenu::Options {}, [this](int result) {
+            if (result == 1)
+            {
+                const std::uint32_t targetId = static_cast<std::uint32_t>(m_trackId * 10 + 2);
+                MidiLearnManager::instance().registerParameter(
+                    targetId,
+                    m_nameLabel.getText().toStdString() + " Pan",
+                    [this](float normVal) {
+                        const float pan = (normVal - 0.5f) * 2.0f;
+                        m_panKnob.setValue(pan, juce::sendNotification);
+                    }
+                );
+                MidiLearnManager::instance().startLearning(targetId);
+            }
+            else if (result == 2)
+            {
+                m_panKnob.setValue(0.0, juce::sendNotification);
+            }
+        });
+    };
+    addAndMakeVisible(m_panKnob);
 
     addAndMakeVisible(m_muteButton);
     addAndMakeVisible(m_soloButton);

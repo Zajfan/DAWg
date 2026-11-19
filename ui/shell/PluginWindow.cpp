@@ -101,12 +101,21 @@ void PluginWindow::open(
         return;
     }
 
+    static std::map<std::string, juce::Component::SafePointer<PluginWindow>> s_activePluginWindows;
+    auto it = s_activePluginWindows.find(pluginName);
+    if (it != s_activePluginWindows.end() && it->second != nullptr)
+    {
+        it->second->toFront(true);
+        return;
+    }
+
     auto editor = std::make_unique<GenericPluginEditorView>(
         pluginName,
         std::move(params),
         std::move(onParamChanged));
 
-    new PluginWindow("Studio Rack: " + pluginName + " - DAWg", std::move(editor), std::move(onClose));
+    auto* win = new PluginWindow("Studio Rack: " + pluginName + " - DAWg", std::move(editor), std::move(onClose));
+    s_activePluginWindows[pluginName] = win;
 }
 
 } // namespace dawg::ui

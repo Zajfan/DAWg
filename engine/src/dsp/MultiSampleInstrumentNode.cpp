@@ -344,6 +344,12 @@ bool MultiSampleInstrumentNode::loadFromSfzString(const std::string& sfzContent)
                 currentRegion.highNote = note;
             } else if (key == "pitch_keycenter") {
                 currentRegion.rootNote = static_cast<std::uint8_t>(std::stoi(val));
+            } else if (key == "sample") {
+                currentRegion.articulationName = val;
+            } else if (key == "sw_last" || key == "sw_lokey") {
+                currentRegion.keySwitchNote = static_cast<std::uint8_t>(std::stoi(val));
+            } else if (key == "xf_vel_width") {
+                currentRegion.xfadeVelWidth = std::stof(val);
             } else if (key == "lokey") {
                 currentRegion.lowNote = static_cast<std::uint8_t>(std::stoi(val));
             } else if (key == "hikey") {

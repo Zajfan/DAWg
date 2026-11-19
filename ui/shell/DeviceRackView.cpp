@@ -148,6 +148,7 @@ DeviceCardComponent::DeviceCardComponent(
             if (m_descriptor.parameters.size() <= paramIdx)
                 m_descriptor.parameters.resize(paramIdx + 1, 0.0f);
             m_descriptor.parameters[paramIdx] = val;
+            m_descriptor.slotIndex = m_slotIndex;
             if (m_cmdHandler)
             {
                 m_cmdHandler(project::AddTrackInsert {

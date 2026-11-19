@@ -278,7 +278,13 @@ void AudioPoolWindow::open(persistence::AudioPoolManager& poolManager,
                            std::function<void()> onProjectChanged,
                            AudioPoolComponent::VocalStemCallback vocalStemCb)
 {
-    new AudioPoolWindow(poolManager, std::move(onProjectChanged), std::move(vocalStemCb));
+    static juce::Component::SafePointer<AudioPoolWindow> s_instance;
+    if (s_instance != nullptr)
+    {
+        s_instance->toFront(true);
+        return;
+    }
+    s_instance = new AudioPoolWindow(poolManager, std::move(onProjectChanged), std::move(vocalStemCb));
 }
 
 } // namespace dawg::ui

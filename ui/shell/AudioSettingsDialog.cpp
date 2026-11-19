@@ -214,8 +214,14 @@ void AudioSettingsWindow::closeButtonPressed()
 void AudioSettingsWindow::open(juce::AudioDeviceManager& deviceManager,
                               platform::juce::LowLatencyAudioDriver* driver)
 {
-    auto* window = new AudioSettingsWindow(deviceManager, driver);
-    window->setVisible(true);
+    static juce::Component::SafePointer<AudioSettingsWindow> s_instance;
+    if (s_instance != nullptr)
+    {
+        s_instance->toFront(true);
+        return;
+    }
+    s_instance = new AudioSettingsWindow(deviceManager, driver);
+    s_instance->setVisible(true);
 }
 
 } // namespace dawg::ui

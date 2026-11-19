@@ -206,42 +206,47 @@ void BounceComponent::startBounce()
     m_cancelButton.setEnabled(true);
     m_statusLabel.setText("Rendering...", juce::dontSendNotification);
 
+    juce::Component::SafePointer<BounceComponent> safeThis(this);
     m_startRender(
         opts,
-        [this](float progress, const std::string& status) {
-            juce::MessageManager::callAsync([this, progress, status] {
-                m_progressVal = static_cast<double>(progress);
-                m_statusLabel.setText(juce::String(status) + " (" + juce::String(static_cast<int>(progress * 100.0f)) + "%)",
-                                      juce::dontSendNotification);
+        [safeThis](float progress, const std::string& status) {
+            juce::MessageManager::callAsync([safeThis, progress, status] {
+                if (safeThis == nullptr)
+                    return;
+                safeThis->m_progressVal = static_cast<double>(progress);
+                safeThis->m_statusLabel.setText(juce::String(status) + " (" + juce::String(static_cast<int>(progress * 100.0f)) + "%)",
+                                                juce::dontSendNotification);
             });
         },
         &m_cancelToken,
-        [this](bool success, const std::string& error) {
-            juce::MessageManager::callAsync([this, success, error] {
-                m_isRendering.store(false);
-                m_startButton.setEnabled(true);
-                m_cancelButton.setEnabled(false);
+        [safeThis](bool success, const std::string& error) {
+            juce::MessageManager::callAsync([safeThis, success, error] {
+                if (safeThis == nullptr)
+                    return;
+                safeThis->m_isRendering.store(false);
+                safeThis->m_startButton.setEnabled(true);
+                safeThis->m_cancelButton.setEnabled(false);
                 if (success)
                 {
-                    m_progressVal = 1.0;
-                    m_statusLabel.setText("Bounce completed successfully!", juce::dontSendNotification);
-                    m_statusLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(70, 220, 100));
+                    safeThis->m_progressVal = 1.0;
+                    safeThis->m_statusLabel.setText("Bounce completed successfully!", juce::dontSendNotification);
+                    safeThis->m_statusLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(70, 220, 100));
 
                     // Generate waveform preview
-                    m_renderedWaveform.resize(64);
+                    safeThis->m_renderedWaveform.resize(64);
                     for (std::size_t i = 0; i < 64; ++i)
                     {
-                        m_renderedWaveform[i] = 0.3f + 0.6f * std::sin(static_cast<float>(i) * 0.15f) * std::cos(static_cast<float>(i) * 0.05f);
+                        safeThis->m_renderedWaveform[i] = 0.3f + 0.6f * std::sin(static_cast<float>(i) * 0.15f) * std::cos(static_cast<float>(i) * 0.05f);
                     }
 
-                    m_lufsVerificationLabel.setText("Loudness: -14.1 LUFS | True Peak: -0.8 dBTP", juce::dontSendNotification);
-                    m_speedBenchmarkLabel.setText("Render Speed: 64x Real-Time (Offline Multi-Core)", juce::dontSendNotification);
-                    repaint();
+                    safeThis->m_lufsVerificationLabel.setText("Loudness: -14.1 LUFS | True Peak: -0.8 dBTP", juce::dontSendNotification);
+                    safeThis->m_speedBenchmarkLabel.setText("Render Speed: 64x Real-Time (Offline Multi-Core)", juce::dontSendNotification);
+                    safeThis->repaint();
                 }
                 else
                 {
-                    m_statusLabel.setText("Render failed: " + juce::String(error), juce::dontSendNotification);
-                    m_statusLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(240, 70, 70));
+                    safeThis->m_statusLabel.setText("Render failed: " + juce::String(error), juce::dontSendNotification);
+                    safeThis->m_statusLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(240, 70, 70));
                 }
             });
         });
@@ -378,7 +383,13 @@ void BounceWindow::closeButtonPressed()
 
 void BounceWindow::open(project::ProjectSnapshot snapshot, BounceComponent::StartRenderFn startRender)
 {
-    new BounceWindow(std::move(snapshot), std::move(startRender));
+    static juce::Component::SafePointer<BounceWindow> s_instance;
+    if (s_instance != nullptr)
+    {
+        s_instance->toFront(true);
+        return;
+    }
+    s_instance = new BounceWindow(std::move(snapshot), std::move(startRender));
 }
 
 } // namespace dawg::ui

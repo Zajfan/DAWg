@@ -167,10 +167,47 @@ bool ClapInstance::getParameterValue(const std::uint32_t paramId, double& outVal
     return m_paramsExt->get_value(m_plugin, paramId, &outValue);
 }
 
-bool ClapInstance::setParameterValue(const std::uint32_t /*paramId*/, const double /*value*/)
+bool ClapInstance::setParameterValue(const std::uint32_t paramId, const double value)
 {
     if (m_plugin == nullptr)
         return false;
+
+    if (m_paramsExt != nullptr && m_paramsExt->flush != nullptr)
+    {
+        clap_event_param_value evt {};
+        evt.header.size = sizeof(clap_event_param_value);
+        evt.header.time = 0;
+        evt.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+        evt.header.type = CLAP_EVENT_PARAM_VALUE;
+        evt.header.flags = 0;
+        evt.param_id = paramId;
+        evt.cookie = nullptr;
+        evt.note_id = -1;
+        evt.port_index = -1;
+        evt.channel = -1;
+        evt.key = -1;
+        evt.value = value;
+
+        struct EventContext
+        {
+            const clap_event_header* header;
+        } ctx { &evt.header };
+
+        clap_input_events inEvents {};
+        inEvents.ctx = &ctx;
+        inEvents.size = [](const clap_input_events* list) -> std::uint32_t {
+            return list != nullptr && list->ctx != nullptr ? 1u : 0u;
+        };
+        inEvents.get = [](const clap_input_events* list, const std::uint32_t index) -> const clap_event_header* {
+            if (list != nullptr && list->ctx != nullptr && index == 0)
+                return static_cast<const EventContext*>(list->ctx)->header;
+            return nullptr;
+        };
+
+        m_paramsExt->flush(m_plugin, &inEvents, nullptr);
+        return true;
+    }
+
     return true;
 }
 
