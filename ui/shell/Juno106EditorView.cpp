@@ -394,17 +394,25 @@ void Juno106Window::open(engine::Juno106SynthNode* node)
     {
         s_instance = std::make_unique<Juno106Window>("Roland Juno-106 Synthesizer", node);
     }
+    else if (node != nullptr)
+    {
+        s_instance->m_view.setSynthNode(node);
+    }
+    s_instance->setVisible(true);
     s_instance->toFront(true);
 }
 
 void Juno106Window::close()
 {
-    s_instance.reset();
+    if (s_instance)
+    {
+        s_instance->setVisible(false);
+    }
 }
 
 bool Juno106Window::isOpen()
 {
-    return s_instance != nullptr;
+    return s_instance != nullptr && s_instance->isVisible();
 }
 
 } // namespace dawg::ui

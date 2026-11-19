@@ -453,22 +453,23 @@ void VirusTiPolarWindow::open()
 {
     if (! s_instance)
     {
-        s_instance = std::make_unique<VirusTiPolarWindow>([] { s_instance.reset(); });
+        s_instance = std::make_unique<VirusTiPolarWindow>();
     }
-    else
-    {
-        s_instance->toFront(true);
-    }
+    s_instance->setVisible(true);
+    s_instance->toFront(true);
 }
 
 void VirusTiPolarWindow::close()
 {
-    s_instance.reset();
+    if (s_instance)
+    {
+        s_instance->setVisible(false);
+    }
 }
 
 bool VirusTiPolarWindow::isOpen() noexcept
 {
-    return s_instance != nullptr;
+    return s_instance != nullptr && s_instance->isVisible();
 }
 
 VirusTiPolarWindow::VirusTiPolarWindow(std::function<void()> onClose)
@@ -489,8 +490,11 @@ VirusTiPolarWindow::VirusTiPolarWindow(std::function<void()> onClose)
 
 void VirusTiPolarWindow::closeButtonPressed()
 {
-    if (m_onClose) m_onClose();
     setVisible(false);
+    if (m_onClose)
+    {
+        m_onClose();
+    }
 }
 
 } // namespace dawg::ui

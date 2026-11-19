@@ -385,17 +385,25 @@ void OmniFmWindow::open(engine::OmniFmSynthNode* node)
     {
         s_instance = std::make_unique<OmniFmWindow>("Yamaha OmniFM 6-Operator Synthesizer", node);
     }
+    else if (node != nullptr)
+    {
+        s_instance->m_view.setSynthNode(node);
+    }
+    s_instance->setVisible(true);
     s_instance->toFront(true);
 }
 
 void OmniFmWindow::close()
 {
-    s_instance.reset();
+    if (s_instance)
+    {
+        s_instance->setVisible(false);
+    }
 }
 
 bool OmniFmWindow::isOpen()
 {
-    return s_instance != nullptr;
+    return s_instance != nullptr && s_instance->isVisible();
 }
 
 } // namespace dawg::ui
