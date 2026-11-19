@@ -134,6 +134,7 @@ MainEditorView::MainEditorView(EditorViewModel model,
         .undo = m_transportCallbacks.undo,
         .redo = m_transportCallbacks.redo,
         .trackSelected = [this](project::TrackId trkId) {
+            m_selectedTrackId = trkId;
             m_trackInspector.setSelectedTrackId(trkId);
             m_deviceRackView.setSelectedTrackId(trkId);
         }
@@ -482,20 +483,92 @@ MainEditorView::MainEditorView(EditorViewModel model,
                     });
                 }
             }
-            PluginWindow::open(plugin.name, std::move(params));
+            auto openDedicatedPluginEditor = [this, &plugin](std::vector<PluginParameterDesc>&& pList) {
+                const auto lower = juce::String(plugin.name).toLowerCase();
+                if (plugin.id == "dawg.synth.virus_ti_polar" || lower.contains("virus") || lower.contains("polar"))
+                {
+                    VirusTiPolarWindow::open();
+                }
+                else if (plugin.id == "dawg.synth.juno_106" || lower.contains("juno"))
+                {
+                    Juno106Window::open();
+                }
+                else if (plugin.id == "dawg.synth.omni_fm" || lower.contains("omnifm") || lower.contains("omni fm"))
+                {
+                    OmniFmWindow::open();
+                }
+                else if (plugin.id == "dawg.synth.buchla_complex" || lower.contains("buchla") || lower.contains("complex 259"))
+                {
+                    DspEditorWindow::open(DspEditorKind::buchlaComplexSynth, plugin.name);
+                }
+                else if (plugin.id == "dawg.effect.dynamic_resonance" || plugin.id == "dawg.fx.resonance_suppressor" || lower.contains("resonance") || lower.contains("resotamer"))
+                {
+                    DspEditorWindow::open(DspEditorKind::resonanceSuppressor, plugin.name);
+                }
+                else if (plugin.id == "dawg.effect.multiband_imager" || plugin.id == "dawg.fx.multiband_imager" || lower.contains("stereoscope") || lower.contains("imager"))
+                {
+                    DspEditorWindow::open(DspEditorKind::multibandImager, plugin.name);
+                }
+                else if (plugin.id == "dawg.effect.linear_phase_eq" || plugin.id == "dawg.fx.linear_phase_eq" || lower.contains("masterphase") || lower.contains("linear phase"))
+                {
+                    DspEditorWindow::open(DspEditorKind::linearPhaseEq, plugin.name);
+                }
+                else if (plugin.id == "tnhc.parametric_eq" || lower.contains("parametric eq"))
+                {
+                    DspEditorWindow::open(DspEditorKind::parametricEq, plugin.name);
+                }
+                else if (plugin.id == "tnhc.studio_compressor" || lower.contains("compressor"))
+                {
+                    DspEditorWindow::open(DspEditorKind::compressor, plugin.name);
+                }
+                else if (plugin.id == "tnhc.plate_reverb" || lower.contains("reverb"))
+                {
+                    DspEditorWindow::open(DspEditorKind::reverb, plugin.name);
+                }
+                else if (plugin.id == "tnhc.stereo_delay" || lower.contains("delay"))
+                {
+                    DspEditorWindow::open(DspEditorKind::delay, plugin.name);
+                }
+                else if (plugin.id == "tnhc.synth" || plugin.id == "dawg.synth.soundfont_player" || lower.contains("soundfont") || lower.contains("poly synth"))
+                {
+                    DspEditorWindow::open(DspEditorKind::synth, plugin.name);
+                }
+                else
+                {
+                    PluginWindow::open(plugin.name, std::move(pList));
+                }
+            };
+
             if (createNewTrack)
             {
                 if (plugin.isInstrument)
                     m_commandHandler(project::AddInstrumentTrack { plugin.name });
                 else
                     m_commandHandler(project::AddAudioTrack { plugin.name });
+                openDedicatedPluginEditor(std::move(params));
                 return;
             }
 
             if (m_model.project.tracks.empty())
+            {
+                openDedicatedPluginEditor(std::move(params));
                 return;
+            }
 
-            const auto& targetTrack = m_model.project.tracks.front();
+            // Find selected track or fallback to first track
+            const project::Track* targetTrack = &m_model.project.tracks.front();
+            if (m_selectedTrackId.has_value())
+            {
+                for (const auto& t : m_model.project.tracks)
+                {
+                    if (t.id == *m_selectedTrackId)
+                    {
+                        targetTrack = &t;
+                        break;
+                    }
+                }
+            }
+
             project::DspNodeType nodeType = project::DspNodeType::clapPlugin;
             if (plugin.id == "tnhc.parametric_eq")
                 nodeType = project::DspNodeType::parametricEq;
@@ -509,11 +582,11 @@ MainEditorView::MainEditorView(EditorViewModel model,
                 nodeType = project::DspNodeType::tnhcReverb;
             else if (plugin.id == "tnhc.stereo_delay")
                 nodeType = project::DspNodeType::tnhcDelay;
-            else if (plugin.id == "dawg.effect.dynamic_resonance")
+            else if (plugin.id == "dawg.effect.dynamic_resonance" || plugin.id == "dawg.fx.resonance_suppressor")
                 nodeType = project::DspNodeType::resonanceSuppressor;
-            else if (plugin.id == "dawg.effect.multiband_imager")
+            else if (plugin.id == "dawg.effect.multiband_imager" || plugin.id == "dawg.fx.multiband_imager")
                 nodeType = project::DspNodeType::multibandStereoImager;
-            else if (plugin.id == "dawg.effect.linear_phase_eq")
+            else if (plugin.id == "dawg.effect.linear_phase_eq" || plugin.id == "dawg.fx.linear_phase_eq")
                 nodeType = project::DspNodeType::linearPhaseMasteringEq;
             else if (plugin.id == "dawg.synth.buchla_complex")
                 nodeType = project::DspNodeType::buchlaComplexSynth;
@@ -541,9 +614,9 @@ MainEditorView::MainEditorView(EditorViewModel model,
                 nodeType = project::DspNodeType::soundFontPlayer;
 
             m_commandHandler(project::AddTrackInsert {
-                targetTrack.id,
+                targetTrack->id,
                 project::DspNodeDescriptor {
-                    .slotIndex = static_cast<std::uint32_t>(targetTrack.inserts.size()),
+                    .slotIndex = static_cast<std::uint32_t>(targetTrack->inserts.size()),
                     .type = nodeType,
                     .bypassed = false,
                     .name = plugin.name,
@@ -551,6 +624,8 @@ MainEditorView::MainEditorView(EditorViewModel model,
                     .parameters = {}
                 }
             });
+
+            openDedicatedPluginEditor(std::move(params));
         });
     addChildComponent(*m_pluginBrowser);
 

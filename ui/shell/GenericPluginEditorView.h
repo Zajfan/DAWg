@@ -23,6 +23,29 @@ struct PluginParameterDesc
     bool isStepped {false};
 };
 
+enum class RackLayoutMode : std::uint8_t
+{
+    RotaryGrid,
+    FaderRack
+};
+
+/// High-end custom LookAndFeel for studio rack instruments and processors.
+/// Draws tactile knurled rotary dials with glowing neon value arcs and console faders.
+class StudioRackLookAndFeel final : public juce::LookAndFeel_V4
+{
+public:
+    StudioRackLookAndFeel() = default;
+    ~StudioRackLookAndFeel() override = default;
+
+    void drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
+                          float sliderPosProportional, float rotaryStartAngle,
+                          float rotaryEndAngle, juce::Slider& slider) override;
+
+    void drawLinearSlider(juce::Graphics& g, int x, int y, int width, int height,
+                          float sliderPos, float minSliderPos, float maxSliderPos,
+                          const juce::Slider::SliderStyle style, juce::Slider& slider) override;
+};
+
 class GenericPluginEditorView final : public juce::Component
 {
 public:
@@ -32,7 +55,7 @@ public:
         std::string pluginName = "Plugin Editor",
         std::vector<PluginParameterDesc> params = {},
         OnParameterChanged onParamChanged = nullptr);
-    ~GenericPluginEditorView() override = default;
+    ~GenericPluginEditorView() override;
 
     void setParameters(std::vector<PluginParameterDesc> params);
     void updateParameterValue(std::uint32_t paramId, float value);
@@ -41,7 +64,7 @@ public:
     void resized() override;
 
 private:
-    struct ParamRow
+    struct ParamTile
     {
         PluginParameterDesc desc;
         std::unique_ptr<juce::Label> nameLabel;
@@ -56,7 +79,13 @@ private:
     std::vector<PluginParameterDesc> m_params;
     OnParameterChanged m_onParamChanged;
 
+    StudioRackLookAndFeel m_rackLookAndFeel;
+    RackLayoutMode m_layoutMode {RackLayoutMode::RotaryGrid};
+
     std::unique_ptr<plugins::PluginPresetManager> m_presetManager;
+    juce::TextButton m_pwrBtn {"PWR"};
+    bool m_isPowered {true};
+    juce::TextButton m_layoutToggleBtn {"[ DIALS ]"};
     juce::ComboBox m_presetCombo;
     std::array<juce::TextButton, 5> m_starButtons;
     juce::TextButton m_abToggleBtn {"[ A ]"};
@@ -72,7 +101,7 @@ private:
     juce::TextEditor m_searchFilter;
     juce::Viewport m_viewport;
     std::unique_ptr<juce::Component> m_container;
-    std::vector<ParamRow> m_rows;
+    std::vector<ParamTile> m_tiles;
 };
 
 } // namespace dawg::ui

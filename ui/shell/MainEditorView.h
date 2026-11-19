@@ -233,6 +233,7 @@ private:
     DragSplitterBar m_inspectorSplitter;
     int m_inspectorWidth {210};
     bool m_inspectorVisible {true};
+    std::optional<project::TrackId> m_selectedTrackId;
 
     // Command Palette Overlay (Ctrl+K)
     CommandPaletteOverlay m_commandPalette;
