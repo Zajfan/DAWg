@@ -108,6 +108,7 @@ void JuceAudioDeviceBridge::triggerAuditionNote(const std::uint8_t pitch,
                                                 const bool isNoteOn) noexcept
 {
     m_callbackAdapter.triggerLiveSynthNote(pitch, velocity, isNoteOn);
+    m_engine.triggerAuditionNote(pitch, velocity, isNoteOn);
 }
 
 void JuceAudioDeviceBridge::handleIncomingMidiMessage(::juce::MidiInput* /*source*/,
@@ -118,6 +119,7 @@ void JuceAudioDeviceBridge::handleIncomingMidiMessage(::juce::MidiInput* /*sourc
         const auto pitch = static_cast<std::uint8_t>(message.getNoteNumber());
         const auto vel = static_cast<std::uint8_t>(message.getVelocity());
         m_callbackAdapter.triggerLiveSynthNote(pitch, vel, true);
+        m_engine.triggerAuditionNote(pitch, vel, true);
         if (m_midiNoteCallback)
             m_midiNoteCallback(pitch, vel, true);
     }
@@ -125,6 +127,7 @@ void JuceAudioDeviceBridge::handleIncomingMidiMessage(::juce::MidiInput* /*sourc
     {
         const auto pitch = static_cast<std::uint8_t>(message.getNoteNumber());
         m_callbackAdapter.triggerLiveSynthNote(pitch, 0, false);
+        m_engine.triggerAuditionNote(pitch, 0, false);
         if (m_midiNoteCallback)
             m_midiNoteCallback(pitch, 0, false);
     }

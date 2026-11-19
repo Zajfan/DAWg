@@ -118,6 +118,20 @@ std::unique_ptr<const engine::CompiledGraph> GraphCompiler::compile(
             ++clipCount;
         }
 
+        std::vector<engine::CompiledInsert> compiledInserts;
+        compiledInserts.reserve(track.inserts.size());
+        for (const auto& ins : track.inserts)
+        {
+            compiledInserts.push_back(engine::CompiledInsert {
+                .slotIndex = ins.slotIndex,
+                .dspType = static_cast<std::uint8_t>(ins.type),
+                .bypassed = ins.bypassed,
+                .name = ins.name,
+                .pluginId = ins.pluginId,
+                .parameters = ins.parameters
+            });
+        }
+
         graph->tracks.push_back(engine::CompiledTrack {
             .trackId = track.id,
             .muted = track.muted,
@@ -126,8 +140,40 @@ std::unique_ptr<const engine::CompiledGraph> GraphCompiler::compile(
             .gainLinear = track.gainLinear,
             .pan = track.pan,
             .clipOffset = clipOffset,
-            .clipCount = clipCount
+            .clipCount = clipCount,
+            .trackKind = static_cast<std::uint8_t>(track.kind),
+            .inserts = std::move(compiledInserts)
         });
+    }
+
+    graph->midiClips.reserve(snapshot.midiClips.size());
+    for (const auto& mClip : snapshot.midiClips)
+    {
+        if (mClip.lengthSamples == 0)
+            continue;
+
+        engine::CompiledMidiClip cmClip {
+            .clipId = mClip.id,
+            .trackId = mClip.trackId,
+            .startSample = mClip.startSample,
+            .lengthSamples = mClip.lengthSamples,
+            .notes = {}
+        };
+        cmClip.notes.reserve(mClip.notes.size());
+        for (const auto& n : mClip.notes)
+        {
+            if (n.lengthSamples == 0 || n.pitch > 127)
+                continue;
+
+            cmClip.notes.push_back(engine::CompiledMidiNote {
+                .noteId = n.id,
+                .startSample = n.startSample,
+                .lengthSamples = n.lengthSamples,
+                .pitch = n.pitch,
+                .velocity = n.velocity
+            });
+        }
+        graph->midiClips.push_back(std::move(cmClip));
     }
 
     return graph;

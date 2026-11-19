@@ -137,6 +137,8 @@ MainEditorView::MainEditorView(EditorViewModel model,
             m_selectedTrackId = trkId;
             m_trackInspector.setSelectedTrackId(trkId);
             m_deviceRackView.setSelectedTrackId(trkId);
+            if (m_transportCallbacks.trackSelected)
+                m_transportCallbacks.trackSelected(trkId);
         }
     }, waveformCache)
     , m_sessionMatrixView(m_commandHandler, m_transportCallbacks.audition)
@@ -1742,9 +1744,13 @@ void MainEditorView::menuItemSelected(int menuItemID, int)
         if (m_transportCallbacks.redo) m_transportCallbacks.redo();
         break;
     case cmdSplitClip:
+        m_timelineView.splitSelectedClip();
+        break;
     case cmdDuplicateClip:
+        m_timelineView.duplicateSelectedClip();
+        break;
     case cmdDeleteClip:
-        m_timelineView.grabKeyboardFocus();
+        m_timelineView.deleteSelectedClip();
         break;
 
     case cmdAddAudioTrack:

@@ -121,7 +121,8 @@ public:
             .canRedo = m_controller.canRedo(),
             .transportRecordArmed = m_transportRecordArmed,
             .masterLimiterEnabled = m_engine.isMasterLimiterEnabled(),
-            .dspPerformance = m_engine.performanceSnapshot()
+            .dspPerformance = m_engine.performanceSnapshot(),
+            .sampleRate = m_engine.sampleRate()
         };
     }
 

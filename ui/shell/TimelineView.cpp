@@ -2433,10 +2433,9 @@ bool TimelineView::keyPressed(const juce::KeyPress& key)
     // Delete / Backspace: Remove selected clip
     if (key.getKeyCode() == juce::KeyPress::deleteKey || key.getKeyCode() == juce::KeyPress::backspaceKey)
     {
-        if (m_selectedClipId.has_value() && m_callbacks.commandHandler)
+        if (m_selectedClipId.has_value())
         {
-            m_callbacks.commandHandler(project::RemoveClip {*m_selectedClipId});
-            m_selectedClipId = std::nullopt;
+            deleteSelectedClip();
             return true;
         }
     }
@@ -2461,19 +2460,8 @@ bool TimelineView::keyPressed(const juce::KeyPress& key)
 
             if (m_selectedClipId.has_value())
             {
-                const auto playhead = static_cast<std::uint64_t>(std::max<std::int64_t>(0, m_model.playbackPosition));
-                for (const auto& clip : m_model.project.clips)
-                {
-                    if (clip.id == *m_selectedClipId)
-                    {
-                        if (playhead > clip.startSample && playhead < clip.startSample + clip.lengthSamples)
-                        {
-                            m_callbacks.commandHandler(project::SplitClip {clip.id, playhead});
-                            return true;
-                        }
-                        break;
-                    }
-                }
+                splitSelectedClip();
+                return true;
             }
         }
     }
@@ -2481,9 +2469,9 @@ bool TimelineView::keyPressed(const juce::KeyPress& key)
     // Ctrl+D: Duplicate selected clip
     if (key.getModifiers().isCtrlDown() && (key.getKeyCode() == 'D' || key.getKeyCode() == 'd'))
     {
-        if (m_selectedClipId.has_value() && m_callbacks.commandHandler)
+        if (m_selectedClipId.has_value())
         {
-            m_callbacks.commandHandler(project::DuplicateClip {*m_selectedClipId});
+            duplicateSelectedClip();
             return true;
         }
     }
@@ -2561,6 +2549,44 @@ void TimelineView::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWh
         const double factor = wheel.deltaY > 0.0f ? 0.85 : 1.15;
         m_samplesPerPixel = std::clamp(m_samplesPerPixel * factor, 8.0, 8192.0);
         repaint();
+    }
+}
+
+void TimelineView::deleteSelectedClip()
+{
+    if (m_selectedClipId.has_value() && m_callbacks.commandHandler)
+    {
+        m_callbacks.commandHandler(project::RemoveClip {*m_selectedClipId});
+        m_selectedClipId = std::nullopt;
+        repaint();
+    }
+}
+
+void TimelineView::duplicateSelectedClip()
+{
+    if (m_selectedClipId.has_value() && m_callbacks.commandHandler)
+    {
+        m_callbacks.commandHandler(project::DuplicateClip {*m_selectedClipId});
+        repaint();
+    }
+}
+
+void TimelineView::splitSelectedClip()
+{
+    if (! m_selectedClipId.has_value() || ! m_callbacks.commandHandler)
+        return;
+
+    const auto playhead = static_cast<std::uint64_t>(std::max<std::int64_t>(0, m_model.playbackPosition));
+    for (const auto& clip : m_model.project.clips)
+    {
+        if (clip.id == *m_selectedClipId)
+        {
+            if (playhead > clip.startSample && playhead < clip.startSample + clip.lengthSamples)
+            {
+                m_callbacks.commandHandler(project::SplitClip {clip.id, playhead});
+            }
+            return;
+        }
     }
 }
 

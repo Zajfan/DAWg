@@ -123,8 +123,9 @@ DeviceCardComponent::DeviceCardComponent(
         break;
     }
 
-    for (const auto& def : paramDefs)
+    for (std::size_t i = 0; i < paramDefs.size(); ++i)
     {
+        const auto& def = paramDefs[i];
         auto qp = std::make_unique<QuickParam>();
         qp->label.setText(def.name, juce::dontSendNotification);
         qp->label.setFont(juce::FontOptions(9.0f));
@@ -135,7 +136,26 @@ DeviceCardComponent::DeviceCardComponent(
         qp->slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
         qp->slider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
         qp->slider.setRange(def.minVal, def.maxVal, 0.1);
-        qp->slider.setValue(def.defVal, juce::dontSendNotification);
+
+        double initialVal = def.defVal;
+        if (i < m_descriptor.parameters.size())
+            initialVal = static_cast<double>(m_descriptor.parameters[i]);
+        qp->slider.setValue(initialVal, juce::dontSendNotification);
+
+        qp->slider.onValueChange = [this, paramIdx = i] {
+            if (paramIdx >= m_params.size()) return;
+            const float val = static_cast<float>(m_params[paramIdx]->slider.getValue());
+            if (m_descriptor.parameters.size() <= paramIdx)
+                m_descriptor.parameters.resize(paramIdx + 1, 0.0f);
+            m_descriptor.parameters[paramIdx] = val;
+            if (m_cmdHandler)
+            {
+                m_cmdHandler(project::AddTrackInsert {
+                    m_trackId,
+                    m_descriptor
+                });
+            }
+        };
         addAndMakeVisible(qp->slider);
 
         m_params.push_back(std::move(qp));

@@ -174,7 +174,7 @@ void ChannelRackView::commitPatternToTimeline()
         return;
 
     const double bpm = m_model.project.tempo.bpm > 0.0 ? m_model.project.tempo.bpm : 120.0;
-    constexpr double sampleRate = 48000.0;
+    const double sampleRate = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
     const double samplesPerBeat = (sampleRate * 60.0) / bpm;
     const auto stepLength = static_cast<std::uint64_t>(std::max(1.0, std::round(samplesPerBeat / 4.0)));
     const auto patternLength = stepLength * static_cast<std::uint64_t>(m_numSteps);
@@ -229,7 +229,7 @@ void ChannelRackView::timerCallback()
     }
 
     const double bpm = m_model.project.tempo.bpm > 0.0 ? m_model.project.tempo.bpm : 120.0;
-    constexpr double sampleRate = 48000.0;
+    const double sampleRate = m_model.sampleRate > 0.0 ? m_model.sampleRate : 48000.0;
     const double samplesPerBeat = (sampleRate * 60.0) / bpm;
     const double samplesPerStep = samplesPerBeat / 4.0;
 

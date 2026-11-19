@@ -69,70 +69,65 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
         menu.addItem(10, "Sidechain Listen", true, m_sidechainListen);
 
         menu.showMenuAsync(juce::PopupMenu::Options {}, [this](int result) {
-            const std::string trkName = m_nameLabel.getText().toStdString();
-            if (result == 1) {
-                m_slotNames[0] = "EQ";
-                m_slotButtons[0].setButtonText("EQ");
-                DspEditorWindow::open(DspEditorKind::parametricEq, trkName);
-            }
-            else if (result == 2) {
-                m_slotNames[1] = "COMP";
-                m_slotButtons[1].setButtonText("COMP");
-                DspEditorWindow::open(DspEditorKind::compressor, trkName);
-            }
-            else if (result == 3) {
-                m_slotNames[0] = "RESO";
-                m_slotButtons[0].setButtonText("RESO");
-                DspEditorWindow::open(DspEditorKind::resonanceSuppressor, trkName);
-            }
-            else if (result == 4) {
-                m_slotNames[1] = "SCOPE";
-                m_slotButtons[1].setButtonText("SCOPE");
-                DspEditorWindow::open(DspEditorKind::multibandImager, trkName);
-            }
-            else if (result == 5) {
-                m_slotNames[0] = "MPHASE";
-                m_slotButtons[0].setButtonText("MPHASE");
-                DspEditorWindow::open(DspEditorKind::linearPhaseEq, trkName);
-            }
-            else if (result == 6) {
-                m_slotNames[0] = "259";
-                m_slotButtons[0].setButtonText("259");
-                DspEditorWindow::open(DspEditorKind::buchlaComplexSynth, trkName);
-            }
-            else if (result == 7) {
-                m_slotNames[1] = "REV";
-                m_slotButtons[1].setButtonText("REV");
-                DspEditorWindow::open(DspEditorKind::reverb, trkName);
-            }
-            else if (result == 8) {
-                m_slotNames[1] = "DLY";
-                m_slotButtons[1].setButtonText("DLY");
-                DspEditorWindow::open(DspEditorKind::delay, trkName);
-            }
-            else if (result == 9) {
-                m_preampModel = 0;
-                m_slotNames[0] = "SSL";
-                m_slotButtons[0].setButtonText("SSL");
-            }
-            else if (result == 10) {
+            if (result <= 0) return;
+            if (result == 10) {
                 m_sidechainListen = ! m_sidechainListen;
+                repaint();
+                return;
             }
-            else if (result == 11) {
-                m_slotNames[0] = "VIRUS";
-                m_slotButtons[0].setButtonText("VIRUS");
-                VirusTiPolarWindow::open();
+
+            const std::string trkName = m_nameLabel.getText().toStdString();
+            project::DspNodeType type = project::DspNodeType::parametricEq;
+            std::string insName = "Parametric EQ";
+            std::string slotLabel = "EQ";
+            std::size_t slotIdx = 0;
+
+            if (result == 1) { type = project::DspNodeType::parametricEq; insName = "Parametric EQ (6-Band)"; slotLabel = "EQ"; slotIdx = 0; }
+            else if (result == 2) { type = project::DspNodeType::dynamicsCompressor; insName = "Dynamics Compressor"; slotLabel = "COMP"; slotIdx = 1; }
+            else if (result == 3) { type = project::DspNodeType::resonanceSuppressor; insName = "Adaptive Resonance Suppressor"; slotLabel = "RESO"; slotIdx = 0; }
+            else if (result == 4) { type = project::DspNodeType::multibandStereoImager; insName = "Multiband Stereo Imager"; slotLabel = "SCOPE"; slotIdx = 1; }
+            else if (result == 5) { type = project::DspNodeType::linearPhaseMasteringEq; insName = "Dynamic Linear-Phase EQ"; slotLabel = "MPHASE"; slotIdx = 0; }
+            else if (result == 6) { type = project::DspNodeType::buchlaComplexSynth; insName = "Buchla Complex 259 Synth"; slotLabel = "259"; slotIdx = 0; }
+            else if (result == 7) { type = project::DspNodeType::tnhcReverb; insName = "Tnhc Studio Reverb"; slotLabel = "REV"; slotIdx = 1; }
+            else if (result == 8) { type = project::DspNodeType::tnhcDelay; insName = "Tnhc Stereo Delay"; slotLabel = "DLY"; slotIdx = 1; }
+            else if (result == 9) { type = project::DspNodeType::tubeTransformer; insName = "Vintage Tube & Transformer Rack"; slotLabel = "SSL"; slotIdx = 0; m_preampModel = 0; }
+            else if (result == 11) { type = project::DspNodeType::virusTiPolarSynth; insName = "Access Virus TI Polar"; slotLabel = "VIRUS"; slotIdx = 0; }
+            else if (result == 12) { type = project::DspNodeType::juno106Synth; insName = "Roland Juno-106"; slotLabel = "JUNO"; slotIdx = 0; }
+            else if (result == 13) { type = project::DspNodeType::omniFmSynth; insName = "Yamaha OmniFM 6-Op Synth"; slotLabel = "OMNIFM"; slotIdx = 0; }
+
+            if (slotIdx < m_slotNames.size())
+            {
+                m_slotNames[slotIdx] = slotLabel;
+                m_slotButtons[slotIdx].setButtonText(slotLabel);
             }
-            else if (result == 12) {
-                m_slotNames[0] = "JUNO";
-                m_slotButtons[0].setButtonText("JUNO");
-                Juno106Window::open();
+
+            if (m_handler && m_trackId != 0)
+            {
+                m_handler(project::AddTrackInsert {
+                    m_trackId,
+                    project::DspNodeDescriptor {
+                        .slotIndex = static_cast<std::uint32_t>(slotIdx),
+                        .type = type,
+                        .bypassed = false,
+                        .name = insName,
+                        .pluginId = {},
+                        .parameters = {},
+                        .stateData = {}
+                    }
+                });
             }
-            else if (result == 13) {
-                m_slotNames[0] = "OMNIFM";
-                m_slotButtons[0].setButtonText("OMNIFM");
-                OmniFmWindow::open();
-            }
+
+            if (result == 1) DspEditorWindow::open(DspEditorKind::parametricEq, trkName);
+            else if (result == 2) DspEditorWindow::open(DspEditorKind::compressor, trkName);
+            else if (result == 3) DspEditorWindow::open(DspEditorKind::resonanceSuppressor, trkName);
+            else if (result == 4) DspEditorWindow::open(DspEditorKind::multibandImager, trkName);
+            else if (result == 5) DspEditorWindow::open(DspEditorKind::linearPhaseEq, trkName);
+            else if (result == 6) DspEditorWindow::open(DspEditorKind::buchlaComplexSynth, trkName);
+            else if (result == 7) DspEditorWindow::open(DspEditorKind::reverb, trkName);
+            else if (result == 8) DspEditorWindow::open(DspEditorKind::delay, trkName);
+            else if (result == 11) VirusTiPolarWindow::open();
+            else if (result == 12) Juno106Window::open();
+            else if (result == 13) OmniFmWindow::open();
             repaint();
         });
     };
@@ -210,19 +205,22 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
 
 void ChannelStripComponent::openInsertEditor(std::size_t slotIdx)
 {
+    if (slotIdx >= m_slotNames.size())
+        return;
+
     const std::string trkName = m_nameLabel.getText().toStdString();
-    const auto& name = m_slotNames[slotIdx];
-    if (name == "EQ") DspEditorWindow::open(DspEditorKind::parametricEq, trkName);
-    else if (name == "COMP") DspEditorWindow::open(DspEditorKind::compressor, trkName);
-    else if (name == "RESO") DspEditorWindow::open(DspEditorKind::resonanceSuppressor, trkName);
-    else if (name == "SCOPE") DspEditorWindow::open(DspEditorKind::multibandImager, trkName);
-    else if (name == "MPHASE") DspEditorWindow::open(DspEditorKind::linearPhaseEq, trkName);
-    else if (name == "259") DspEditorWindow::open(DspEditorKind::buchlaComplexSynth, trkName);
-    else if (name == "REV") DspEditorWindow::open(DspEditorKind::reverb, trkName);
-    else if (name == "DLY") DspEditorWindow::open(DspEditorKind::delay, trkName);
-    else if (name == "VIRUS") VirusTiPolarWindow::open();
-    else if (name == "JUNO") Juno106Window::open();
-    else if (name == "OMNIFM") OmniFmWindow::open();
+    const auto lower = juce::String(m_slotNames[slotIdx]).toLowerCase();
+
+    if (lower.contains("virus") || lower.contains("polar")) VirusTiPolarWindow::open();
+    else if (lower.contains("juno")) Juno106Window::open();
+    else if (lower.contains("omni") || lower.contains("yamaha")) OmniFmWindow::open();
+    else if (lower.contains("reso") || lower.contains("tamer")) DspEditorWindow::open(DspEditorKind::resonanceSuppressor, trkName);
+    else if (lower.contains("scope") || lower.contains("imager")) DspEditorWindow::open(DspEditorKind::multibandImager, trkName);
+    else if (lower.contains("mphase") || lower.contains("phase")) DspEditorWindow::open(DspEditorKind::linearPhaseEq, trkName);
+    else if (lower.contains("259") || lower.contains("buchla")) DspEditorWindow::open(DspEditorKind::buchlaComplexSynth, trkName);
+    else if (lower.contains("rev") || lower.contains("reverb")) DspEditorWindow::open(DspEditorKind::reverb, trkName);
+    else if (lower.contains("dly") || lower.contains("delay")) DspEditorWindow::open(DspEditorKind::delay, trkName);
+    else if (lower.contains("comp")) DspEditorWindow::open(DspEditorKind::compressor, trkName);
     else DspEditorWindow::open(DspEditorKind::parametricEq, trkName);
 }
 

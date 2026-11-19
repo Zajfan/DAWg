@@ -28,6 +28,7 @@ struct EditorViewModel
     bool transportRecordArmed {};
     bool masterLimiterEnabled {};
     engine::DspPerformanceSnapshot dspPerformance {};
+    double sampleRate {48000.0};
 
     [[nodiscard]] std::size_t trackCount() const noexcept { return project.tracks.size(); }
 };

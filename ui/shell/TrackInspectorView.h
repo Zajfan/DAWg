@@ -90,6 +90,7 @@ private:
     {
         std::unique_ptr<juce::TextButton> btnName;
         std::unique_ptr<juce::TextButton> btnBypass;
+        std::unique_ptr<juce::TextButton> btnRemove;
     };
     std::vector<DspSlotRow> m_dspRows;
     juce::Component m_dspContainer;

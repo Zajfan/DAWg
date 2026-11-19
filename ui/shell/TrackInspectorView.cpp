@@ -349,8 +349,19 @@ void TrackInspectorView::updateFromSelectedTrack()
             }
         };
 
+        row.btnRemove = std::make_unique<juce::TextButton>("X");
+        row.btnRemove->setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(55, 30, 35));
+        row.btnRemove->setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(220, 110, 110));
+        row.btnRemove->onClick = [this, trackId = trk->id, slotIdx = i] {
+            if (m_commandHandler)
+            {
+                m_commandHandler(project::RemoveTrackInsert { trackId, static_cast<std::uint32_t>(slotIdx) });
+            }
+        };
+
         m_dspContainer.addAndMakeVisible(*row.btnName);
         m_dspContainer.addAndMakeVisible(*row.btnBypass);
+        m_dspContainer.addAndMakeVisible(*row.btnRemove);
         m_dspRows.push_back(std::move(row));
     }
 
@@ -502,12 +513,22 @@ void TrackInspectorView::resized()
     // DSP Rows
     m_dspContainer.setBounds(8, y, w - 16, std::max(20, getHeight() - y - 8));
     int rowY = 0;
+    const int contW = m_dspContainer.getWidth();
     for (auto& row : m_dspRows)
     {
         if (row.btnName && row.btnBypass)
         {
-            row.btnName->setBounds(0, rowY, m_dspContainer.getWidth() - 36, 20);
-            row.btnBypass->setBounds(m_dspContainer.getWidth() - 32, rowY, 32, 20);
+            if (row.btnRemove)
+            {
+                row.btnName->setBounds(0, rowY, contW - 56, 20);
+                row.btnBypass->setBounds(contW - 52, rowY, 32, 20);
+                row.btnRemove->setBounds(contW - 18, rowY, 18, 20);
+            }
+            else
+            {
+                row.btnName->setBounds(0, rowY, contW - 36, 20);
+                row.btnBypass->setBounds(contW - 32, rowY, 32, 20);
+            }
             rowY += 23;
         }
     }

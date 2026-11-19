@@ -54,6 +54,7 @@ public:
         LimiterCallback setMasterLimiter;
         AuditionCallback audition;
         SampleImportCallback importSample;
+        std::function<void(project::TrackId)> trackSelected;
     };
 
     struct MenuCallbacks

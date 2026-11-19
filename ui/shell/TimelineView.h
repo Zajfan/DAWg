@@ -57,6 +57,10 @@ public:
     void toggleAutomation() noexcept;
     [[nodiscard]] bool showAutomation() const noexcept { return m_showAutomation; }
 
+    void deleteSelectedClip();
+    void duplicateSelectedClip();
+    void splitSelectedClip();
+
     struct TimelineMarker
     {
         std::uint64_t samplePosition {0};

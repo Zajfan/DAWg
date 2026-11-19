@@ -8,9 +8,12 @@
 #include <dawg/engine/EngineConfig.h>
 #include <dawg/engine/GraphHandoff.h>
 #include <dawg/engine/MeterTelemetry.h>
+#include <dawg/engine/Metronome.h>
 #include <dawg/engine/MidiEvent.h>
+#include <dawg/engine/ProcessorNode.h>
 #include <dawg/engine/RecordRingBuffer.h>
 #include <dawg/engine/RenderSnapshotPublisher.h>
+#include <dawg/engine/TempoMap.h>
 #include <dawg/engine/TransportSnapshot.h>
 #include <dawg/engine/TransportState.h>
 #include <dawg/engine/WorkStealingScheduler.h>
@@ -79,6 +82,14 @@ public:
     void setMasterLimiterEnabled(bool enabled) noexcept;
     [[nodiscard]] bool isMasterLimiterEnabled() const noexcept;
 
+    void setMetronomeEnabled(const bool enabled) noexcept { m_metronomeEnabled.store(enabled, std::memory_order_relaxed); }
+    [[nodiscard]] bool isMetronomeEnabled() const noexcept { return m_metronomeEnabled.load(std::memory_order_relaxed); }
+
+    // Per-track live auditioning & routing
+    void triggerAuditionNote(std::uint8_t pitch, std::uint8_t velocity, bool isNoteOn) noexcept;
+    void setSelectedTrackId(std::uint64_t trackId) noexcept { m_selectedTrackId.store(trackId, std::memory_order_relaxed); }
+    [[nodiscard]] std::uint64_t selectedTrackId() const noexcept { return m_selectedTrackId.load(std::memory_order_relaxed); }
+
     // Multi-Core Topological Work-Stealing Scheduler (Frontier A)
     bool prepareScheduler(std::size_t workerCount) noexcept { return m_scheduler.prepare(workerCount); }
     void shutdownScheduler() noexcept { m_scheduler.shutdown(); }
@@ -95,6 +106,7 @@ public:
     void process(AudioInputBufferView input, AudioBufferView output, MidiBufferView midi,
                  const TransportSnapshot& transport) noexcept;
     [[nodiscard]] bool isPrepared() const noexcept;
+    [[nodiscard]] double sampleRate() const noexcept { return m_sampleRate; }
 
 private:
     std::unique_ptr<TransportCommandQueue> m_commandQueue;
@@ -114,11 +126,39 @@ private:
     std::atomic<std::uint64_t> m_punchOutSample {0};
     std::atomic<std::uint32_t> m_loopTakeCount {0};
     std::atomic<bool> m_masterLimiterEnabled {false};
+    std::atomic<bool> m_metronomeEnabled {false};
     dsp::BrickwallLimiterNode m_masterLimiter;
     WorkStealingScheduler m_scheduler;
     DspPerformanceProfiler m_profiler;
     double m_sampleRate {48000.0};
     bool m_prepared {};
+
+    Metronome m_metronome;
+    TempoMap m_tempoMap;
+    std::vector<float> m_trackScratchLeft;
+    std::vector<float> m_trackScratchRight;
+    std::array<MidiEvent, 128> m_midiScratchEvents {};
+    std::atomic<std::uint64_t> m_selectedTrackId {0};
+
+    struct TrackDspInstance
+    {
+        std::uint32_t slotIndex {0};
+        std::uint8_t dspType {0};
+        bool bypassed {false};
+        std::unique_ptr<ProcessorNode> node;
+    };
+
+    struct TrackRuntime
+    {
+        std::uint64_t trackId {0};
+        std::uint8_t trackKind {0};
+        std::unique_ptr<ProcessorNode> fallbackInstrument;
+        ProcessorNode* activeInstrument {nullptr};
+        std::vector<TrackDspInstance> inserts;
+    };
+
+    std::vector<TrackRuntime> m_trackRuntimes;
+    [[nodiscard]] TrackRuntime* findTrackRuntime(std::uint64_t trackId) noexcept;
 };
 
 } // namespace dawg::engine

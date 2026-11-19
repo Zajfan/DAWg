@@ -148,6 +148,10 @@ void Application::initialise(const juce::String&)
         },
         .importSample = [this](const std::filesystem::path& path) {
             importWavFile(juce::File(juce::String(path.string())));
+        },
+        .trackSelected = [this](const project::TrackId trkId) {
+            if (m_engine)
+                m_engine->setSelectedTrackId(trkId);
         }
     };
 
@@ -229,6 +233,11 @@ void Application::systemRequestedQuit() { quit(); }
 
 void Application::dispatchProjectCommand(project::ProjectCommand command)
 {
+    if (const auto* tempoCmd = std::get_if<project::SetProjectTempo>(&command))
+    {
+        if (m_engine)
+            m_engine->setMetronomeEnabled(tempoCmd->metronomeEnabled);
+    }
     if (m_state->dispatch(std::move(command)))
         refreshMainComponent();
 }
