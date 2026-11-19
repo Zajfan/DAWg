@@ -54,6 +54,7 @@ public:
         LimiterCallback setMasterLimiter;
         AuditionCallback audition;
         SampleImportCallback importSample;
+        std::function<void(const std::filesystem::path& path, project::TrackId trackId, std::uint64_t startSample)> importSampleAt;
         std::function<void(project::TrackId)> trackSelected;
     };
 

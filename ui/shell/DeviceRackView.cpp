@@ -364,6 +364,13 @@ void DeviceRackView::showAddDeviceMenu()
     menu.addItem(8, "TNHC Stereo Delay");
     menu.addItem(9, "Brickwall Peak Limiter");
     menu.addItem(10, "Drum Pad MPC Sampler");
+    menu.addItem(11, "Access Virus TI Polar Synth");
+    menu.addItem(12, "Roland Juno-106 Analog Poly Synth");
+    menu.addItem(13, "Yamaha OmniFM 6-Operator FM Synth");
+    menu.addItem(14, "SoundFont / SFZ Instrument Player");
+    menu.addItem(15, "Vintage Tube & Transformer Rack");
+    menu.addItem(16, "Analog Tape & Vinyl Degrader");
+    menu.addItem(17, "3D Ray-Tracing Acoustic Room Reverb");
 
     menu.showMenuAsync(juce::PopupMenu::Options {}, [this, trkId = *m_selectedTrackId](int res) {
         if (res <= 0 || ! m_cmdHandler) return;
@@ -379,6 +386,13 @@ void DeviceRackView::showAddDeviceMenu()
         else if (res == 8) { type = project::DspNodeType::tnhcDelay; name = "Stereo Delay"; }
         else if (res == 9) { type = project::DspNodeType::brickwallLimiter; name = "Peak Limiter"; }
         else if (res == 10) { type = project::DspNodeType::drumPadSampler; name = "Drum Pad Sampler"; }
+        else if (res == 11) { type = project::DspNodeType::virusTiPolarSynth; name = "Access Virus TI Polar"; }
+        else if (res == 12) { type = project::DspNodeType::juno106Synth; name = "Roland Juno-106"; }
+        else if (res == 13) { type = project::DspNodeType::omniFmSynth; name = "Yamaha OmniFM 6-Op Synth"; }
+        else if (res == 14) { type = project::DspNodeType::soundFontPlayer; name = "SoundFont / SFZ Player"; }
+        else if (res == 15) { type = project::DspNodeType::tubeTransformer; name = "Vintage Tube & Transformer"; }
+        else if (res == 16) { type = project::DspNodeType::analogDegrader; name = "Analog Tape Degrader"; }
+        else if (res == 17) { type = project::DspNodeType::rayTracingReverb; name = "3D Ray-Tracing Reverb"; }
 
         const project::Track* trk = nullptr;
         for (const auto& t : m_model.project.tracks)

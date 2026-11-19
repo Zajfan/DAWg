@@ -141,6 +141,12 @@ MainEditorView::MainEditorView(EditorViewModel model,
             m_pianoRollView.setSelectedTrackId(trkId);
             if (m_transportCallbacks.trackSelected)
                 m_transportCallbacks.trackSelected(trkId);
+        },
+        .importFile = [this](const std::filesystem::path& path, project::TrackId trkId, std::uint64_t startSample) {
+            if (m_transportCallbacks.importSampleAt)
+                m_transportCallbacks.importSampleAt(path, trkId, startSample);
+            else if (m_transportCallbacks.importSample)
+                m_transportCallbacks.importSample(path);
         }
     }, waveformCache)
     , m_sessionMatrixView(m_commandHandler, m_transportCallbacks.audition)

@@ -149,6 +149,9 @@ void Application::initialise(const juce::String&)
         .importSample = [this](const std::filesystem::path& path) {
             importWavFile(juce::File(juce::String(path.string())));
         },
+        .importSampleAt = [this](const std::filesystem::path& path, project::TrackId trkId, std::uint64_t startSample) {
+            importWavFile(juce::File(juce::String(path.string())), trkId != 0 ? std::optional<project::TrackId>(trkId) : std::nullopt, startSample);
+        },
         .trackSelected = [this](const project::TrackId trkId) {
             if (m_engine)
                 m_engine->setSelectedTrackId(trkId);
@@ -255,7 +258,9 @@ void Application::promptImportWav()
         });
 }
 
-void Application::importWavFile(const juce::File& file)
+void Application::importWavFile(const juce::File& file,
+                               std::optional<project::TrackId> targetTrackId,
+                               const std::uint64_t targetStartSample)
 {
     if (!m_mediaService || !m_diskStreamPool || !m_state)
         return;
@@ -282,7 +287,7 @@ void Application::importWavFile(const juce::File& file)
     const project::AudioClip draftClip {
         .id = 1,
         .assetId = draftAsset.id,
-        .startSample = 0,
+        .startSample = targetStartSample,
         .sourceOffset = 0,
         .lengthSamples = draftAsset.frameCount
     };
@@ -295,15 +300,31 @@ void Application::importWavFile(const juce::File& file)
         return;
     }
 
-    if (m_state->editorViewModel().trackCount() == 0) {
-        if (!m_state->dispatch(project::AddAudioTrack {"Audio 1"})) {
-            m_state->setMediaStatus(false, "Cannot create audio track for imported WAV");
-            refreshMainComponent();
-            return;
+    project::TrackId trackId = 0;
+    if (targetTrackId.has_value())
+    {
+        for (const auto& t : m_state->editorViewModel().project.tracks)
+        {
+            if (t.id == *targetTrackId)
+            {
+                trackId = t.id;
+                break;
+            }
         }
     }
 
-    const auto trackId = m_state->editorViewModel().project.tracks.back().id;
+    if (trackId == 0)
+    {
+        if (m_state->editorViewModel().trackCount() == 0) {
+            if (!m_state->dispatch(project::AddAudioTrack {"Audio 1"})) {
+                m_state->setMediaStatus(false, "Cannot create audio track for imported WAV");
+                refreshMainComponent();
+                return;
+            }
+        }
+        trackId = m_state->editorViewModel().project.tracks.back().id;
+    }
+
     const auto assetId = m_state->addAudioAsset(asset);
     if (!assetId.has_value()) {
         m_state->setMediaStatus(false, "Cannot register imported WAV asset in project");
@@ -314,7 +335,7 @@ void Application::importWavFile(const juce::File& file)
     const auto clipId = m_state->addAudioClip(project::AudioClip {
         .id = 0,
         .assetId = *assetId,
-        .startSample = 0,
+        .startSample = targetStartSample,
         .sourceOffset = 0,
         .lengthSamples = draftAsset.frameCount,
         .trackId = trackId
@@ -330,7 +351,7 @@ void Application::importWavFile(const juce::File& file)
     const project::AudioClip registeredClip {
         .id = *clipId,
         .assetId = *assetId,
-        .startSample = 0,
+        .startSample = targetStartSample,
         .sourceOffset = 0,
         .lengthSamples = draftAsset.frameCount,
         .trackId = trackId

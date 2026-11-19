@@ -33,6 +33,13 @@ struct CompiledInsert
     std::vector<float> parameters {};
 };
 
+struct CompiledSend
+{
+    std::uint64_t targetTrackId {};
+    float levelLinear {1.0f};
+    bool preFader {false};
+};
+
 struct CompiledTrack
 {
     std::uint64_t trackId {};
@@ -45,6 +52,7 @@ struct CompiledTrack
     std::uint32_t clipCount {};
     std::uint8_t trackKind {0};
     std::vector<CompiledInsert> inserts {};
+    std::vector<CompiledSend> sends {};
 };
 
 struct CompiledMidiNote

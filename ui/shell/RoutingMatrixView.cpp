@@ -41,27 +41,52 @@ void RoutingMatrixView::setViewModel(const EditorViewModel& model)
 {
     m_model = model;
 
-    // Ensure default master routes exist for tracks
+    // Synchronize active routes with project model sends and routing
+    m_routes.clear();
     for (const auto& track : m_model.project.tracks)
     {
-        bool found = false;
-        for (const auto& r : m_routes)
+        // 1. Master Out route (active if track outputBusTrackId == 0)
+        m_routes.push_back(MatrixRoute {
+            .sourceTrackId = track.id,
+            .destination = "Master Out",
+            .sendGain = 1.0f,
+            .isSidechain = false,
+            .active = (track.outputBusTrackId == 0)
+        });
+
+        // 2. Aux sends
+        for (const auto& send : track.sends)
         {
-            if (r.sourceTrackId == track.id && r.destination == "Master Out")
+            const project::Track* targetTrack = nullptr;
+            for (const auto& t : m_model.project.tracks)
             {
-                found = true;
-                break;
+                if (t.id == send.targetTrackId)
+                {
+                    targetTrack = &t;
+                    break;
+                }
             }
-        }
-        if (! found)
-        {
-            m_routes.push_back(MatrixRoute {
-                .sourceTrackId = track.id,
-                .destination = "Master Out",
-                .sendGain = 1.0f,
-                .isSidechain = false,
-                .active = true
-            });
+
+            if (targetTrack != nullptr)
+            {
+                std::string destName = targetTrack->name;
+                if (destName.find("Reverb") != std::string::npos)
+                    destName = "Aux Reverb";
+                else if (destName.find("Delay") != std::string::npos)
+                    destName = "Aux Delay";
+                else if (destName.find("Drum") != std::string::npos)
+                    destName = "Drum Bus";
+                else if (destName.find("Music") != std::string::npos)
+                    destName = "Music Bus";
+
+                m_routes.push_back(MatrixRoute {
+                    .sourceTrackId = track.id,
+                    .destination = destName,
+                    .sendGain = send.levelLinear,
+                    .isSidechain = false,
+                    .active = true
+                });
+            }
         }
     }
     repaint();
@@ -110,9 +135,10 @@ void RoutingMatrixView::mouseDown(const juce::MouseEvent& e)
         return r.sourceTrackId == trackId && r.destination == dest;
     });
 
+    const bool willBeActive = (it != m_routes.end()) ? (! it->active) : true;
     if (it != m_routes.end())
     {
-        it->active = ! it->active;
+        it->active = willBeActive;
     }
     else
     {
@@ -123,6 +149,54 @@ void RoutingMatrixView::mouseDown(const juce::MouseEvent& e)
             .isSidechain = (dest == "Sidechain SC"),
             .active = true
         });
+    }
+
+    if (m_commandHandler)
+    {
+        if (dest == "Master Out")
+        {
+            m_commandHandler(project::SetTrackOutputBus { trackId, willBeActive ? 0u : 999u });
+        }
+        else
+        {
+            // Find existing target aux track or create one
+            const project::Track* targetTrack = nullptr;
+            for (const auto& t : m_model.project.tracks)
+            {
+                if (t.name == dest || (dest == "Aux Reverb" && t.name.find("Reverb") != std::string::npos) ||
+                    (dest == "Aux Delay" && t.name.find("Delay") != std::string::npos) ||
+                    (dest == "Drum Bus" && t.name.find("Drum") != std::string::npos) ||
+                    (dest == "Music Bus" && t.name.find("Music") != std::string::npos))
+                {
+                    targetTrack = &t;
+                    break;
+                }
+            }
+
+            if (targetTrack != nullptr)
+            {
+                if (willBeActive)
+                {
+                    m_commandHandler(project::AddTrackSend {
+                        trackId,
+                        project::TrackSend {
+                            .targetTrackId = targetTrack->id,
+                            .levelLinear = 1.0f,
+                            .preFader = false
+                        }
+                    });
+                }
+                else
+                {
+                    m_commandHandler(project::RemoveTrackSend { trackId, targetTrack->id });
+                }
+            }
+            else if (willBeActive)
+            {
+                // Create the aux track
+                m_commandHandler(project::AddAuxReturnTrack { dest });
+            }
+        }
     }
     repaint();
 }

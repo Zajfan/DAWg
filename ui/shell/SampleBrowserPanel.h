@@ -37,6 +37,8 @@ public:
     int getNumRows() override;
     void paintListBoxItem(int rowNumber, juce::Graphics& g, int width, int height, bool rowIsSelected) override;
     void selectedRowsChanged(int lastRowSelected) override;
+    void listBoxItemDoubleClicked(int row, const juce::MouseEvent& e) override;
+    void mouseDrag(const juce::MouseEvent& e) override;
 
     void setDirectory(const std::filesystem::path& dir);
     [[nodiscard]] std::filesystem::path currentDirectory() const { return m_currentDir; }

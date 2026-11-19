@@ -116,6 +116,7 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
         menu.addItem(11, "Access Virus TI Polar Synth");
         menu.addItem(12, "Roland Juno-106 Analog Synth");
         menu.addItem(13, "Yamaha OmniFM 6-Op Synth");
+        menu.addItem(14, "SoundFont / SFZ Instrument Player");
         menu.addSeparator();
         menu.addItem(10, "Sidechain Listen", true, m_sidechainListen);
 
@@ -145,6 +146,7 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
             else if (result == 11) { type = project::DspNodeType::virusTiPolarSynth; insName = "Access Virus TI Polar"; slotLabel = "VIRUS"; slotIdx = 0; }
             else if (result == 12) { type = project::DspNodeType::juno106Synth; insName = "Roland Juno-106"; slotLabel = "JUNO"; slotIdx = 0; }
             else if (result == 13) { type = project::DspNodeType::omniFmSynth; insName = "Yamaha OmniFM 6-Op Synth"; slotLabel = "OMNIFM"; slotIdx = 0; }
+            else if (result == 14) { type = project::DspNodeType::soundFontPlayer; insName = "SoundFont / SFZ Player"; slotLabel = "SFZ"; slotIdx = 0; }
 
             if (slotIdx < m_slotNames.size())
             {

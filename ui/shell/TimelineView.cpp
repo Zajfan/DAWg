@@ -1555,6 +1555,18 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                     const int py = laneTop + laneH - static_cast<int>(std::round(pt.value * static_cast<float>(laneH)));
                     if (std::abs(e.x - px) <= 10 && std::abs(e.y - py) <= 10)
                     {
+                        if (e.mods.isRightButtonDown())
+                        {
+                            if (m_callbacks.commandHandler)
+                            {
+                                m_callbacks.commandHandler(project::RemoveAutomationPoint {
+                                    trackLane->id,
+                                    pt.id
+                                });
+                            }
+                            repaint();
+                            return;
+                        }
                         m_dragMode = DragMode::moveAutomationPoint;
                         m_dragAutomationLaneId = trackLane->id;
                         m_dragAutomationPointId = pt.id;
@@ -2093,6 +2105,40 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
                     m_selectedClipId = mClip.id;
                     if (m_callbacks.trackSelected)
                         m_callbacks.trackSelected(track.id);
+
+                    if (e.mods.isRightButtonDown())
+                    {
+                        const auto clipId = mClip.id;
+                        juce::PopupMenu menu;
+                        menu.addItem(1, "Split MIDI Clip at Playhead (S)");
+                        menu.addItem(2, "Duplicate MIDI Clip (Ctrl+D)");
+                        menu.addItem(3, "Delete MIDI Clip (Del)");
+                        menu.showMenuAsync(juce::PopupMenu::Options {}, [this, clipId](int res) {
+                            if (res == 1)
+                                splitSelectedClip();
+                            else if (res == 2)
+                                duplicateSelectedClip();
+                            else if (res == 3)
+                                deleteSelectedClip();
+                        });
+                        repaint();
+                        return;
+                    }
+
+                    // Start moving MIDI clip
+                    m_draggedClipId = mClip.id;
+                    m_dragInitialClip = project::AudioClip {
+                        .id = mClip.id,
+                        .assetId = 0,
+                        .startSample = mClip.startSample,
+                        .sourceOffset = 0,
+                        .lengthSamples = mClip.lengthSamples,
+                        .trackId = mClip.trackId
+                    };
+                    m_dragStartPos = e.getPosition();
+                    m_dragMode = DragMode::moveClip;
+                    m_dragTargetTrackId = track.id;
+                    m_dragTargetStartSample = static_cast<std::int64_t>(mClip.startSample);
                     repaint();
                     return;
                 }
@@ -2587,6 +2633,68 @@ void TimelineView::splitSelectedClip()
                 m_callbacks.commandHandler(project::SplitClip {clip.id, playhead});
             }
             return;
+        }
+    }
+
+    for (const auto& mClip : m_model.project.midiClips)
+    {
+        if (mClip.id == *m_selectedClipId)
+        {
+            if (playhead > mClip.startSample && playhead < mClip.startSample + mClip.lengthSamples)
+            {
+                m_callbacks.commandHandler(project::SplitClip {mClip.id, playhead});
+            }
+            return;
+        }
+    }
+}
+
+bool TimelineView::isInterestedInFileDrag(const juce::StringArray& files)
+{
+    for (const auto& f : files)
+    {
+        const auto ext = juce::File(f).getFileExtension().toLowerCase();
+        if (ext == ".wav" || ext == ".flac" || ext == ".aiff" || ext == ".aif" || ext == ".ogg" || ext == ".mp3")
+            return true;
+    }
+    return false;
+}
+
+void TimelineView::filesDropped(const juce::StringArray& files, int x, int y)
+{
+    if (files.isEmpty())
+        return;
+
+    // Find track at y
+    project::TrackId targetTrackId = 0;
+    int currentY = tracksTopY();
+    for (const auto& track : m_model.project.tracks)
+    {
+        if (track.parentFolderId != 0)
+        {
+            const auto parentIt = std::find_if(m_model.project.tracks.begin(), m_model.project.tracks.end(),
+                [&](const auto& t) { return t.id == track.parentFolderId; });
+            if (parentIt != m_model.project.tracks.end() && parentIt->folderCollapsed)
+                continue;
+        }
+
+        const int trackHeight = m_trackLaneHeight + (track.takeLanesExpanded ? static_cast<int>(track.takes.size()) * 32 : 0);
+        if (y >= currentY && y < currentY + trackHeight)
+        {
+            targetTrackId = track.id;
+            break;
+        }
+        currentY += trackHeight;
+    }
+
+    const auto startSample = static_cast<std::uint64_t>(std::max<std::int64_t>(0, snapSample(pixelToSample(x))));
+
+    for (const auto& file : files)
+    {
+        const std::filesystem::path p(file.toStdString());
+        if (m_callbacks.importFile)
+        {
+            m_callbacks.importFile(p, targetTrackId, startSample);
         }
     }
 }

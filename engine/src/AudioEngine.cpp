@@ -163,6 +163,9 @@ void AudioEngine::publishCompiledGraph(std::unique_ptr<const CompiledGraph> grap
                 TrackRuntime tr;
                 tr.trackId = track.trackId;
                 tr.trackKind = track.trackKind;
+                const auto maxBlock = m_scratchLeft.empty() ? 2048 : m_scratchLeft.size();
+                tr.inputBufferLeft.resize(maxBlock, 0.0f);
+                tr.inputBufferRight.resize(maxBlock, 0.0f);
                 m_trackRuntimes.push_back(std::move(tr));
                 it = m_trackRuntimes.end() - 1;
             }
@@ -308,6 +311,10 @@ bool AudioEngine::prepare(const EngineConfig& config) noexcept
 
     for (auto& tr : m_trackRuntimes)
     {
+        tr.inputBufferLeft.resize(config.maximumBlockSize, 0.0f);
+        tr.inputBufferRight.resize(config.maximumBlockSize, 0.0f);
+        std::fill(tr.inputBufferLeft.begin(), tr.inputBufferLeft.end(), 0.0f);
+        std::fill(tr.inputBufferRight.begin(), tr.inputBufferRight.end(), 0.0f);
         if (tr.fallbackInstrument)
             static_cast<void>(tr.fallbackInstrument->prepare(m_sampleRate, config.maximumBlockSize, 2));
         for (auto& ins : tr.inserts)
@@ -334,6 +341,8 @@ void AudioEngine::reset() noexcept
     m_metronome.reset();
     for (auto& tr : m_trackRuntimes)
     {
+        std::fill(tr.inputBufferLeft.begin(), tr.inputBufferLeft.end(), 0.0f);
+        std::fill(tr.inputBufferRight.begin(), tr.inputBufferRight.end(), 0.0f);
         if (tr.fallbackInstrument)
             tr.fallbackInstrument->reset();
         for (auto& ins : tr.inserts)
@@ -512,11 +521,20 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
 
                 const auto trackStartTime = std::chrono::steady_clock::now();
 
-                // 1. Clear track scratch buffer
-                std::fill_n(m_trackScratchLeft.begin(), sliceFrames, 0.0f);
-                std::fill_n(m_trackScratchRight.begin(), sliceFrames, 0.0f);
-
+                // 1. Initialize track scratch buffer from incoming send buffer (if any)
                 auto* trackRuntime = findTrackRuntime(track.trackId);
+                if (trackRuntime != nullptr && trackRuntime->inputBufferLeft.size() >= sliceFrames)
+                {
+                    std::copy_n(trackRuntime->inputBufferLeft.begin(), sliceFrames, m_trackScratchLeft.begin());
+                    std::copy_n(trackRuntime->inputBufferRight.begin(), sliceFrames, m_trackScratchRight.begin());
+                    std::fill_n(trackRuntime->inputBufferLeft.begin(), sliceFrames, 0.0f);
+                    std::fill_n(trackRuntime->inputBufferRight.begin(), sliceFrames, 0.0f);
+                }
+                else
+                {
+                    std::fill_n(m_trackScratchLeft.begin(), sliceFrames, 0.0f);
+                    std::fill_n(m_trackScratchRight.begin(), sliceFrames, 0.0f);
+                }
 
                 // 2. Instrument track MIDI synthesis
                 if (trackRuntime != nullptr && (track.trackKind == 1 || trackRuntime->activeInstrument != nullptr))
@@ -656,6 +674,24 @@ void AudioEngine::process(const AudioInputBufferView input, const AudioBufferVie
                                 .sampleRate = m_sampleRate
                             };
                             ins.node->process(insCtx);
+                        }
+                    }
+                }
+
+                // 4b. Route track aux sends
+                for (const auto& send : track.sends)
+                {
+                    if (send.levelLinear > 0.0001f)
+                    {
+                        auto* targetRuntime = findTrackRuntime(send.targetTrackId);
+                        if (targetRuntime != nullptr && targetRuntime->inputBufferLeft.size() >= sliceFrames)
+                        {
+                            const float sGain = send.levelLinear * (send.preFader ? 1.0f : track.gainLinear);
+                            for (std::size_t f = 0; f < sliceFrames; ++f)
+                            {
+                                targetRuntime->inputBufferLeft[f] += m_trackScratchLeft[f] * sGain;
+                                targetRuntime->inputBufferRight[f] += m_trackScratchRight[f] * sGain;
+                            }
                         }
                     }
                 }

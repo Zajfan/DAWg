@@ -54,6 +54,7 @@ SampleBrowserPanel::SampleBrowserPanel(SampleImportCallback importCallback,
     m_fileListBox.setRowHeight(28);
     m_fileListBox.setColour(juce::ListBox::backgroundColourId, juce::Colour(0xff0d1117));
     m_fileListBox.setColour(juce::ListBox::outlineColourId, juce::Colour(0xff30363d));
+    m_fileListBox.addMouseListener(this, true);
     addAndMakeVisible(m_fileListBox);
 
     m_syncTempoToggle.setColour(juce::ToggleButton::textColourId, juce::Colour(0xffc9d1d9));
@@ -229,6 +230,35 @@ void SampleBrowserPanel::paintListBoxItem(const int rowNumber, juce::Graphics& g
 void SampleBrowserPanel::selectedRowsChanged(const int lastRowSelected)
 {
     m_selectedRow = lastRowSelected;
+}
+
+void SampleBrowserPanel::listBoxItemDoubleClicked(const int row, const juce::MouseEvent& /*e*/)
+{
+    if (row < 0 || static_cast<std::size_t>(row) >= m_filteredFiles.size())
+        return;
+
+    const auto& file = m_filteredFiles[static_cast<std::size_t>(row)];
+    if (file.extension == "dir" || std::filesystem::is_directory(file.path))
+    {
+        setDirectory(file.path);
+    }
+    else
+    {
+        if (m_auditionCallback)
+            m_auditionCallback(file.path, m_syncTempoToggle.getToggleState());
+    }
+}
+
+void SampleBrowserPanel::mouseDrag(const juce::MouseEvent& e)
+{
+    if (e.getDistanceFromDragStart() > 6 && m_selectedRow >= 0 && static_cast<std::size_t>(m_selectedRow) < m_filteredFiles.size())
+    {
+        const auto& file = m_filteredFiles[static_cast<std::size_t>(m_selectedRow)];
+        if (file.extension != "dir" && ! std::filesystem::is_directory(file.path))
+        {
+            juce::DragAndDropContainer::performExternalDragDropOfFiles({ file.path.string() }, false, this);
+        }
+    }
 }
 
 void SampleBrowserPanel::paint(juce::Graphics& g)

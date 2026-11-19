@@ -155,6 +155,8 @@ private:
         std::unique_ptr<ProcessorNode> fallbackInstrument;
         ProcessorNode* activeInstrument {nullptr};
         std::vector<TrackDspInstance> inserts;
+        std::vector<float> inputBufferLeft;
+        std::vector<float> inputBufferRight;
     };
 
     std::vector<TrackRuntime> m_trackRuntimes;

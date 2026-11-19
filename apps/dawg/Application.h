@@ -49,7 +49,9 @@ public:
 private:
     void dispatchProjectCommand(project::ProjectCommand);
     void promptImportWav();
-    void importWavFile(const juce::File& file);
+    void importWavFile(const juce::File& file,
+                       std::optional<project::TrackId> targetTrackId = std::nullopt,
+                       std::uint64_t targetStartSample = 0);
     void playTransport();
     void stopTransport();
     void returnTransportToStart();

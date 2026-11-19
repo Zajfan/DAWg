@@ -6,18 +6,22 @@
 #include <dawg/project/ProjectCommand.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <filesystem>
 #include <functional>
 #include <optional>
 
 namespace dawg::ui {
 
-class TimelineView final : public juce::Component, private juce::Timer
+class TimelineView final : public juce::Component,
+                           public juce::FileDragAndDropTarget,
+                           private juce::Timer
 {
 public:
     using CommandHandler = std::function<void(project::ProjectCommand)>;
     using SeekCallback = std::function<void(std::int64_t samplePosition)>;
     using ActionCallback = std::function<void()>;
     using TrackSelectedCallback = std::function<void(project::TrackId trackId)>;
+    using ImportFileCallback = std::function<void(const std::filesystem::path& path, project::TrackId trackId, std::uint64_t startSample)>;
 
     enum class SnapMode : std::uint8_t
     {
@@ -36,6 +40,7 @@ public:
         ActionCallback undo;
         ActionCallback redo;
         TrackSelectedCallback trackSelected;
+        ImportFileCallback importFile;
     };
 
     explicit TimelineView(Callbacks callbacks, media::WaveformCache* waveformCache = nullptr);
@@ -51,6 +56,10 @@ public:
     void mouseUp(const juce::MouseEvent& e) override;
     void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
     bool keyPressed(const juce::KeyPress& key) override;
+
+    // FileDragAndDropTarget
+    bool isInterestedInFileDrag(const juce::StringArray& files) override;
+    void filesDropped(const juce::StringArray& files, int x, int y) override;
 
     void cycleSnapMode();
     [[nodiscard]] SnapMode snapMode() const noexcept { return m_snapMode; }

@@ -132,6 +132,17 @@ std::unique_ptr<const engine::CompiledGraph> GraphCompiler::compile(
             });
         }
 
+        std::vector<engine::CompiledSend> compiledSends;
+        compiledSends.reserve(track.sends.size());
+        for (const auto& s : track.sends)
+        {
+            compiledSends.push_back(engine::CompiledSend {
+                .targetTrackId = s.targetTrackId,
+                .levelLinear = s.levelLinear,
+                .preFader = s.preFader
+            });
+        }
+
         graph->tracks.push_back(engine::CompiledTrack {
             .trackId = track.id,
             .muted = track.muted,
@@ -142,7 +153,8 @@ std::unique_ptr<const engine::CompiledGraph> GraphCompiler::compile(
             .clipOffset = clipOffset,
             .clipCount = clipCount,
             .trackKind = static_cast<std::uint8_t>(track.kind),
-            .inserts = std::move(compiledInserts)
+            .inserts = std::move(compiledInserts),
+            .sends = std::move(compiledSends)
         });
     }
 
