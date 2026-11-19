@@ -32,12 +32,14 @@ class ChannelRackView final : public juce::Component,
 public:
     using CommandHandler = std::function<void(project::ProjectCommand)>;
     using AuditionCallback = std::function<void(std::uint8_t pitch, std::uint8_t velocity, bool isNoteOn)>;
+    using OpenPianoRollCallback = std::function<void()>;
 
     explicit ChannelRackView(CommandHandler handler = nullptr, AuditionCallback auditionCb = nullptr);
     ~ChannelRackView() override;
 
     void setViewModel(const EditorViewModel& model);
     void setAuditionCallback(AuditionCallback cb) noexcept { m_auditionCallback = std::move(cb); }
+    void setOpenPianoRollCallback(OpenPianoRollCallback cb) noexcept { m_openPianoRollCb = std::move(cb); }
 
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -74,6 +76,7 @@ private:
 
     CommandHandler m_commandHandler;
     AuditionCallback m_auditionCallback;
+    OpenPianoRollCallback m_openPianoRollCb;
     EditorViewModel m_model;
 
     std::vector<ChannelRackRow> m_channels;

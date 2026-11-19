@@ -465,6 +465,7 @@ MainEditorView::MainEditorView(EditorViewModel model,
     addAndMakeVisible(m_mixerPanel);
     addChildComponent(m_deviceRackView);
     addChildComponent(m_pianoRollView);
+    m_channelRackView.setOpenPianoRollCallback([this] { setDockMode(BottomDockMode::pianoRoll); });
     addChildComponent(m_channelRackView);
     addChildComponent(m_drumSamplerView);
     addChildComponent(m_routingMatrixView);

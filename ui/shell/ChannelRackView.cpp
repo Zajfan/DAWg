@@ -289,7 +289,31 @@ void ChannelRackView::showChannelContextMenu(int channelIndex)
     menu.addItem(6, "Delete Channel");
 
     menu.showMenuAsync(juce::PopupMenu::Options {}, [this, channelIndex, &ch](int result) {
-        if (result == 3)
+        if (result == 1)
+        {
+            if (m_openPianoRollCb)
+                m_openPianoRollCb();
+        }
+        else if (result == 2)
+        {
+            auto chooser = std::make_shared<juce::FileChooser>(
+                "Select Audio Sample",
+                juce::File::getSpecialLocation(juce::File::userHomeDirectory),
+                "*.wav;*.flac;*.ogg;*.mp3;*.aif;*.aiff");
+
+            chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                [this, channelIndex, chooser](const juce::FileChooser& fc) {
+                    const auto file = fc.getResult();
+                    if (file.existsAsFile() && channelIndex < static_cast<int>(m_channels.size()))
+                    {
+                        auto& channel = m_channels[static_cast<std::size_t>(channelIndex)];
+                        channel.samplePath = file.getFullPathName().toStdString();
+                        channel.name = file.getFileNameWithoutExtension().toStdString();
+                        repaint();
+                    }
+                });
+        }
+        else if (result == 3)
         {
             // Find max mixer track
             int maxTrack = 1;
@@ -297,6 +321,25 @@ void ChannelRackView::showChannelContextMenu(int channelIndex)
                 maxTrack = std::max(maxTrack, row.mixerTrack);
             ch.mixerTrack = maxTrack + 1;
             repaint();
+        }
+        else if (result == 4)
+        {
+            auto* alert = new juce::AlertWindow("Rename Channel", "Enter new channel name:", juce::AlertWindow::NoIcon);
+            alert->addTextEditor("name", ch.name, "Channel Name");
+            alert->addButton("OK", 1, juce::KeyPress(juce::KeyPress::returnKey));
+            alert->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+            alert->enterModalState(true, juce::ModalCallbackFunction::create([this, channelIndex, alert](int res) {
+                if (res == 1 && channelIndex < static_cast<int>(m_channels.size()))
+                {
+                    const auto newName = alert->getTextEditorContents("name").trim().toStdString();
+                    if (! newName.empty())
+                    {
+                        m_channels[static_cast<std::size_t>(channelIndex)].name = newName;
+                        repaint();
+                    }
+                }
+                delete alert;
+            }));
         }
         else if (result == 5)
         {

@@ -34,6 +34,7 @@ public:
     void mouseUp(const juce::MouseEvent& e) override;
     void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
     bool keyPressed(const juce::KeyPress& key) override;
+    bool keyStateChanged(bool isKeyDown) override;
 
     void quantizeNotes();
     void toggleStepRecord();
@@ -100,6 +101,9 @@ private:
     std::vector<project::NoteId> m_selectedNoteIds;
     std::optional<project::NoteId> m_draggedNoteId;
     project::MidiNote m_dragInitialNote {};
+    std::uint64_t m_dragTargetStartSample {0};
+    std::uint8_t m_dragTargetPitch {60};
+    std::uint64_t m_dragTargetLengthSamples {0};
     DragMode m_dragMode {DragMode::none};
     juce::Point<int> m_dragStartPos;
     juce::Rectangle<int> m_lassoRect;

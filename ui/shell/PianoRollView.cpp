@@ -566,9 +566,14 @@ void PianoRollView::drawNotes(juce::Graphics& g, const juce::Rectangle<int> boun
 
     for (const auto& note : clip->notes)
     {
-        const int noteX = m_keyWidth + sampleToPixel(static_cast<std::int64_t>(note.startSample));
-        const int noteW = std::max(4, sampleToPixel(static_cast<std::int64_t>(note.lengthSamples)));
-        const int noteY = pitchToPixel(note.pitch);
+        const bool isDragged = (m_draggedNoteId.has_value() && note.id == *m_draggedNoteId);
+        const auto curStart = (isDragged && m_dragMode == DragMode::moveNote) ? m_dragTargetStartSample : note.startSample;
+        const auto curLen = (isDragged && m_dragMode == DragMode::resizeNote) ? m_dragTargetLengthSamples : note.lengthSamples;
+        const auto curPitch = (isDragged && m_dragMode == DragMode::moveNote) ? m_dragTargetPitch : note.pitch;
+
+        const int noteX = m_keyWidth + sampleToPixel(static_cast<std::int64_t>(curStart));
+        const int noteW = std::max(4, sampleToPixel(static_cast<std::int64_t>(curLen)));
+        const int noteY = pitchToPixel(curPitch);
 
         if (noteY + m_noteRowHeight < bounds.getY() || noteY > bounds.getBottom())
             continue;
@@ -951,11 +956,27 @@ void PianoRollView::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
+    const auto* clip = findActiveClip();
+
     bool nearRightEdge = false;
     const auto* note = findNoteAt(e.getPosition(), nearRightEdge);
 
     if (note != nullptr)
     {
+        if (e.mods.isRightButtonDown())
+        {
+            if (m_handler && clip != nullptr)
+            {
+                m_handler(project::RemoveMidiNote {clip->id, note->id});
+                auto it = std::find(m_selectedNoteIds.begin(), m_selectedNoteIds.end(), note->id);
+                if (it != m_selectedNoteIds.end())
+                    m_selectedNoteIds.erase(it);
+                repaint();
+                return;
+            }
+        }
+
+        m_auditioningPitch = note->pitch;
         if (m_auditionCallback)
             m_auditionCallback(note->pitch, note->velocity, true);
         if (e.mods.isShiftDown() || e.mods.isCtrlDown())
@@ -974,13 +995,15 @@ void PianoRollView::mouseDown(const juce::MouseEvent& e)
 
         m_draggedNoteId = note->id;
         m_dragInitialNote = *note;
+        m_dragTargetStartSample = note->startSample;
+        m_dragTargetPitch = note->pitch;
+        m_dragTargetLengthSamples = note->lengthSamples;
         m_dragMode = nearRightEdge ? DragMode::resizeNote : DragMode::moveNote;
         repaint();
         return;
     }
 
     // Double-click on empty grid: create note
-    const auto* clip = findActiveClip();
     if (e.getNumberOfClicks() >= 2 && m_handler)
     {
         const auto pitch = pixelToPitch(e.y);
@@ -1013,6 +1036,7 @@ void PianoRollView::mouseDown(const juce::MouseEvent& e)
             });
         }
 
+        m_auditioningPitch = pitch;
         if (m_auditionCallback)
             m_auditionCallback(pitch, 100, true);
         return;
@@ -1082,16 +1106,16 @@ void PianoRollView::mouseDrag(const juce::MouseEvent& e)
     if (m_dragMode == DragMode::moveNote && m_draggedNoteId.has_value())
     {
         const auto rawStart = static_cast<std::int64_t>(m_dragInitialNote.startSample) + deltaSample;
-        const auto newStart = static_cast<std::uint64_t>(std::max<std::int64_t>(0, snapSample(rawStart)));
-        const auto newPitch = pixelToPitch(e.y);
-        m_handler(project::MoveMidiNote {clip->id, *m_draggedNoteId, newStart, newPitch});
+        m_dragTargetStartSample = static_cast<std::uint64_t>(std::max<std::int64_t>(0, snapSample(rawStart)));
+        m_dragTargetPitch = pixelToPitch(e.y);
+        repaint();
     }
     else if (m_dragMode == DragMode::resizeNote && m_draggedNoteId.has_value())
     {
         const auto rawLen = static_cast<std::int64_t>(m_dragInitialNote.lengthSamples) + deltaSample;
         const auto minLen = static_cast<std::int64_t>(gridIntervalSamples() / 2.0);
-        const auto newLen = static_cast<std::uint64_t>(std::max<std::int64_t>(minLen, rawLen));
-        m_handler(project::ResizeMidiNote {clip->id, *m_draggedNoteId, newLen});
+        m_dragTargetLengthSamples = static_cast<std::uint64_t>(std::max<std::int64_t>(minLen, rawLen));
+        repaint();
     }
 }
 
@@ -1103,6 +1127,26 @@ void PianoRollView::mouseUp(const juce::MouseEvent&)
             m_auditionCallback(*m_auditioningPitch, 0, false);
         m_auditioningPitch.reset();
     }
+
+    const auto* clip = findActiveClip();
+    if (clip != nullptr && m_handler && m_draggedNoteId.has_value())
+    {
+        if (m_dragMode == DragMode::moveNote)
+        {
+            if (m_dragTargetStartSample != m_dragInitialNote.startSample || m_dragTargetPitch != m_dragInitialNote.pitch)
+            {
+                m_handler(project::MoveMidiNote {clip->id, *m_draggedNoteId, m_dragTargetStartSample, m_dragTargetPitch});
+            }
+        }
+        else if (m_dragMode == DragMode::resizeNote)
+        {
+            if (m_dragTargetLengthSamples != m_dragInitialNote.lengthSamples)
+            {
+                m_handler(project::ResizeMidiNote {clip->id, *m_draggedNoteId, m_dragTargetLengthSamples});
+            }
+        }
+    }
+
     m_dragMode = DragMode::none;
     m_draggedNoteId.reset();
     m_lassoRect = {};
@@ -1160,6 +1204,7 @@ bool PianoRollView::keyPressed(const juce::KeyPress& key)
     if (noteOffset >= 0)
     {
         const auto pitch = static_cast<std::uint8_t>(std::clamp(m_virtualKeyboardOctave * 12 + noteOffset, 0, 127));
+        m_auditioningPitch = pitch;
         if (m_auditionCallback)
             m_auditionCallback(pitch, 100, true);
         return true;
@@ -1181,6 +1226,42 @@ bool PianoRollView::keyPressed(const juce::KeyPress& key)
         return true;
     }
 
+    if (key.getModifiers().isCtrlDown() && (code == 'D' || code == 'd'))
+    {
+        // Duplicate selected notes
+        std::vector<project::MidiNote> newNotes;
+        std::uint64_t maxEndSample = 0;
+        std::uint64_t minStartSample = std::numeric_limits<std::uint64_t>::max();
+        for (const auto& note : clip->notes)
+        {
+            if (isNoteSelected(note.id))
+            {
+                minStartSample = std::min(minStartSample, note.startSample);
+                maxEndSample = std::max(maxEndSample, note.startSample + note.lengthSamples);
+            }
+        }
+        if (maxEndSample > minStartSample && minStartSample != std::numeric_limits<std::uint64_t>::max())
+        {
+            const auto shift = maxEndSample - minStartSample;
+            for (const auto& note : clip->notes)
+            {
+                if (isNoteSelected(note.id))
+                {
+                    auto dup = note;
+                    dup.id = 0;
+                    dup.startSample = note.startSample + shift;
+                    newNotes.push_back(dup);
+                }
+            }
+            m_selectedNoteIds.clear();
+            for (const auto& nn : newNotes)
+            {
+                m_handler(project::AddMidiNote {clip->id, nn});
+            }
+        }
+        return true;
+    }
+
     if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey)
     {
         for (const auto id : m_selectedNoteIds)
@@ -1191,6 +1272,18 @@ bool PianoRollView::keyPressed(const juce::KeyPress& key)
         return true;
     }
     return false;
+}
+
+bool PianoRollView::keyStateChanged(const bool isKeyDown)
+{
+    if (! isKeyDown && m_auditioningPitch.has_value())
+    {
+        if (m_auditionCallback)
+            m_auditionCallback(*m_auditioningPitch, 0, false);
+        m_auditioningPitch.reset();
+        return true;
+    }
+    return Component::keyStateChanged(isKeyDown);
 }
 
 } // namespace dawg::ui
