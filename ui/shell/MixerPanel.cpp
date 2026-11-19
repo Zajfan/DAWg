@@ -1,5 +1,6 @@
 #include "MixerPanel.h"
 #include "DspEditorDialog.h"
+#include "VirusTiPolarEditorView.h"
 
 #include <algorithm>
 #include <cmath>
@@ -59,6 +60,7 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
         menu.addItem(7, "Studio Reverb");
         menu.addItem(8, "Stereo Delay");
         menu.addItem(9, "Preamp: SSL 4k Line");
+        menu.addItem(11, "Access Virus TI Polar Synth");
         menu.addSeparator();
         menu.addItem(10, "Sidechain Listen", true, m_sidechainListen);
 
@@ -111,6 +113,11 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
             }
             else if (result == 10) {
                 m_sidechainListen = ! m_sidechainListen;
+            }
+            else if (result == 11) {
+                m_slotNames[0] = "VIRUS";
+                m_slotButtons[0].setButtonText("VIRUS");
+                VirusTiPolarWindow::open();
             }
             repaint();
         });
@@ -199,6 +206,7 @@ void ChannelStripComponent::openInsertEditor(std::size_t slotIdx)
     else if (name == "259") DspEditorWindow::open(DspEditorKind::buchlaComplexSynth, trkName);
     else if (name == "REV") DspEditorWindow::open(DspEditorKind::reverb, trkName);
     else if (name == "DLY") DspEditorWindow::open(DspEditorKind::delay, trkName);
+    else if (name == "VIRUS") VirusTiPolarWindow::open();
     else DspEditorWindow::open(DspEditorKind::parametricEq, trkName);
 }
 

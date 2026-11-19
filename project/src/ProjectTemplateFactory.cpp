@@ -167,6 +167,76 @@ ProjectSnapshot ProjectTemplateFactory::createModernTrapTemplate()
     };
 
     s.tracks = {trk808, trkKick, trkSnare, trkHats, trkMelody};
+
+    // 4 bars at 140 BPM: 1 beat = 20571 samples, 1 bar = 82286 samples, 4 bars = 329143 samples
+    const std::uint64_t barLen = 82286;
+    const std::uint64_t stepLen = barLen / 16;
+
+    // 1. 808 Sub Bass MIDI Sequence with Pitch Slides
+    MidiClip clip808;
+    clip808.id = 1;
+    clip808.trackId = trk808.id;
+    clip808.startSample = 0;
+    clip808.lengthSamples = barLen * 4;
+
+    const std::uint8_t bassPitches[4] = {36, 36, 41, 39};
+    NoteId nId = 1;
+    for (std::size_t bar = 0; bar < 4; ++bar)
+    {
+        const std::uint8_t p = bassPitches[bar];
+        // Downbeat hit
+        clip808.notes.push_back(MidiNote {
+            .id = nId++, .pitch = p, .velocity = 115,
+            .startSample = bar * barLen, .lengthSamples = stepLen * 5,
+            .vibratoDepth = 0.0f, .vibratoRateHz = 5.0f, .vibratoDelayMs = 0.0f,
+            .slideSemitones = (bar == 1 || bar == 3) ? 12.0f : 0.0f
+        });
+        // Syncopated hit
+        clip808.notes.push_back(MidiNote {
+            .id = nId++, .pitch = p, .velocity = 105,
+            .startSample = bar * barLen + stepLen * 6, .lengthSamples = stepLen * 4,
+            .vibratoDepth = 0.0f, .vibratoRateHz = 5.0f, .vibratoDelayMs = 0.0f,
+            .slideSemitones = 0.0f
+        });
+        // Pickup hit
+        clip808.notes.push_back(MidiNote {
+            .id = nId++, .pitch = static_cast<std::uint8_t>(p + 2), .velocity = 95,
+            .startSample = bar * barLen + stepLen * 11, .lengthSamples = stepLen * 3,
+            .vibratoDepth = 0.0f, .vibratoRateHz = 5.0f, .vibratoDelayMs = 0.0f,
+            .slideSemitones = 0.0f
+        });
+    }
+
+    // 2. Dark Trap Melody Pluck Sequence
+    MidiClip clipMelody;
+    clipMelody.id = 2;
+    clipMelody.trackId = trkMelody.id;
+    clipMelody.startSample = 0;
+    clipMelody.lengthSamples = barLen * 4;
+
+    const std::uint8_t melodyPattern[16] = {
+        72, 75, 74, 72, 79, 75, 74, 72, 71, 74, 72, 71, 75, 74, 72, 67
+    };
+    NoteId melId = 1;
+    for (std::size_t bar = 0; bar < 4; ++bar)
+    {
+        for (std::size_t step = 0; step < 16; ++step)
+        {
+            clipMelody.notes.push_back(MidiNote {
+                .id = melId++,
+                .pitch = melodyPattern[step],
+                .velocity = static_cast<std::uint8_t>(85 + (step % 4 == 0 ? 20 : 0)),
+                .startSample = bar * barLen + step * stepLen,
+                .lengthSamples = static_cast<std::uint64_t>(static_cast<double>(stepLen) * 0.85),
+                .vibratoDepth = (step == 4 || step == 12) ? 0.4f : 0.0f,
+                .vibratoRateHz = 6.0f,
+                .vibratoDelayMs = 80.0f,
+                .slideSemitones = 0.0f
+            });
+        }
+    }
+
+    s.midiClips = {std::move(clip808), std::move(clipMelody)};
     return s;
 }
 
@@ -176,7 +246,7 @@ ProjectSnapshot ProjectTemplateFactory::createSynthwaveCyberpunkTemplate()
     s.formatVersion = 3;
     s.name = "Cyberpunk Synthwave";
     s.tempo = TempoSetting {.bpm = 110.0, .timeSigNumerator = 4, .timeSigDenominator = 4, .metronomeEnabled = false};
-    s.loop = LoopSetting {.enabled = true, .startSample = 0, .endSample = 48000 * 8};
+    s.loop = LoopSetting {.enabled = true, .startSample = 0, .endSample = 837816}; // 8 bars at 110 bpm
     s.punch = PunchSetting {.enabled = false, .punchInSample = 0, .punchOutSample = 48000 * 16, .prerollBars = 1, .countInBars = 1};
 
     // 1. Retro Saw Bass
@@ -235,7 +305,7 @@ ProjectSnapshot ProjectTemplateFactory::createSynthwaveCyberpunkTemplate()
         .frozenInserts = {}
     };
 
-    // 3. Arpeggiator Synth
+    // 3. Arpeggiator Synth (Access Virus TI Polar)
     Track trkArp {
         .id = 3,
         .name = "Neon Arpeggio",
@@ -247,7 +317,7 @@ ProjectSnapshot ProjectTemplateFactory::createSynthwaveCyberpunkTemplate()
         .recordArmed = false,
         .kind = TrackKind::instrument,
         .inserts = {
-            DspNodeDescriptor {.slotIndex = 0, .type = DspNodeType::tnhcSynth, .bypassed = false, .name = "Pluck Synth", .pluginId = "", .parameters = {}, .stateData = ""},
+            DspNodeDescriptor {.slotIndex = 0, .type = DspNodeType::virusTiPolarSynth, .bypassed = false, .name = "Virus TI Polar (Arp)", .pluginId = "", .parameters = {}, .stateData = ""},
             DspNodeDescriptor {.slotIndex = 1, .type = DspNodeType::tnhcDelay, .bypassed = false, .name = "Stereo Dotted 8th", .pluginId = "", .parameters = {0.35f, 0.5f}, .stateData = ""}
         },
         .sends = {},
@@ -263,7 +333,7 @@ ProjectSnapshot ProjectTemplateFactory::createSynthwaveCyberpunkTemplate()
         .frozenInserts = {}
     };
 
-    // 4. Synthwave Lead
+    // 4. Synthwave Lead (Access Virus TI Polar Hypersaw)
     Track trkLead {
         .id = 4,
         .name = "Outrun Lead",
@@ -275,7 +345,7 @@ ProjectSnapshot ProjectTemplateFactory::createSynthwaveCyberpunkTemplate()
         .recordArmed = true,
         .kind = TrackKind::instrument,
         .inserts = {
-            DspNodeDescriptor {.slotIndex = 0, .type = DspNodeType::tnhcSynth, .bypassed = false, .name = "Detuned Lead", .pluginId = "", .parameters = {}, .stateData = ""},
+            DspNodeDescriptor {.slotIndex = 0, .type = DspNodeType::virusTiPolarSynth, .bypassed = false, .name = "Virus TI Polar (Hypersaw Lead)", .pluginId = "", .parameters = {}, .stateData = ""},
             DspNodeDescriptor {.slotIndex = 1, .type = DspNodeType::tnhcReverb, .bypassed = false, .name = "Lush Plate", .pluginId = "", .parameters = {0.4f, 0.6f}, .stateData = ""}
         },
         .sends = {},
@@ -292,6 +362,113 @@ ProjectSnapshot ProjectTemplateFactory::createSynthwaveCyberpunkTemplate()
     };
 
     s.tracks = {trkBass, trkSnare, trkArp, trkLead};
+
+    // 8 bars at 110 BPM: 1 beat = 26182 samples, 1 bar = 104727 samples, 8 bars = 837816 samples
+    const std::uint64_t barLen = 104727;
+    const std::uint64_t step16 = barLen / 16; // 6545 samples
+
+    // 1. Rolling 16th-Note Analog Bassline (Track 1)
+    MidiClip clipBass;
+    clipBass.id = 10;
+    clipBass.trackId = trkBass.id;
+    clipBass.startSample = 0;
+    clipBass.lengthSamples = barLen * 8;
+
+    const std::uint8_t bassProg[8] = {38, 38, 34, 34, 41, 41, 36, 38}; // D1, D1, Bb0, Bb0, F1, F1, C1, D1
+    NoteId bId = 1;
+    for (std::size_t bar = 0; bar < 8; ++bar)
+    {
+        const std::uint8_t root = bassProg[bar];
+        for (std::size_t step = 0; step < 16; ++step)
+        {
+            // Alternate root and octave on 16th notes for authentic synthwave drive
+            const std::uint8_t p = (step % 2 == 1) ? static_cast<std::uint8_t>(root + 12) : root;
+            const std::uint8_t vel = (step % 4 == 0) ? 110 : ((step % 2 == 0) ? 95 : 85);
+            clipBass.notes.push_back(MidiNote {
+                .id = bId++,
+                .pitch = p,
+                .velocity = vel,
+                .startSample = bar * barLen + step * step16,
+                .lengthSamples = static_cast<std::uint64_t>(static_cast<double>(step16) * 0.80),
+                .vibratoDepth = 0.0f,
+                .vibratoRateHz = 5.0f,
+                .vibratoDelayMs = 0.0f,
+                .slideSemitones = 0.0f
+            });
+        }
+    }
+
+    // 2. Rapid 16th-Note Arpeggiator on Virus TI Polar (Track 3)
+    MidiClip clipArp;
+    clipArp.id = 11;
+    clipArp.trackId = trkArp.id;
+    clipArp.startSample = 0;
+    clipArp.lengthSamples = barLen * 8;
+
+    const std::uint8_t arpChords[4][4] = {
+        {50, 57, 62, 65}, // Dm:  D3, A3, D4, F4
+        {46, 53, 58, 62}, // Bb:  Bb2, F3, Bb3, D4
+        {41, 48, 53, 57}, // F:   F2, C3, F3, A3
+        {48, 55, 60, 64}  // C:   C3, G3, C4, E4
+    };
+    NoteId aId = 1;
+    for (std::size_t bar = 0; bar < 8; ++bar)
+    {
+        const auto& chord = arpChords[(bar / 2) % 4];
+        for (std::size_t step = 0; step < 16; ++step)
+        {
+            const std::uint8_t p = chord[step % 4];
+            clipArp.notes.push_back(MidiNote {
+                .id = aId++,
+                .pitch = p,
+                .velocity = static_cast<std::uint8_t>(80 + (step % 4 == 0 ? 25 : 0)),
+                .startSample = bar * barLen + step * step16,
+                .lengthSamples = static_cast<std::uint64_t>(static_cast<double>(step16) * 0.75),
+                .vibratoDepth = 0.0f,
+                .vibratoRateHz = 6.0f,
+                .vibratoDelayMs = 0.0f,
+                .slideSemitones = 0.0f
+            });
+        }
+    }
+
+    // 3. Cyberpunk Hypersaw Lead Solo on Virus TI Polar (Track 4)
+    MidiClip clipLead;
+    clipLead.id = 12;
+    clipLead.trackId = trkLead.id;
+    clipLead.startSample = 0;
+    clipLead.lengthSamples = barLen * 8;
+
+    NoteId lId = 1;
+    // Bar 1: Soaring D4 sustain
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 62, .velocity = 115, .startSample = 0 * barLen, .lengthSamples = step16 * 14, .vibratoDepth = 0.6f, .vibratoRateHz = 5.5f, .vibratoDelayMs = 180.0f, .slideSemitones = 0.0f});
+    // Bar 2: F4 -> E4 -> D4
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 65, .velocity = 110, .startSample = 1 * barLen, .lengthSamples = step16 * 6, .vibratoDepth = 0.4f, .vibratoRateHz = 5.5f, .vibratoDelayMs = 100.0f, .slideSemitones = 0.0f});
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 64, .velocity = 105, .startSample = 1 * barLen + step16 * 6, .lengthSamples = step16 * 4, .vibratoDepth = 0.0f, .vibratoRateHz = 5.5f, .vibratoDelayMs = 0.0f, .slideSemitones = 0.0f});
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 62, .velocity = 112, .startSample = 1 * barLen + step16 * 10, .lengthSamples = step16 * 6, .vibratoDepth = 0.5f, .vibratoRateHz = 5.5f, .vibratoDelayMs = 150.0f, .slideSemitones = 0.0f});
+    // Bar 3: Bb4 climax with slide
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 70, .velocity = 120, .startSample = 2 * barLen, .lengthSamples = step16 * 12, .vibratoDepth = 0.7f, .vibratoRateHz = 6.0f, .vibratoDelayMs = 200.0f, .slideSemitones = 2.0f});
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 69, .velocity = 100, .startSample = 2 * barLen + step16 * 12, .lengthSamples = step16 * 4, .vibratoDepth = 0.0f, .vibratoRateHz = 5.5f, .vibratoDelayMs = 0.0f, .slideSemitones = 0.0f});
+    // Bar 4: A4 -> G4 -> F4 -> E4
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 69, .velocity = 108, .startSample = 3 * barLen, .lengthSamples = step16 * 4, .vibratoDepth = 0.3f, .vibratoRateHz = 5.5f, .vibratoDelayMs = 100.0f, .slideSemitones = 0.0f});
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 67, .velocity = 105, .startSample = 3 * barLen + step16 * 4, .lengthSamples = step16 * 4, .vibratoDepth = 0.3f, .vibratoRateHz = 5.5f, .vibratoDelayMs = 100.0f, .slideSemitones = 0.0f});
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 65, .velocity = 110, .startSample = 3 * barLen + step16 * 8, .lengthSamples = step16 * 4, .vibratoDepth = 0.3f, .vibratoRateHz = 5.5f, .vibratoDelayMs = 100.0f, .slideSemitones = 0.0f});
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 64, .velocity = 100, .startSample = 3 * barLen + step16 * 12, .lengthSamples = step16 * 4, .vibratoDepth = 0.4f, .vibratoRateHz = 5.5f, .vibratoDelayMs = 100.0f, .slideSemitones = 0.0f});
+    // Bar 5: High C5 peak
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 72, .velocity = 125, .startSample = 4 * barLen, .lengthSamples = step16 * 12, .vibratoDepth = 0.8f, .vibratoRateHz = 6.0f, .vibratoDelayMs = 150.0f, .slideSemitones = 0.0f});
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 69, .velocity = 102, .startSample = 4 * barLen + step16 * 12, .lengthSamples = step16 * 4, .vibratoDepth = 0.0f, .vibratoRateHz = 5.5f, .vibratoDelayMs = 0.0f, .slideSemitones = 0.0f});
+    // Bar 6: A4 -> G4 -> E4
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 69, .velocity = 108, .startSample = 5 * barLen, .lengthSamples = step16 * 6, .vibratoDepth = 0.3f, .vibratoRateHz = 5.5f, .vibratoDelayMs = 100.0f, .slideSemitones = 0.0f});
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 67, .velocity = 105, .startSample = 5 * barLen + step16 * 6, .lengthSamples = step16 * 4, .vibratoDepth = 0.0f, .vibratoRateHz = 5.5f, .vibratoDelayMs = 0.0f, .slideSemitones = 0.0f});
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 64, .velocity = 112, .startSample = 5 * barLen + step16 * 10, .lengthSamples = step16 * 6, .vibratoDepth = 0.5f, .vibratoRateHz = 5.5f, .vibratoDelayMs = 120.0f, .slideSemitones = 0.0f});
+    // Bar 7: F4 -> E4 -> C#4 leading tone
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 65, .velocity = 108, .startSample = 6 * barLen, .lengthSamples = step16 * 6, .vibratoDepth = 0.3f, .vibratoRateHz = 5.5f, .vibratoDelayMs = 100.0f, .slideSemitones = 0.0f});
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 64, .velocity = 105, .startSample = 6 * barLen + step16 * 6, .lengthSamples = step16 * 4, .vibratoDepth = 0.0f, .vibratoRateHz = 5.5f, .vibratoDelayMs = 0.0f, .slideSemitones = 0.0f});
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 61, .velocity = 110, .startSample = 6 * barLen + step16 * 10, .lengthSamples = step16 * 6, .vibratoDepth = 0.4f, .vibratoRateHz = 5.5f, .vibratoDelayMs = 100.0f, .slideSemitones = 0.0f});
+    // Bar 8: Final D4 home resolution
+    clipLead.notes.push_back(MidiNote {.id = lId++, .pitch = 62, .velocity = 120, .startSample = 7 * barLen, .lengthSamples = step16 * 16, .vibratoDepth = 0.7f, .vibratoRateHz = 5.5f, .vibratoDelayMs = 250.0f, .slideSemitones = 0.0f});
+
+    s.midiClips = {std::move(clipBass), std::move(clipArp), std::move(clipLead)};
     return s;
 }
 

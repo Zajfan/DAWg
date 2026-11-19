@@ -125,6 +125,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/TransientSplitGranularResynthesizerNode.cpp
     src/dsp/VectorWaveSequencerNode.cpp
     src/dsp/VintageTapeMachineNode.cpp
+    src/dsp/VirusTiPolarSynthNode.cpp
     src/dsp/VocalHarmonyEngine.cpp
     src/dsp/VocalPitchCorrectorNode.cpp
     src/dsp/VocalNoteBlobEditorEngine.cpp

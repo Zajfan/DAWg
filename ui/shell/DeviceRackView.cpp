@@ -1,5 +1,6 @@
 #include "DeviceRackView.h"
 #include "DspEditorDialog.h"
+#include "VirusTiPolarEditorView.h"
 
 #include <algorithm>
 
@@ -85,6 +86,7 @@ DeviceCardComponent::DeviceCardComponent(
     case project::DspNodeType::vectorSequencer:
     case project::DspNodeType::physicalModelSynth:
     case project::DspNodeType::granularCloud:
+    case project::DspNodeType::virusTiPolarSynth:
         paramDefs = { {"Cutoff", 20.0, 20000.0, 2500.0}, {"Reso", 0.0, 100.0, 30.0}, {"Attack", 1.0, 1000.0, 15.0}, {"Release", 10.0, 3000.0, 400.0} };
         break;
     case project::DspNodeType::resonanceSuppressor:
@@ -287,6 +289,9 @@ void DeviceRackView::rebuildRack()
             case project::DspNodeType::analogDegrader: kind = DspEditorKind::compressor; break;
             case project::DspNodeType::drumPadSampler:
             case project::DspNodeType::clapPlugin: kind = DspEditorKind::synth; break;
+            case project::DspNodeType::virusTiPolarSynth:
+                VirusTiPolarWindow::open();
+                return;
             }
             DspEditorWindow::open(kind, name);
         };

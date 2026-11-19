@@ -246,6 +246,7 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
                 else if (typeStr == "tubeTransformer") desc.type = project::DspNodeType::tubeTransformer;
                 else if (typeStr == "analogDegrader") desc.type = project::DspNodeType::analogDegrader;
                 else if (typeStr == "rayTracingReverb") desc.type = project::DspNodeType::rayTracingReverb;
+                else if (typeStr == "virusTiPolarSynth") desc.type = project::DspNodeType::virusTiPolarSynth;
                 desc.bypassed = ins.at("bypassed").get<bool>();
                 desc.name = ins.at("name").get<std::string>();
                 if (ins.contains("pluginId")) desc.pluginId = ins.at("pluginId").get<std::string>();
@@ -597,6 +598,7 @@ std::expected<void, ProjectFileError> saveProject(
                         case project::DspNodeType::tubeTransformer: typeStr = "tubeTransformer"; break;
                         case project::DspNodeType::analogDegrader: typeStr = "analogDegrader"; break;
                         case project::DspNodeType::rayTracingReverb: typeStr = "rayTracingReverb"; break;
+                        case project::DspNodeType::virusTiPolarSynth: typeStr = "virusTiPolarSynth"; break;
                         }
                         Json insJson = {
                             {"slotIndex", ins.slotIndex},

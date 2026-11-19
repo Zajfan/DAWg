@@ -64,6 +64,8 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/VideoPlaybackWindow.h
     ../../ui/shell/SpectralRepairDialog.cpp
     ../../ui/shell/SpectralRepairDialog.h
+    ../../ui/shell/VirusTiPolarEditorView.cpp
+    ../../ui/shell/VirusTiPolarEditorView.h
     ../../ui/shell/CommandPaletteOverlay.cpp
     ../../ui/shell/CommandPaletteOverlay.h
     ../../ui/shell/DragSplitterBar.h

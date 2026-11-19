@@ -295,6 +295,13 @@ juce::Rectangle<int> TimelineView::getClipBounds(const project::AudioClip& clip,
     return juce::Rectangle<int> {clipX, laneY + 3, clipW, m_trackLaneHeight - 6};
 }
 
+juce::Rectangle<int> TimelineView::getMidiClipBounds(const project::MidiClip& clip, const int laneY) const noexcept
+{
+    const int clipX = m_headerWidth + sampleToPixel(static_cast<std::int64_t>(clip.startSample));
+    const int clipW = std::max(8, sampleToPixel(static_cast<std::int64_t>(clip.lengthSamples)));
+    return juce::Rectangle<int> {clipX, laneY + 3, clipW, m_trackLaneHeight - 6};
+}
+
 const project::AudioClip* TimelineView::findClipAt(juce::Point<int> pos, int& outLaneY) const noexcept
 {
     if (pos.x < m_headerWidth || pos.y < tracksTopY())
@@ -815,6 +822,63 @@ void TimelineView::drawTracksAndClips(juce::Graphics& g, juce::Rectangle<int> bo
                         flag.lineTo(static_cast<float>(wmPx), static_cast<float>(clipBounds.getY() + 12));
                         flag.closeSubPath();
                         g.fillPath(flag);
+                    }
+                }
+            }
+        }
+
+        // Draw MIDI Clips for this track
+        for (const auto& mClip : m_model.project.midiClips)
+        {
+            if (mClip.trackId != track.id)
+                continue;
+
+            auto clipBounds = getMidiClipBounds(mClip, currentY);
+            const bool isSelected = (m_selectedClipId.has_value() && *m_selectedClipId == mClip.id);
+
+            // Clip background: subtle cyberpunk violet / indigo slate
+            g.setColour(isSelected ? juce::Colour::fromRGB(75, 45, 110) : juce::Colour::fromRGB(45, 32, 70));
+            g.fillRoundedRectangle(clipBounds.toFloat(), 4.0f);
+
+            // Clip border
+            g.setColour(isSelected ? juce::Colour::fromRGB(255, 215, 60) : juce::Colour::fromRGB(140, 95, 210));
+            g.drawRoundedRectangle(clipBounds.toFloat(), 4.0f, isSelected ? 2.0f : 1.0f);
+
+            // Clip label
+            g.setColour(juce::Colour::fromRGB(240, 235, 255));
+            g.setFont(juce::FontOptions(11.0f));
+            g.drawText("[MIDI] Pattern " + juce::String(mClip.id),
+                       clipBounds.getX() + 6, clipBounds.getY() + 3, clipBounds.getWidth() - 12, 14,
+                       juce::Justification::topLeft);
+
+            // Draw mini-piano-roll note bars
+            if (! mClip.notes.empty() && clipBounds.getWidth() > 10)
+            {
+                std::uint8_t minP = 127;
+                std::uint8_t maxP = 0;
+                for (const auto& n : mClip.notes)
+                {
+                    minP = std::min(minP, n.pitch);
+                    maxP = std::max(maxP, n.pitch);
+                }
+                const int pRange = std::max(1, static_cast<int>(maxP - minP));
+                const int noteAreaTop = clipBounds.getY() + 18;
+                const int noteAreaHeight = std::max(8, clipBounds.getHeight() - 22);
+
+                g.setColour(isSelected ? juce::Colour::fromRGB(130, 255, 210) : juce::Colour::fromRGB(95, 215, 180));
+                for (const auto& n : mClip.notes)
+                {
+                    const int nx = clipBounds.getX() + sampleToPixel(static_cast<std::int64_t>(n.startSample));
+                    const int nw = std::max(3, sampleToPixel(static_cast<std::int64_t>(n.lengthSamples)));
+                    const float normP = static_cast<float>(n.pitch - minP) / static_cast<float>(pRange);
+                    const int ny = noteAreaTop + static_cast<int>((1.0f - normP) * static_cast<float>(noteAreaHeight - 4));
+                    if (nx + nw >= clipBounds.getX() && nx <= clipBounds.getRight())
+                    {
+                        const int clampedX = std::max(clipBounds.getX() + 1, nx);
+                        const int clampedW = std::min(clipBounds.getRight() - 1 - clampedX, nw);
+                        if (clampedW > 0)
+                            g.fillRoundedRectangle(static_cast<float>(clampedX), static_cast<float>(ny),
+                                                   static_cast<float>(clampedW), 3.0f, 1.5f);
                     }
                 }
             }
@@ -2001,6 +2065,39 @@ void TimelineView::mouseDown(const juce::MouseEvent& e)
         }
         repaint();
         return;
+    }
+
+    // Check if clicked inside a MIDI clip
+    int midiLaneY = tracksTopY();
+    for (const auto& track : m_model.project.tracks)
+    {
+        if (track.parentFolderId != 0)
+        {
+            const auto parentIt = std::find_if(m_model.project.tracks.begin(), m_model.project.tracks.end(),
+                [&](const auto& t) { return t.id == track.parentFolderId; });
+            if (parentIt != m_model.project.tracks.end() && parentIt->folderCollapsed)
+                continue;
+        }
+
+        if (e.y >= midiLaneY && e.y < midiLaneY + m_trackLaneHeight)
+        {
+            for (const auto& mClip : m_model.project.midiClips)
+            {
+                if (mClip.trackId != track.id)
+                    continue;
+
+                const auto bounds = getMidiClipBounds(mClip, midiLaneY);
+                if (bounds.contains(e.getPosition()))
+                {
+                    m_selectedClipId = mClip.id;
+                    if (m_callbacks.trackSelected)
+                        m_callbacks.trackSelected(track.id);
+                    repaint();
+                    return;
+                }
+            }
+        }
+        midiLaneY += m_trackLaneHeight + (track.takeLanesExpanded ? static_cast<int>(track.takes.size()) * 32 : 0);
     }
 
     // Empty space click

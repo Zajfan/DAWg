@@ -17,6 +17,7 @@
 #include <dawg/engine/dsp/TnhcSynthNode.h>
 #include <dawg/engine/dsp/TubeTransformerSaturationNode.h>
 #include <dawg/engine/dsp/VectorWaveSequencerNode.h>
+#include <dawg/engine/dsp/VirusTiPolarSynthNode.h>
 
 #include <algorithm>
 
@@ -28,6 +29,34 @@ const std::vector<NativePluginDef>& NativePluginCatalog::allPlugins()
         // =====================================================================
         // Native Instruments (VSTi)
         // =====================================================================
+        {
+            .descriptor = {
+                .id = "dawg.synth.virus_ti_polar",
+                .name = "Access Virus TI Polar Native Synth",
+                .vendor = "The No-hands Company",
+                .version = "1.0.0",
+                .path = "",
+                .format = PluginFormat::native,
+                .category = PluginCategory::instrument,
+                .isInstrument = true,
+                .isSandboxed = false
+            },
+            .parameters = {
+                {0, "Hypersaw Density", 1.0f, 9.0f, 9.0f, "saws"},
+                {1, "Hypersaw Detune", 0.0f, 1.0f, 0.42f, "%"},
+                {2, "Stereo Spread", 0.0f, 1.0f, 0.90f, "%"},
+                {3, "Filter 1 Cutoff", 20.0f, 20000.0f, 4800.0f, "Hz"},
+                {4, "Filter 1 Reso", 0.5f, 15.0f, 2.4f, "Q"},
+                {5, "Filter 2 Cutoff", 20.0f, 20000.0f, 2200.0f, "Hz"},
+                {6, "Drive", 0.0f, 1.0f, 0.35f, "%"},
+                {7, "Delay Mix", 0.0f, 1.0f, 0.35f, "%"},
+                {8, "Reverb Mix", 0.0f, 1.0f, 0.28f, "%"}
+            },
+            .presets = {
+                {"Polar Hypersaw Lead", {9.0f, 0.42f, 0.90f, 4800.0f, 2.4f, 2200.0f, 0.35f, 0.35f, 0.28f}},
+                {"Cyberpunk Reese Bass", {7.0f, 0.55f, 0.60f, 850.0f, 1.8f, 450.0f, 0.65f, 0.15f, 0.10f}}
+            }
+        },
         {
             .descriptor = {
                 .id = "dawg.synth.buchla_complex",
@@ -472,6 +501,8 @@ std::vector<PluginDescriptor> NativePluginCatalog::getDescriptors()
 std::unique_ptr<engine::ProcessorNode> NativePluginCatalog::createNode(std::string_view id)
 {
     // Synths
+    if (id == "dawg.synth.virus_ti_polar")
+        return std::make_unique<engine::VirusTiPolarSynthNode>();
     if (id == "dawg.synth.buchla_complex")
         return std::make_unique<engine::dsp::ComplexOscillatorWavefolderNode>();
     if (id == "dawg.synth.vector_sequencer")

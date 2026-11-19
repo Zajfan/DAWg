@@ -3,6 +3,7 @@
 #include "PluginWindow.h"
 #include "SpectralRepairDialog.h"
 #include "VideoPlaybackWindow.h"
+#include "VirusTiPolarEditorView.h"
 #include "WorkspaceLayoutManager.h"
 #include <dawg/engine/SmpteTimecode.h>
 #include <dawg/plugins/NativePluginCatalog.h>
@@ -160,6 +161,9 @@ MainEditorView::MainEditorView(EditorViewModel model,
             case project::DspNodeType::multibandStereoImager: kind = DspEditorKind::multibandImager; break;
             case project::DspNodeType::linearPhaseMasteringEq: kind = DspEditorKind::linearPhaseEq; break;
             case project::DspNodeType::buchlaComplexSynth: kind = DspEditorKind::buchlaComplexSynth; break;
+            case project::DspNodeType::virusTiPolarSynth:
+                VirusTiPolarWindow::open();
+                return;
             case project::DspNodeType::brickwallLimiter:
             case project::DspNodeType::clapPlugin:
             case project::DspNodeType::drumPadSampler:
@@ -516,6 +520,8 @@ MainEditorView::MainEditorView(EditorViewModel model,
                 nodeType = project::DspNodeType::analogDegrader;
             else if (plugin.id == "dawg.effect.ray_tracing_reverb")
                 nodeType = project::DspNodeType::rayTracingReverb;
+            else if (plugin.id == "dawg.synth.virus_ti_polar")
+                nodeType = project::DspNodeType::virusTiPolarSynth;
 
             m_commandHandler(project::AddTrackInsert {
                 targetTrack.id,

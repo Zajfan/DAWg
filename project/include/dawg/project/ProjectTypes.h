@@ -224,7 +224,8 @@ enum class DspNodeType : std::uint8_t
     analogLadderSynth,
     tubeTransformer,
     analogDegrader,
-    rayTracingReverb
+    rayTracingReverb,
+    virusTiPolarSynth
 };
 
 struct DspNodeDescriptor

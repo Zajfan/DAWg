@@ -106,6 +106,7 @@ private:
     [[nodiscard]] std::int64_t pixelToSample(int x) const noexcept;
     [[nodiscard]] std::int64_t snapSample(std::int64_t sample) const noexcept;
     [[nodiscard]] juce::Rectangle<int> getClipBounds(const project::AudioClip& clip, int laneY) const noexcept;
+    [[nodiscard]] juce::Rectangle<int> getMidiClipBounds(const project::MidiClip& clip, int laneY) const noexcept;
     [[nodiscard]] const project::AudioClip* findClipAt(juce::Point<int> pos, int& outLaneY) const noexcept;
 
     void seekToX(int x);
