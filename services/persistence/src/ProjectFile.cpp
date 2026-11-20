@@ -250,6 +250,7 @@ std::expected<project::ProjectSnapshot, ProjectFileError> decode(const Json& doc
                 else if (typeStr == "juno106Synth") desc.type = project::DspNodeType::juno106Synth;
                 else if (typeStr == "omniFmSynth") desc.type = project::DspNodeType::omniFmSynth;
                 else if (typeStr == "soundFontPlayer") desc.type = project::DspNodeType::soundFontPlayer;
+                else if (typeStr == "tripleOscillatorSynth") desc.type = project::DspNodeType::tripleOscillatorSynth;
                 desc.bypassed = ins.at("bypassed").get<bool>();
                 desc.name = ins.at("name").get<std::string>();
                 if (ins.contains("pluginId")) desc.pluginId = ins.at("pluginId").get<std::string>();
@@ -605,6 +606,7 @@ std::expected<void, ProjectFileError> saveProject(
                         case project::DspNodeType::juno106Synth: typeStr = "juno106Synth"; break;
                         case project::DspNodeType::omniFmSynth: typeStr = "omniFmSynth"; break;
                         case project::DspNodeType::soundFontPlayer: typeStr = "soundFontPlayer"; break;
+                        case project::DspNodeType::tripleOscillatorSynth: typeStr = "tripleOscillatorSynth"; break;
                         }
                         Json insJson = {
                             {"slotIndex", ins.slotIndex},

@@ -3,6 +3,8 @@
 #include "VirusTiPolarEditorView.h"
 #include "Juno106EditorView.h"
 #include "OmniFmEditorView.h"
+#include "ModelDEditorView.h"
+#include "TripleOscillatorEditorView.h"
 
 #include <algorithm>
 
@@ -92,6 +94,7 @@ DeviceCardComponent::DeviceCardComponent(
     case project::DspNodeType::juno106Synth:
     case project::DspNodeType::omniFmSynth:
     case project::DspNodeType::soundFontPlayer:
+    case project::DspNodeType::tripleOscillatorSynth:
         paramDefs = { {"Cutoff", 20.0, 20000.0, 2500.0}, {"Reso", 0.0, 100.0, 30.0}, {"Attack", 1.0, 1000.0, 15.0}, {"Release", 10.0, 3000.0, 400.0} };
         break;
     case project::DspNodeType::resonanceSuppressor:
@@ -300,7 +303,6 @@ void DeviceRackView::rebuildRack()
             case project::DspNodeType::dynamicsCompressor:
             case project::DspNodeType::brickwallLimiter: kind = DspEditorKind::compressor; break;
             case project::DspNodeType::tnhcSynth:
-            case project::DspNodeType::analogLadderSynth:
             case project::DspNodeType::vectorSequencer:
             case project::DspNodeType::physicalModelSynth:
             case project::DspNodeType::granularCloud: kind = DspEditorKind::synth; break;
@@ -323,6 +325,12 @@ void DeviceRackView::rebuildRack()
                 return;
             case project::DspNodeType::omniFmSynth:
                 OmniFmWindow::open();
+                return;
+            case project::DspNodeType::analogLadderSynth:
+                ModelDWindow::open();
+                return;
+            case project::DspNodeType::tripleOscillatorSynth:
+                TripleOscillatorWindow::open();
                 return;
             case project::DspNodeType::soundFontPlayer:
                 kind = DspEditorKind::synth;

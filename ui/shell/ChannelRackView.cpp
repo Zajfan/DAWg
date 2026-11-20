@@ -47,6 +47,58 @@ ChannelRackView::ChannelRackView(CommandHandler handler, AuditionCallback auditi
     // Splash on 0
     m_channels[6].steps[0] = true;
 
+    // Multi-Pattern initialization: Pattern 1, Pattern 2, Pattern 3
+    for (int p = 1; p <= 3; ++p)
+    {
+        ChannelRackPattern pat;
+        pat.name = "Pattern " + std::to_string(p);
+        pat.channelData.resize(m_channels.size());
+        m_patterns.push_back(std::move(pat));
+    }
+    syncCurrentPatternToBank();
+
+    // Pattern Selector
+    for (std::size_t i = 0; i < m_patterns.size(); ++i)
+    {
+        m_patternCombo.addItem(m_patterns[i].name, static_cast<int>(i + 1));
+    }
+    m_patternCombo.setSelectedId(1, juce::dontSendNotification);
+    m_patternCombo.onChange = [this] {
+        const int id = m_patternCombo.getSelectedId();
+        if (id > 0) switchPattern(id - 1);
+    };
+    addAndMakeVisible(m_patternCombo);
+
+    m_addPatternButton.onClick = [this] { addNewPattern(); };
+    m_addPatternButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(40, 44, 52));
+    m_addPatternButton.setColour(juce::TextButton::textColourOffId, juce::Colour::fromRGB(220, 225, 235));
+    addAndMakeVisible(m_addPatternButton);
+
+    // Graph Editor toggle & mode
+    m_graphToggleBtn.setClickingTogglesState(true);
+    m_graphToggleBtn.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(40, 44, 52));
+    m_graphToggleBtn.onClick = [this] {
+        m_graphEditorOpen = m_graphToggleBtn.getToggleState();
+        m_graphToggleBtn.setColour(juce::TextButton::buttonColourId,
+            m_graphEditorOpen ? juce::Colour::fromRGB(45, 140, 220) : juce::Colour::fromRGB(40, 44, 52));
+        resized();
+        repaint();
+    };
+    addAndMakeVisible(m_graphToggleBtn);
+
+    m_graphModeCombo.addItem("Velocity", 1);
+    m_graphModeCombo.addItem("Pitch", 2);
+    m_graphModeCombo.addItem("Pan", 3);
+    m_graphModeCombo.setSelectedId(1, juce::dontSendNotification);
+    m_graphModeCombo.onChange = [this] {
+        const int id = m_graphModeCombo.getSelectedId();
+        if (id == 1) m_graphMode = GraphMode::velocity;
+        else if (id == 2) m_graphMode = GraphMode::pitch;
+        else if (id == 3) m_graphMode = GraphMode::pan;
+        repaint();
+    };
+    addAndMakeVisible(m_graphModeCombo);
+
     // Header controls
     m_filterCombo.addItem("All", 1);
     m_filterCombo.addItem("Audio", 2);
@@ -89,6 +141,85 @@ ChannelRackView::ChannelRackView(CommandHandler handler, AuditionCallback auditi
 
     m_selectedChannel = 4; // Select Shaker 4 initially like in the screenshot
     startTimerHz(30);
+}
+
+const std::string& ChannelRackView::currentPatternName() const noexcept
+{
+    static const std::string fallback = "Pattern 1";
+    if (m_currentPatternIndex >= 0 && static_cast<std::size_t>(m_currentPatternIndex) < m_patterns.size())
+        return m_patterns[static_cast<std::size_t>(m_currentPatternIndex)].name;
+    return fallback;
+}
+
+void ChannelRackView::syncCurrentPatternToBank()
+{
+    if (m_currentPatternIndex < 0 || static_cast<std::size_t>(m_currentPatternIndex) >= m_patterns.size())
+        return;
+
+    auto& pat = m_patterns[static_cast<std::size_t>(m_currentPatternIndex)];
+    pat.channelData.resize(m_channels.size());
+    for (std::size_t c = 0; c < m_channels.size(); ++c)
+    {
+        pat.channelData[c].steps = m_channels[c].steps;
+        pat.channelData[c].velocities = m_channels[c].velocities;
+        pat.channelData[c].pitchOffsets = m_channels[c].pitchOffsets;
+        pat.channelData[c].panOffsets = m_channels[c].panOffsets;
+    }
+}
+
+void ChannelRackView::loadPatternFromBank(int patternIndex)
+{
+    if (patternIndex < 0 || static_cast<std::size_t>(patternIndex) >= m_patterns.size())
+        return;
+
+    m_currentPatternIndex = patternIndex;
+    const auto& pat = m_patterns[static_cast<std::size_t>(patternIndex)];
+    for (std::size_t c = 0; c < m_channels.size(); ++c)
+    {
+        if (c < pat.channelData.size())
+        {
+            m_channels[c].steps = pat.channelData[c].steps;
+            m_channels[c].velocities = pat.channelData[c].velocities;
+            m_channels[c].pitchOffsets = pat.channelData[c].pitchOffsets;
+            m_channels[c].panOffsets = pat.channelData[c].panOffsets;
+        }
+        else
+        {
+            m_channels[c].steps.fill(false);
+            m_channels[c].velocities.fill(100);
+            m_channels[c].pitchOffsets.fill(0);
+            m_channels[c].panOffsets.fill(0);
+        }
+    }
+    m_patternCombo.setSelectedId(patternIndex + 1, juce::dontSendNotification);
+    repaint();
+}
+
+void ChannelRackView::switchPattern(int patternIndex)
+{
+    if (patternIndex == m_currentPatternIndex)
+        return;
+
+    syncCurrentPatternToBank();
+    loadPatternFromBank(patternIndex);
+}
+
+void ChannelRackView::addNewPattern()
+{
+    syncCurrentPatternToBank();
+    ChannelRackPattern newPat;
+    newPat.name = "Pattern " + std::to_string(m_patterns.size() + 1);
+    newPat.channelData.resize(m_channels.size());
+    for (auto& cd : newPat.channelData)
+    {
+        cd.steps.fill(false);
+        cd.velocities.fill(100);
+        cd.pitchOffsets.fill(0);
+        cd.panOffsets.fill(0);
+    }
+    m_patterns.push_back(std::move(newPat));
+    m_patternCombo.addItem(m_patterns.back().name, static_cast<int>(m_patterns.size()));
+    switchPattern(static_cast<int>(m_patterns.size() - 1));
 }
 
 ChannelRackView::~ChannelRackView()
@@ -192,6 +323,7 @@ void ChannelRackView::commitPatternToTimeline()
     }
 
     std::vector<project::MidiNote> notes;
+    const float swingVal = static_cast<float>(m_swingSlider.getValue()) / 100.0f;
     for (const auto& ch : m_channels)
     {
         if (ch.muted)
@@ -201,11 +333,14 @@ void ChannelRackView::commitPatternToTimeline()
         {
             if (ch.steps[static_cast<std::size_t>(s)])
             {
+                const double swingOffset = (s % 2 == 1) ? (static_cast<double>(swingVal) * static_cast<double>(stepLength) * 0.35) : 0.0;
+                const auto noteStart = static_cast<std::uint64_t>(static_cast<double>(static_cast<std::uint64_t>(s) * stepLength) + swingOffset);
+                const int effectivePitch = std::clamp<int>(static_cast<int>(ch.rootPitch) + static_cast<int>(ch.pitchOffsets[static_cast<std::size_t>(s)]), 0, 127);
                 notes.push_back(project::MidiNote {
                     .id = 0,
-                    .pitch = ch.rootPitch,
+                    .pitch = static_cast<std::uint8_t>(effectivePitch),
                     .velocity = ch.velocities[static_cast<std::size_t>(s)],
-                    .startSample = static_cast<std::uint64_t>(s) * stepLength,
+                    .startSample = noteStart,
                     .lengthSamples = static_cast<std::uint64_t>(static_cast<double>(stepLength) * 0.85)
                 });
             }
@@ -276,7 +411,8 @@ void ChannelRackView::timerCallback()
                 const auto& ch = m_channels[c];
                 if (! ch.muted && ch.steps[static_cast<std::size_t>(currentStep)])
                 {
-                    m_auditionCallback(ch.rootPitch, ch.velocities[static_cast<std::size_t>(currentStep)], true);
+                    const int effectivePitch = std::clamp<int>(static_cast<int>(ch.rootPitch) + static_cast<int>(ch.pitchOffsets[static_cast<std::size_t>(currentStep)]), 0, 127);
+                    m_auditionCallback(static_cast<std::uint8_t>(effectivePitch), ch.velocities[static_cast<std::size_t>(currentStep)], true);
                 }
             }
         }
@@ -291,7 +427,8 @@ void ChannelRackView::triggerStepAudition(int channelIndex, int stepIndex)
 
     const auto& ch = m_channels[static_cast<std::size_t>(channelIndex)];
     const std::uint8_t vel = ch.velocities[static_cast<std::size_t>(stepIndex)];
-    m_auditionCallback(ch.rootPitch, vel, true);
+    const int effectivePitch = std::clamp<int>(static_cast<int>(ch.rootPitch) + static_cast<int>(ch.pitchOffsets[static_cast<std::size_t>(stepIndex)]), 0, 127);
+    m_auditionCallback(static_cast<std::uint8_t>(effectivePitch), vel, true);
 }
 
 void ChannelRackView::showChannelContextMenu(int channelIndex)
@@ -388,6 +525,46 @@ void ChannelRackView::mouseDown(const juce::MouseEvent& e)
     int channelIdx = -1;
     const int stepIdx = getStepAt(e.getPosition(), channelIdx);
 
+    // Check if clicked in Graph Editor
+    if (m_graphEditorOpen)
+    {
+        auto bounds = getLocalBounds();
+        bounds.removeFromTop(m_headerHeight);
+        bounds.removeFromBottom(m_bottomBarHeight);
+        auto graphBounds = bounds.removeFromBottom(m_graphEditorHeight);
+
+        if (graphBounds.contains(e.getPosition()))
+        {
+            m_activeDragControl = DragControl::graphEditor;
+            const int startX = m_leftControlsWidth + 8;
+            const int stepSlot = (e.getPosition().getX() - startX) / (m_stepWidth + m_stepSpacing) + m_scrollOffsetSteps;
+            if (stepSlot >= 0 && stepSlot < m_numSteps && m_selectedChannel >= 0 && static_cast<std::size_t>(m_selectedChannel) < m_channels.size())
+            {
+                auto& ch = m_channels[static_cast<std::size_t>(m_selectedChannel)];
+                const float localY = static_cast<float>(e.getPosition().getY() - graphBounds.getY() - 4);
+                const float height = static_cast<float>(graphBounds.getHeight() - 8);
+
+                if (m_graphMode == GraphMode::velocity)
+                {
+                    const float norm = std::clamp(1.0f - (localY / height), 0.05f, 1.0f);
+                    ch.velocities[static_cast<std::size_t>(stepSlot)] = static_cast<std::uint8_t>(norm * 127.0f);
+                }
+                else if (m_graphMode == GraphMode::pitch)
+                {
+                    const float norm = std::clamp(1.0f - (localY / height) * 2.0f, -1.0f, 1.0f);
+                    ch.pitchOffsets[static_cast<std::size_t>(stepSlot)] = static_cast<int8_t>(norm * 24.0f);
+                }
+                else if (m_graphMode == GraphMode::pan)
+                {
+                    const float norm = std::clamp(1.0f - (localY / height) * 2.0f, -1.0f, 1.0f);
+                    ch.panOffsets[static_cast<std::size_t>(stepSlot)] = static_cast<int8_t>(norm * 50.0f);
+                }
+                repaint();
+                return;
+            }
+        }
+    }
+
     if (channelIdx >= 0 && static_cast<std::size_t>(channelIdx) < m_channels.size())
     {
         m_selectedChannel = channelIdx;
@@ -481,6 +658,41 @@ void ChannelRackView::mouseDown(const juce::MouseEvent& e)
 
 void ChannelRackView::mouseDrag(const juce::MouseEvent& e)
 {
+    if (m_activeDragControl == DragControl::graphEditor && m_graphEditorOpen)
+    {
+        auto bounds = getLocalBounds();
+        bounds.removeFromTop(m_headerHeight);
+        bounds.removeFromBottom(m_bottomBarHeight);
+        auto graphBounds = bounds.removeFromBottom(m_graphEditorHeight);
+
+        const int startX = m_leftControlsWidth + 8;
+        const int stepSlot = (e.getPosition().getX() - startX) / (m_stepWidth + m_stepSpacing) + m_scrollOffsetSteps;
+        if (stepSlot >= 0 && stepSlot < m_numSteps && m_selectedChannel >= 0 && static_cast<std::size_t>(m_selectedChannel) < m_channels.size())
+        {
+            auto& ch = m_channels[static_cast<std::size_t>(m_selectedChannel)];
+            const float localY = static_cast<float>(e.getPosition().getY() - graphBounds.getY() - 4);
+            const float height = static_cast<float>(graphBounds.getHeight() - 8);
+
+            if (m_graphMode == GraphMode::velocity)
+            {
+                const float norm = std::clamp(1.0f - (localY / height), 0.05f, 1.0f);
+                ch.velocities[static_cast<std::size_t>(stepSlot)] = static_cast<std::uint8_t>(norm * 127.0f);
+            }
+            else if (m_graphMode == GraphMode::pitch)
+            {
+                const float norm = std::clamp(1.0f - (localY / height) * 2.0f, -1.0f, 1.0f);
+                ch.pitchOffsets[static_cast<std::size_t>(stepSlot)] = static_cast<int8_t>(norm * 24.0f);
+            }
+            else if (m_graphMode == GraphMode::pan)
+            {
+                const float norm = std::clamp(1.0f - (localY / height) * 2.0f, -1.0f, 1.0f);
+                ch.panOffsets[static_cast<std::size_t>(stepSlot)] = static_cast<int8_t>(norm * 50.0f);
+            }
+            repaint();
+            return;
+        }
+    }
+
     if (m_activeDragControl != DragControl::none && m_dragChannelIndex >= 0 &&
         static_cast<std::size_t>(m_dragChannelIndex) < m_channels.size())
     {
@@ -598,10 +810,100 @@ void ChannelRackView::paint(juce::Graphics& g)
     auto bottomBounds = bounds.removeFromBottom(m_bottomBarHeight);
     drawBottomBar(g, bottomBounds);
 
+    if (m_graphEditorOpen)
+    {
+        auto graphBounds = bounds.removeFromBottom(m_graphEditorHeight);
+        drawGraphEditor(g, graphBounds);
+    }
+
     for (std::size_t i = 0; i < m_channels.size(); ++i)
     {
         auto rowBounds = bounds.removeFromTop(m_rowHeight);
         drawChannelRow(g, static_cast<int>(i), rowBounds);
+    }
+}
+
+void ChannelRackView::drawGraphEditor(juce::Graphics& g, juce::Rectangle<int> bounds)
+{
+    g.setColour(juce::Colour::fromRGB(28, 30, 36));
+    g.fillRect(bounds);
+    g.setColour(juce::Colour::fromRGB(55, 60, 70));
+    g.drawHorizontalLine(bounds.getY(), 0.0f, static_cast<float>(bounds.getWidth()));
+
+    if (m_selectedChannel < 0 || static_cast<std::size_t>(m_selectedChannel) >= m_channels.size())
+        return;
+
+    const auto& ch = m_channels[static_cast<std::size_t>(m_selectedChannel)];
+
+    // Left info
+    auto leftArea = bounds.removeFromLeft(m_leftControlsWidth);
+    g.setColour(juce::Colour::fromRGB(180, 185, 200));
+    g.setFont(juce::FontOptions(11.0f).withStyle("Bold"));
+    juce::String modeName = "VELOCITY";
+    if (m_graphMode == GraphMode::pitch) modeName = "PITCH TUNE";
+    else if (m_graphMode == GraphMode::pan) modeName = "PAN";
+    g.drawText(juce::String(ch.name) + " (" + modeName + ")", leftArea.reduced(8, 4), juce::Justification::left, true);
+
+    const int startX = m_leftControlsWidth + 8;
+    for (int s = 0; s < m_numSteps; ++s)
+    {
+        const int actualStep = s + m_scrollOffsetSteps;
+        if (actualStep < 0 || actualStep >= m_numSteps)
+            continue;
+
+        const int x = startX + s * (m_stepWidth + m_stepSpacing);
+        auto colBounds = juce::Rectangle<int>(x, bounds.getY() + 4, m_stepWidth, bounds.getHeight() - 8);
+
+        // Background slot
+        g.setColour(juce::Colour::fromRGB(36, 39, 46));
+        g.fillRoundedRectangle(colBounds.toFloat(), 2.0f);
+
+        const bool isStepActive = ch.steps[static_cast<std::size_t>(actualStep)];
+
+        if (m_graphMode == GraphMode::velocity)
+        {
+            const float valNorm = static_cast<float>(ch.velocities[static_cast<std::size_t>(actualStep)]) / 127.0f;
+            const int barH = static_cast<int>(static_cast<float>(colBounds.getHeight()) * valNorm);
+            auto barRect = colBounds.removeFromBottom(barH);
+            g.setColour(isStepActive ? juce::Colour::fromRGB(0, 220, 240) : juce::Colour::fromRGB(70, 90, 105));
+            g.fillRoundedRectangle(barRect.toFloat(), 2.0f);
+        }
+        else if (m_graphMode == GraphMode::pitch)
+        {
+            const int pitchOff = ch.pitchOffsets[static_cast<std::size_t>(actualStep)];
+            const int midY = colBounds.getCentreY();
+            g.setColour(juce::Colour::fromRGB(60, 65, 75));
+            g.drawHorizontalLine(midY, static_cast<float>(colBounds.getX()), static_cast<float>(colBounds.getRight()));
+
+            const float norm = static_cast<float>(pitchOff) / 24.0f;
+            const int barH = static_cast<int>(std::abs(norm) * static_cast<float>(colBounds.getHeight() / 2));
+            juce::Rectangle<int> barRect;
+            if (norm >= 0.0f)
+                barRect = juce::Rectangle<int>(colBounds.getX(), midY - barH, colBounds.getWidth(), barH);
+            else
+                barRect = juce::Rectangle<int>(colBounds.getX(), midY, colBounds.getWidth(), barH);
+
+            g.setColour(isStepActive ? juce::Colour::fromRGB(245, 170, 45) : juce::Colour::fromRGB(100, 85, 60));
+            g.fillRoundedRectangle(barRect.toFloat(), 2.0f);
+        }
+        else if (m_graphMode == GraphMode::pan)
+        {
+            const int panOff = ch.panOffsets[static_cast<std::size_t>(actualStep)];
+            const int midY = colBounds.getCentreY();
+            g.setColour(juce::Colour::fromRGB(60, 65, 75));
+            g.drawHorizontalLine(midY, static_cast<float>(colBounds.getX()), static_cast<float>(colBounds.getRight()));
+
+            const float norm = static_cast<float>(panOff) / 50.0f;
+            const int barH = static_cast<int>(std::abs(norm) * static_cast<float>(colBounds.getHeight() / 2));
+            juce::Rectangle<int> barRect;
+            if (norm >= 0.0f)
+                barRect = juce::Rectangle<int>(colBounds.getX(), midY - barH, colBounds.getWidth(), barH);
+            else
+                barRect = juce::Rectangle<int>(colBounds.getX(), midY, colBounds.getWidth(), barH);
+
+            g.setColour(isStepActive ? juce::Colour::fromRGB(160, 110, 240) : juce::Colour::fromRGB(80, 65, 110));
+            g.fillRoundedRectangle(barRect.toFloat(), 2.0f);
+        }
     }
 }
 
@@ -845,17 +1147,21 @@ void ChannelRackView::resized()
     auto bounds = getLocalBounds();
     auto headerBounds = bounds.removeFromTop(m_headerHeight);
 
-    // Left preset dropdown
-    m_filterCombo.setBounds(headerBounds.removeFromLeft(85).reduced(4, 5));
+    // Left controls: filter preset + Pattern selector + Add pattern
+    m_filterCombo.setBounds(headerBounds.removeFromLeft(75).reduced(2, 5));
+    m_patternCombo.setBounds(headerBounds.removeFromLeft(110).reduced(2, 5));
+    m_addPatternButton.setBounds(headerBounds.removeFromLeft(46).reduced(2, 5));
 
     // Right-aligned controls
-    m_clearButton.setBounds(headerBounds.removeFromRight(65).reduced(2, 5));
-    m_commitButton.setBounds(headerBounds.removeFromRight(135).reduced(2, 5));
-    m_stepCountCombo.setBounds(headerBounds.removeFromRight(95).reduced(2, 5));
+    m_clearButton.setBounds(headerBounds.removeFromRight(60).reduced(2, 5));
+    m_commitButton.setBounds(headerBounds.removeFromRight(130).reduced(2, 5));
+    m_graphToggleBtn.setBounds(headerBounds.removeFromRight(55).reduced(2, 5));
+    m_graphModeCombo.setBounds(headerBounds.removeFromRight(78).reduced(2, 5));
+    m_stepCountCombo.setBounds(headerBounds.removeFromRight(85).reduced(2, 5));
 
     // Swing control (knob + label)
-    auto swingArea = headerBounds.removeFromRight(90);
-    m_swingSlider.setBounds(swingArea.removeFromRight(30).reduced(2, 4));
+    auto swingArea = headerBounds.removeFromRight(80);
+    m_swingSlider.setBounds(swingArea.removeFromRight(28).reduced(2, 4));
     m_swingLabel.setBounds(swingArea);
 
     // Bottom bar `+` button

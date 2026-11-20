@@ -2,6 +2,8 @@
 #include "VirusTiPolarEditorView.h"
 #include "Juno106EditorView.h"
 #include "OmniFmEditorView.h"
+#include "ModelDEditorView.h"
+#include "TripleOscillatorEditorView.h"
 #include "DspEditorDialog.h"
 
 namespace dawg::ui {
@@ -53,6 +55,16 @@ void PluginWindow::open(
     if (lower.contains("omnifm") || lower.contains("omni fm") || lower.contains("yamaha"))
     {
         OmniFmWindow::open();
+        return;
+    }
+    if (lower.contains("moog") || lower.contains("model d") || lower.contains("analog ladder"))
+    {
+        ModelDWindow::open();
+        return;
+    }
+    if (lower.contains("3xosc") || lower.contains("triple osc") || lower.contains("tripleoscillator"))
+    {
+        TripleOscillatorWindow::open();
         return;
     }
     if (lower.contains("buchla") || lower.contains("complex 259") || lower.contains("complex synth"))

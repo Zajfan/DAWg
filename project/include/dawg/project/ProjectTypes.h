@@ -228,7 +228,8 @@ enum class DspNodeType : std::uint8_t
     virusTiPolarSynth,
     juno106Synth,
     omniFmSynth,
-    soundFontPlayer
+    soundFontPlayer,
+    tripleOscillatorSynth
 };
 
 struct DspNodeDescriptor

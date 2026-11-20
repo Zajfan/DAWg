@@ -70,6 +70,10 @@ target_sources(DAWg PRIVATE
     ../../ui/shell/Juno106EditorView.h
     ../../ui/shell/OmniFmEditorView.cpp
     ../../ui/shell/OmniFmEditorView.h
+    ../../ui/shell/ModelDEditorView.cpp
+    ../../ui/shell/ModelDEditorView.h
+    ../../ui/shell/TripleOscillatorEditorView.cpp
+    ../../ui/shell/TripleOscillatorEditorView.h
     ../../ui/shell/CommandPaletteOverlay.cpp
     ../../ui/shell/CommandPaletteOverlay.h
     ../../ui/shell/DragSplitterBar.h

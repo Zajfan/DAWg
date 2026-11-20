@@ -12,6 +12,20 @@
 
 namespace dawg::ui {
 
+struct ChannelPatternData
+{
+    std::array<bool, 64> steps {};
+    std::array<std::uint8_t, 64> velocities {};
+    std::array<int8_t, 64> pitchOffsets {}; // -24 to +24 semitones
+    std::array<int8_t, 64> panOffsets {};   // -50 to +50
+};
+
+struct ChannelRackPattern
+{
+    std::string name {"Pattern 1"};
+    std::vector<ChannelPatternData> channelData {};
+};
+
 struct ChannelRackRow
 {
     std::string name;
@@ -23,6 +37,8 @@ struct ChannelRackRow
     std::string samplePath;
     std::array<bool, 64> steps {};
     std::array<std::uint8_t, 64> velocities {};
+    std::array<int8_t, 64> pitchOffsets {};
+    std::array<int8_t, 64> panOffsets {};
 };
 
 class ChannelRackView final : public juce::Component,
@@ -59,8 +75,21 @@ public:
     void setNumSteps(int steps);
     void setSelectedTrackId(project::TrackId trkId) { m_selectedTrackId = trkId; }
 
+    // Multi-pattern management
+    void switchPattern(int patternIndex);
+    void addNewPattern();
+    [[nodiscard]] int currentPatternIndex() const noexcept { return m_currentPatternIndex; }
+    [[nodiscard]] const std::string& currentPatternName() const noexcept;
+
     [[nodiscard]] int currentPlayStep() const noexcept { return m_lastPlayedStep; }
     [[nodiscard]] int numSteps() const noexcept { return m_numSteps; }
+
+    enum class GraphMode : std::uint8_t
+    {
+        velocity,
+        pitch,
+        pan
+    };
 
 private:
     void timerCallback() override;
@@ -68,11 +97,14 @@ private:
     void drawHeader(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawChannelRow(juce::Graphics& g, int channelIndex, juce::Rectangle<int> bounds);
     void drawStepButton(juce::Graphics& g, int channelIndex, int stepIndex, juce::Rectangle<int> bounds, bool isActive, bool isPlayhead);
+    void drawGraphEditor(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawBottomBar(juce::Graphics& g, juce::Rectangle<int> bounds);
 
     [[nodiscard]] int getStepAt(juce::Point<int> pos, int& outChannelIndex) const noexcept;
     void triggerStepAudition(int channelIndex, int stepIndex);
     void showChannelContextMenu(int channelIndex);
+    void syncCurrentPatternToBank();
+    void loadPatternFromBank(int patternIndex);
 
     CommandHandler m_commandHandler;
     AuditionCallback m_auditionCallback;
@@ -80,23 +112,33 @@ private:
     EditorViewModel m_model;
 
     std::vector<ChannelRackRow> m_channels;
+    std::vector<ChannelRackPattern> m_patterns;
+    int m_currentPatternIndex {0};
+
     int m_selectedChannel {0};
     int m_lastPlayedStep {-1};
     int m_numSteps {32}; // Default 32 steps (matching FL Studio Channel Rack)
     int m_scrollOffsetSteps {0};
     bool m_dragPaintingState {true};
 
-    enum class DragControl { none, pan, volume, mixerTrack };
+    bool m_graphEditorOpen {false};
+    GraphMode m_graphMode {GraphMode::velocity};
+
+    enum class DragControl { none, pan, volume, mixerTrack, graphEditor };
     DragControl m_activeDragControl {DragControl::none};
     int m_dragChannelIndex {-1};
     juce::Point<int> m_dragStartPos;
     float m_dragStartValue {0.0f};
 
     // Header controls
+    juce::ComboBox m_patternCombo;
+    juce::TextButton m_addPatternButton {"+ Pat"};
     juce::ComboBox m_filterCombo;
     juce::Slider m_swingSlider;
     juce::Label m_swingLabel;
     juce::ComboBox m_stepCountCombo;
+    juce::TextButton m_graphToggleBtn {"Graph"};
+    juce::ComboBox m_graphModeCombo;
     juce::TextButton m_commitButton {"Commit (Timeline)"};
     juce::TextButton m_clearButton {"Clear"};
 
@@ -110,6 +152,7 @@ private:
     int m_leftControlsWidth {246};
     int m_stepWidth {20};
     int m_stepSpacing {3};
+    int m_graphEditorHeight {70};
 };
 
 } // namespace dawg::ui

@@ -6,6 +6,8 @@
 #include "VirusTiPolarEditorView.h"
 #include "Juno106EditorView.h"
 #include "OmniFmEditorView.h"
+#include "ModelDEditorView.h"
+#include "TripleOscillatorEditorView.h"
 #include "WorkspaceLayoutManager.h"
 #include <dawg/engine/SmpteTimecode.h>
 #include <dawg/plugins/NativePluginCatalog.h>
@@ -186,13 +188,18 @@ MainEditorView::MainEditorView(EditorViewModel model,
             case project::DspNodeType::soundFontPlayer:
                 DspEditorWindow::open(DspEditorKind::synth, trk->name);
                 return;
+            case project::DspNodeType::analogLadderSynth:
+                ModelDWindow::open();
+                return;
+            case project::DspNodeType::tripleOscillatorSynth:
+                TripleOscillatorWindow::open();
+                return;
             case project::DspNodeType::brickwallLimiter:
             case project::DspNodeType::clapPlugin:
             case project::DspNodeType::drumPadSampler:
             case project::DspNodeType::vectorSequencer:
             case project::DspNodeType::physicalModelSynth:
             case project::DspNodeType::granularCloud:
-            case project::DspNodeType::analogLadderSynth:
             case project::DspNodeType::tubeTransformer:
             case project::DspNodeType::analogDegrader:
             case project::DspNodeType::rayTracingReverb:
@@ -532,6 +539,14 @@ MainEditorView::MainEditorView(EditorViewModel model,
                 {
                     OmniFmWindow::open();
                 }
+                else if (plugin.id == "dawg.synth.analog_ladder" || lower.contains("moog") || lower.contains("model d"))
+                {
+                    ModelDWindow::open();
+                }
+                else if (plugin.id == "dawg.synth.triple_oscillator" || lower.contains("3xosc") || lower.contains("triple osc"))
+                {
+                    TripleOscillatorWindow::open();
+                }
                 else if (plugin.id == "dawg.synth.buchla_complex" || lower.contains("buchla") || lower.contains("complex 259"))
                 {
                     DspEditorWindow::open(DspEditorKind::buchlaComplexSynth, plugin.name);
@@ -647,6 +662,8 @@ MainEditorView::MainEditorView(EditorViewModel model,
                 nodeType = project::DspNodeType::omniFmSynth;
             else if (plugin.id == "dawg.synth.soundfont_player")
                 nodeType = project::DspNodeType::soundFontPlayer;
+            else if (plugin.id == "dawg.synth.triple_oscillator")
+                nodeType = project::DspNodeType::tripleOscillatorSynth;
 
             m_commandHandler(project::AddTrackInsert {
                 targetTrack->id,

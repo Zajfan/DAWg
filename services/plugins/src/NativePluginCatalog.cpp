@@ -21,6 +21,7 @@
 #include <dawg/engine/dsp/Juno106SynthNode.h>
 #include <dawg/engine/dsp/OmniFmSynthNode.h>
 #include <dawg/engine/dsp/SoundFontPlayerNode.h>
+#include <dawg/engine/dsp/TripleOscillatorSynthNode.h>
 
 #include <algorithm>
 
@@ -255,6 +256,34 @@ const std::vector<NativePluginDef>& NativePluginCatalog::allPlugins()
                 {"Fat Minimoog Bass", {450.0f, 0.7f, 12.0f, 0.0f, 0.2f}},
                 {"Screaming Ring Lead", {2800.0f, 0.85f, 18.0f, 0.65f, 0.4f}},
                 {"Warm Analog Brass", {1800.0f, 0.35f, 3.0f, 0.0f, 0.0f}}
+            }
+        },
+        {
+            .descriptor = {
+                .id = "dawg.synth.triple_oscillator",
+                .name = "3xOsc Studio Edition",
+                .vendor = "The No-hands Company",
+                .version = "1.0.0",
+                .path = "",
+                .format = PluginFormat::native,
+                .category = PluginCategory::instrument,
+                .isInstrument = true,
+                .isSandboxed = false
+            },
+            .parameters = {
+                {0, "Osc 1 Wave", 0.0f, 4.0f, 2.0f, "idx"},
+                {1, "Osc 2 Wave", 0.0f, 4.0f, 2.0f, "idx"},
+                {2, "Osc 2 Detune", -24.0f, 24.0f, 0.0f, "st"},
+                {3, "Osc 2 Fine", -100.0f, 100.0f, 12.0f, "cents"},
+                {4, "Osc 3 Wave", 0.0f, 4.0f, 3.0f, "idx"},
+                {5, "Osc 3 Detune", -24.0f, 24.0f, -12.0f, "st"},
+                {6, "Cutoff Freq", 20.0f, 20000.0f, 4500.0f, "Hz"},
+                {7, "Resonance", 0.1f, 10.0f, 1.5f, "Q"}
+            },
+            .presets = {
+                {"Classic Trance Lead", {2.0f, 2.0f, 0.0f, 12.0f, 3.0f, -12.0f, 6500.0f, 2.0f}},
+                {"Deep Sub Bass", {0.0f, 0.0f, -12.0f, 0.0f, 3.0f, -24.0f, 850.0f, 1.2f}},
+                {"Screaming Hardstyle Saw", {2.0f, 2.0f, 7.0f, 20.0f, 2.0f, -12.0f, 12000.0f, 3.5f}}
             }
         },
 
@@ -592,6 +621,8 @@ std::unique_ptr<engine::ProcessorNode> NativePluginCatalog::createNode(std::stri
         return std::make_unique<engine::dsp::GranularTextureMorphNode>();
     if (id == "dawg.synth.analog_ladder")
         return std::make_unique<engine::dsp::AnalogLadderRingModSynthNode>();
+    if (id == "dawg.synth.triple_oscillator" || id == "dawg.synth.3xosc")
+        return std::make_unique<engine::dsp::TripleOscillatorSynthNode>();
 
     // Effects
     if (id == "dawg.fx.resonance_suppressor")

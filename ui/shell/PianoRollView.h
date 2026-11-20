@@ -37,6 +37,12 @@ public:
     bool keyStateChanged(bool isKeyDown) override;
 
     void quantizeNotes();
+    void strumNotes();
+    void quickLegato();
+    void chopArpNotes();
+    void flamRollNotes();
+    void toggleGhostNotes();
+    [[nodiscard]] bool areGhostNotesEnabled() const noexcept { return m_ghostNotesEnabled; }
     void toggleStepRecord();
     [[nodiscard]] bool isStepRecordEnabled() const noexcept { return m_stepRecordEnabled; }
     void handleIncomingStepNote(std::uint8_t pitch, std::uint8_t velocity);
@@ -110,9 +116,11 @@ private:
 
     QuantizeGrid m_grid {QuantizeGrid::sixteenth};
     float m_swing {0.0f};
+    bool m_ghostNotesEnabled {true};
 
     juce::ComboBox m_gridCombo;
     juce::ComboBox m_swingCombo;
+    juce::TextButton m_btnTools {"Tools"};
     juce::TextButton m_quantizeButton {"Quantize [Q]"};
     juce::TextButton m_btnEuclidean {"Euclidean"};
     juce::TextButton m_btnMarkov {"Chords"};

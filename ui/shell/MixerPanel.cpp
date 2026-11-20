@@ -4,6 +4,8 @@
 #include "VirusTiPolarEditorView.h"
 #include "Juno106EditorView.h"
 #include "OmniFmEditorView.h"
+#include "ModelDEditorView.h"
+#include "TripleOscillatorEditorView.h"
 
 #include <algorithm>
 #include <cmath>
@@ -117,6 +119,8 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
         menu.addItem(12, "Roland Juno-106 Analog Synth");
         menu.addItem(13, "Yamaha OmniFM 6-Op Synth");
         menu.addItem(14, "SoundFont / SFZ Instrument Player");
+        menu.addItem(15, "Moog Model D Analog Synth");
+        menu.addItem(16, "3xOsc Studio Edition Synth");
         menu.addSeparator();
         menu.addItem(10, "Sidechain Listen", true, m_sidechainListen);
 
@@ -147,6 +151,8 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
             else if (result == 12) { type = project::DspNodeType::juno106Synth; insName = "Roland Juno-106"; slotLabel = "JUNO"; slotIdx = 0; }
             else if (result == 13) { type = project::DspNodeType::omniFmSynth; insName = "Yamaha OmniFM 6-Op Synth"; slotLabel = "OMNIFM"; slotIdx = 0; }
             else if (result == 14) { type = project::DspNodeType::soundFontPlayer; insName = "SoundFont / SFZ Player"; slotLabel = "SFZ"; slotIdx = 0; }
+            else if (result == 15) { type = project::DspNodeType::analogLadderSynth; insName = "Moog Model D Analog Synth"; slotLabel = "MODEL D"; slotIdx = 0; }
+            else if (result == 16) { type = project::DspNodeType::tripleOscillatorSynth; insName = "3xOsc Studio Edition"; slotLabel = "3XOSC"; slotIdx = 0; }
 
             if (slotIdx < m_slotNames.size())
             {
@@ -181,6 +187,8 @@ ChannelStripComponent::ChannelStripComponent(CommandHandler handler)
             else if (result == 11) VirusTiPolarWindow::open();
             else if (result == 12) Juno106Window::open();
             else if (result == 13) OmniFmWindow::open();
+            else if (result == 15) ModelDWindow::open();
+            else if (result == 16) TripleOscillatorWindow::open();
             repaint();
         });
     };
@@ -267,6 +275,8 @@ void ChannelStripComponent::openInsertEditor(std::size_t slotIdx)
     if (lower.contains("virus") || lower.contains("polar")) VirusTiPolarWindow::open();
     else if (lower.contains("juno")) Juno106Window::open();
     else if (lower.contains("omni") || lower.contains("yamaha")) OmniFmWindow::open();
+    else if (lower.contains("model d") || lower.contains("moog")) ModelDWindow::open();
+    else if (lower.contains("3xosc") || lower.contains("triple")) TripleOscillatorWindow::open();
     else if (lower.contains("reso") || lower.contains("tamer")) DspEditorWindow::open(DspEditorKind::resonanceSuppressor, trkName);
     else if (lower.contains("scope") || lower.contains("imager")) DspEditorWindow::open(DspEditorKind::multibandImager, trkName);
     else if (lower.contains("mphase") || lower.contains("phase")) DspEditorWindow::open(DspEditorKind::linearPhaseEq, trkName);

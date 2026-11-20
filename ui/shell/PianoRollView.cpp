@@ -77,6 +77,27 @@ PianoRollView::PianoRollView(CommandHandler handler, AuditionCallback auditionCb
     };
     addAndMakeVisible(m_swingCombo);
 
+    m_btnTools.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(40, 44, 52));
+    m_btnTools.onClick = [this] {
+        juce::PopupMenu menu;
+        menu.addItem(1, "Strum (Alt+S)");
+        menu.addItem(2, "Chop / Arp (Alt+U)");
+        menu.addItem(3, "Quick Legato (Ctrl+L)");
+        menu.addItem(4, "Flam / Roll (Alt+F)");
+        menu.addItem(5, "Quick Quantize (Ctrl+Q)");
+        menu.addSeparator();
+        menu.addItem(6, "Ghost Notes (Alt+V)", true, m_ghostNotesEnabled);
+        menu.showMenuAsync(juce::PopupMenu::Options {}, [this](int res) {
+            if (res == 1) strumNotes();
+            else if (res == 2) chopArpNotes();
+            else if (res == 3) quickLegato();
+            else if (res == 4) flamRollNotes();
+            else if (res == 5) quantizeNotes();
+            else if (res == 6) toggleGhostNotes();
+        });
+    };
+    addAndMakeVisible(m_btnTools);
+
     m_quantizeButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(45, 110, 160));
     m_quantizeButton.onClick = [this] { quantizeNotes(); };
     addAndMakeVisible(m_quantizeButton);
@@ -349,6 +370,189 @@ void PianoRollView::quantizeNotes()
     }
 }
 
+void PianoRollView::strumNotes()
+{
+    const auto* clip = findActiveClip();
+    if (clip == nullptr || ! m_handler || clip->notes.empty())
+        return;
+
+    std::vector<project::MidiNote> targetNotes;
+    for (const auto& note : clip->notes)
+    {
+        if (m_selectedNoteIds.empty() || isNoteSelected(note.id))
+            targetNotes.push_back(note);
+    }
+    if (targetNotes.size() < 2)
+        return;
+
+    std::sort(targetNotes.begin(), targetNotes.end(), [](const auto& a, const auto& b) {
+        if (a.startSample != b.startSample)
+            return a.startSample < b.startSample;
+        return a.pitch < b.pitch;
+    });
+
+    std::vector<std::vector<project::MidiNote>> chords;
+    std::vector<project::MidiNote> currentChord;
+    for (const auto& note : targetNotes)
+    {
+        if (currentChord.empty())
+        {
+            currentChord.push_back(note);
+        }
+        else
+        {
+            const auto diff = (note.startSample > currentChord.front().startSample)
+                ? (note.startSample - currentChord.front().startSample)
+                : (currentChord.front().startSample - note.startSample);
+            if (diff < 960)
+            {
+                currentChord.push_back(note);
+            }
+            else
+            {
+                chords.push_back(std::move(currentChord));
+                currentChord.clear();
+                currentChord.push_back(note);
+            }
+        }
+    }
+    if (! currentChord.empty())
+        chords.push_back(std::move(currentChord));
+
+    constexpr std::uint64_t strumStep = 240;
+    for (auto& chord : chords)
+    {
+        if (chord.size() < 2)
+            continue;
+
+        std::sort(chord.begin(), chord.end(), [](const auto& a, const auto& b) {
+            return a.pitch < b.pitch;
+        });
+
+        for (std::size_t i = 0; i < chord.size(); ++i)
+        {
+            const auto& note = chord[i];
+            const auto newStart = note.startSample + static_cast<std::uint64_t>(i) * strumStep;
+            const float ramp = 0.85f + 0.25f * (static_cast<float>(i) / static_cast<float>(chord.size() - 1));
+            const auto newVel = static_cast<std::uint8_t>(std::clamp(static_cast<float>(note.velocity) * ramp, 20.0f, 127.0f));
+
+            m_handler(project::MoveMidiNote {clip->id, note.id, newStart, note.pitch});
+            m_handler(project::SetMidiNoteVelocity {clip->id, note.id, newVel});
+        }
+    }
+}
+
+void PianoRollView::quickLegato()
+{
+    const auto* clip = findActiveClip();
+    if (clip == nullptr || ! m_handler || clip->notes.empty())
+        return;
+
+    std::vector<project::MidiNote> notes;
+    for (const auto& note : clip->notes)
+    {
+        if (m_selectedNoteIds.empty() || isNoteSelected(note.id))
+            notes.push_back(note);
+    }
+    if (notes.size() < 2)
+        return;
+
+    std::sort(notes.begin(), notes.end(), [](const auto& a, const auto& b) {
+        return a.startSample < b.startSample;
+    });
+
+    for (std::size_t i = 0; i < notes.size() - 1; ++i)
+    {
+        const auto& cur = notes[i];
+        const auto& next = notes[i + 1];
+        if (next.startSample > cur.startSample)
+        {
+            const auto targetLen = next.startSample - cur.startSample;
+            if (targetLen > cur.lengthSamples && (targetLen - cur.lengthSamples) <= 96000)
+            {
+                m_handler(project::ResizeMidiNote {clip->id, cur.id, targetLen});
+            }
+        }
+    }
+}
+
+void PianoRollView::chopArpNotes()
+{
+    const auto* clip = findActiveClip();
+    if (clip == nullptr || ! m_handler || clip->notes.empty())
+        return;
+
+    const double interval = gridIntervalSamples();
+    if (interval <= 0.0)
+        return;
+
+    const auto sliceLength = static_cast<std::uint64_t>(interval);
+    std::vector<project::MidiNote> notesToChop;
+    for (const auto& note : clip->notes)
+    {
+        if (m_selectedNoteIds.empty() || isNoteSelected(note.id))
+        {
+            if (note.lengthSamples >= sliceLength * 2)
+                notesToChop.push_back(note);
+        }
+    }
+
+    for (const auto& note : notesToChop)
+    {
+        const std::size_t numSlices = static_cast<std::size_t>(note.lengthSamples / sliceLength);
+        if (numSlices <= 1)
+            continue;
+
+        const auto originalGate = static_cast<std::uint64_t>(static_cast<double>(sliceLength) * 0.90);
+        m_handler(project::ResizeMidiNote {clip->id, note.id, originalGate});
+
+        for (std::size_t s = 1; s < numSlices; ++s)
+        {
+            project::MidiNote slice = note;
+            slice.id = 0;
+            slice.startSample = note.startSample + static_cast<std::uint64_t>(s) * sliceLength;
+            slice.lengthSamples = originalGate;
+            m_handler(project::AddMidiNote {clip->id, slice});
+        }
+    }
+}
+
+void PianoRollView::flamRollNotes()
+{
+    const auto* clip = findActiveClip();
+    if (clip == nullptr || ! m_handler || clip->notes.empty())
+        return;
+
+    const double interval = gridIntervalSamples();
+    const auto flamOffset = static_cast<std::uint64_t>(std::max(120.0, interval * 0.25));
+
+    std::vector<project::MidiNote> targetNotes;
+    for (const auto& note : clip->notes)
+    {
+        if (m_selectedNoteIds.empty() || isNoteSelected(note.id))
+            targetNotes.push_back(note);
+    }
+
+    for (const auto& note : targetNotes)
+    {
+        if (note.startSample >= flamOffset)
+        {
+            project::MidiNote grace = note;
+            grace.id = 0;
+            grace.startSample = note.startSample - flamOffset;
+            grace.lengthSamples = flamOffset;
+            grace.velocity = static_cast<std::uint8_t>(static_cast<float>(note.velocity) * 0.65f);
+            m_handler(project::AddMidiNote {clip->id, grace});
+        }
+    }
+}
+
+void PianoRollView::toggleGhostNotes()
+{
+    m_ghostNotesEnabled = ! m_ghostNotesEnabled;
+    repaint();
+}
+
 void PianoRollView::toggleStepRecord()
 {
     m_stepRecordEnabled = ! m_stepRecordEnabled;
@@ -564,6 +768,38 @@ void PianoRollView::drawNotes(juce::Graphics& g, const juce::Rectangle<int> boun
     g.saveState();
     g.reduceClipRegion(bounds);
 
+    // Ghost notes from other clips across the arrangement
+    if (m_ghostNotesEnabled)
+    {
+        for (const auto& otherClip : m_model.project.midiClips)
+        {
+            if (m_activeClipId.has_value() && otherClip.id == *m_activeClipId)
+                continue;
+
+            for (const auto& gNote : otherClip.notes)
+            {
+                const int gX = m_keyWidth + sampleToPixel(static_cast<std::int64_t>(otherClip.startSample + gNote.startSample));
+                const int gW = std::max(4, sampleToPixel(static_cast<std::int64_t>(gNote.lengthSamples)));
+                const int gY = pitchToPixel(gNote.pitch);
+
+                if (gY + m_noteRowHeight < bounds.getY() || gY > bounds.getBottom())
+                    continue;
+
+                const auto ghostRect = juce::Rectangle<float> {
+                    static_cast<float>(gX),
+                    static_cast<float>(gY + 1),
+                    static_cast<float>(gW),
+                    static_cast<float>(m_noteRowHeight - 2)
+                };
+
+                g.setColour(juce::Colour::fromRGBA(140, 160, 185, 30));
+                g.fillRoundedRectangle(ghostRect, 2.0f);
+                g.setColour(juce::Colour::fromRGBA(160, 180, 210, 80));
+                g.drawRoundedRectangle(ghostRect, 2.0f, 1.0f);
+            }
+        }
+    }
+
     for (const auto& note : clip->notes)
     {
         const bool isDragged = (m_draggedNoteId.has_value() && note.id == *m_draggedNoteId);
@@ -597,6 +833,20 @@ void PianoRollView::drawNotes(juce::Graphics& g, const juce::Rectangle<int> boun
 
         g.setColour(isSelected ? juce::Colours::white : baseColor.brighter(0.3f));
         g.drawRoundedRectangle(noteRect, 2.0f, 1.0f);
+
+        // Slide Note badge (classic FL Studio slide triangle indicator)
+        if (std::abs(note.slideSemitones) > 0.01f)
+        {
+            juce::Path slideTriangle;
+            const float tX = noteRect.getX() + 1.0f;
+            const float tY = noteRect.getY() + 1.0f;
+            slideTriangle.startNewSubPath(tX, tY);
+            slideTriangle.lineTo(tX + 7.0f, tY);
+            slideTriangle.lineTo(tX, tY + 7.0f);
+            slideTriangle.closeSubPath();
+            g.setColour(juce::Colour::fromRGB(255, 145, 0));
+            g.fillPath(slideTriangle);
+        }
 
         if (noteW > 28)
         {
@@ -913,7 +1163,9 @@ void PianoRollView::resized()
     toolbarArea.removeFromLeft(6);
     m_swingCombo.setBounds(toolbarArea.removeFromLeft(104));
     toolbarArea.removeFromLeft(6);
-    m_quantizeButton.setBounds(toolbarArea.removeFromLeft(100));
+    m_btnTools.setBounds(toolbarArea.removeFromLeft(65));
+    toolbarArea.removeFromLeft(4);
+    m_quantizeButton.setBounds(toolbarArea.removeFromLeft(95));
     toolbarArea.removeFromLeft(4);
     m_btnEuclidean.setBounds(toolbarArea.removeFromLeft(80));
     toolbarArea.removeFromLeft(4);
@@ -1165,49 +1417,69 @@ void PianoRollView::mouseWheelMove(const juce::MouseEvent&, const juce::MouseWhe
 bool PianoRollView::keyPressed(const juce::KeyPress& key)
 {
     const int code = key.getKeyCode();
+    const bool isAlt = key.getModifiers().isAltDown();
+    const bool isCtrl = key.getModifiers().isCtrlDown() || key.getModifiers().isCommandDown();
 
-    // Octave controls
-    if (code == 'Z' || code == 'z')
+    if (isAlt)
     {
-        m_virtualKeyboardOctave = std::max(0, m_virtualKeyboardOctave - 1);
-        return true;
-    }
-    if (code == 'X' || code == 'x')
-    {
-        m_virtualKeyboardOctave = std::min(8, m_virtualKeyboardOctave + 1);
-        return true;
+        if (code == 'S' || code == 's') { strumNotes(); return true; }
+        if (code == 'U' || code == 'u') { chopArpNotes(); return true; }
+        if (code == 'F' || code == 'f') { flamRollNotes(); return true; }
+        if (code == 'V' || code == 'v') { toggleGhostNotes(); return true; }
     }
 
-    // Musical typing keys mapping:
-    // A=C, W=C#, S=D, E=D#, D=E, F=F, T=F#, G=G, Y=G#, H=A, U=A#, J=B, K=C+1, O=C#+1, L=D+1
-    int noteOffset = -1;
-    switch (code)
+    if (isCtrl)
     {
-    case 'A': case 'a': noteOffset = 0; break;
-    case 'W': case 'w': noteOffset = 1; break;
-    case 'S': case 's': noteOffset = 2; break;
-    case 'E': case 'e': noteOffset = 3; break;
-    case 'D': case 'd': noteOffset = 4; break;
-    case 'F': case 'f': noteOffset = 5; break;
-    case 'T': case 't': noteOffset = 6; break;
-    case 'G': case 'g': noteOffset = 7; break;
-    case 'Y': case 'y': noteOffset = 8; break;
-    case 'H': case 'h': noteOffset = 9; break;
-    case 'U': case 'u': noteOffset = 10; break;
-    case 'J': case 'j': noteOffset = 11; break;
-    case 'K': case 'k': noteOffset = 12; break;
-    case 'O': case 'o': noteOffset = 13; break;
-    case 'L': case 'l': noteOffset = 14; break;
-    default: break;
+        if (code == 'Q' || code == 'q') { quantizeNotes(); return true; }
+        if (code == 'L' || code == 'l') { quickLegato(); return true; }
+        if (code == 'A' || code == 'a') { selectAllNotes(); return true; }
     }
 
-    if (noteOffset >= 0)
+    if (! isAlt && ! isCtrl)
     {
-        const auto pitch = static_cast<std::uint8_t>(std::clamp(m_virtualKeyboardOctave * 12 + noteOffset, 0, 127));
-        m_auditioningPitch = pitch;
-        if (m_auditionCallback)
-            m_auditionCallback(pitch, 100, true);
-        return true;
+        // Octave controls
+        if (code == 'Z' || code == 'z')
+        {
+            m_virtualKeyboardOctave = std::max(0, m_virtualKeyboardOctave - 1);
+            return true;
+        }
+        if (code == 'X' || code == 'x')
+        {
+            m_virtualKeyboardOctave = std::min(8, m_virtualKeyboardOctave + 1);
+            return true;
+        }
+
+        // Musical typing keys mapping:
+        // A=C, W=C#, S=D, E=D#, D=E, F=F, T=F#, G=G, Y=G#, H=A, U=A#, J=B, K=C+1, O=C#+1, L=D+1
+        int noteOffset = -1;
+        switch (code)
+        {
+        case 'A': case 'a': noteOffset = 0; break;
+        case 'W': case 'w': noteOffset = 1; break;
+        case 'S': case 's': noteOffset = 2; break;
+        case 'E': case 'e': noteOffset = 3; break;
+        case 'D': case 'd': noteOffset = 4; break;
+        case 'F': case 'f': noteOffset = 5; break;
+        case 'T': case 't': noteOffset = 6; break;
+        case 'G': case 'g': noteOffset = 7; break;
+        case 'Y': case 'y': noteOffset = 8; break;
+        case 'H': case 'h': noteOffset = 9; break;
+        case 'U': case 'u': noteOffset = 10; break;
+        case 'J': case 'j': noteOffset = 11; break;
+        case 'K': case 'k': noteOffset = 12; break;
+        case 'O': case 'o': noteOffset = 13; break;
+        case 'L': case 'l': noteOffset = 14; break;
+        default: break;
+        }
+
+        if (noteOffset >= 0)
+        {
+            const auto pitch = static_cast<std::uint8_t>(std::clamp(m_virtualKeyboardOctave * 12 + noteOffset, 0, 127));
+            m_auditioningPitch = pitch;
+            if (m_auditionCallback)
+                m_auditionCallback(pitch, 100, true);
+            return true;
+        }
     }
 
     const auto* clip = findActiveClip();

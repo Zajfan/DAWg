@@ -123,6 +123,7 @@ add_library(dawg_engine_core STATIC
     src/dsp/TransientExciterNode.cpp
     src/dsp/TransientSlicerEngine.cpp
     src/dsp/TransientSplitGranularResynthesizerNode.cpp
+    src/dsp/TripleOscillatorSynthNode.cpp
     src/dsp/VectorWaveSequencerNode.cpp
     src/dsp/VintageTapeMachineNode.cpp
     src/dsp/VirusTiPolarSynthNode.cpp
